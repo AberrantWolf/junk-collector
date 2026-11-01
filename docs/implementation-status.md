@@ -1,3 +1,34 @@
+## Inbox recovery installed on Fi — 2026-10-31
+
+Reviewed signed source `0bec4af` is installed on Fi. One release-mode image was
+built and qualified with disposable old-version profile/receipt state, runtime/
+backup/media checks and real desktop/mobile UI acceptance before activation.
+Paired stopped-writer Fi/NAS snapshots protect the complete installation. The
+managed Bridge profile and paused connection/cursor remain unchanged, with no
+receipt state reset; Bridge resumed syncing using its retained image/home and
+certificate. Existing identity/configuration/TLS, 79 Items, accounts/grants/Jobs,
+mounts and seven unrelated containers are retained. See
+[deployment evidence](validation/fi-inbox-recovery-deployment-2026-10-31.md).
+
+## WAV digital originals — source implementation, 2026-10-31
+
+Digital intake now recognizes integer PCM WAV packages without creating physical
+copies. Exact WAV masters remain downloadable; explicit FLAC preparation preserves
+sample rate, mono/stereo channels and 16/24-bit samples. Mixed packages prepare only
+WAV tracks and retain direct FLAC/MP3 playback. The existing jobs, retry/cancellation,
+publication, search/listening, metadata/artwork and visibility paths are reused.
+Shared strict parsing and independent FLAC comparison live in `junk-libs-pcm`.
+
+The supported boundary is RIFF PCM/checked extensible PCM at 8–192 kHz. Float,
+compressed/multichannel WAV, RF64 and continuous-image/CUE splitting remain
+unsupported. The 2026-11-01 completion adds bounded INFO/ID3 tags and embedded
+artwork, direct PCM fingerprint matching, in-place analysis of retained packages,
+and temporary FLAC downloads carrying accepted metadata/artwork and useful names.
+Manual authority, source visibility, existing inventory and immutable audio survive.
+See [initial check results](validation/wav-digital-originals-2026-10-31.md) and
+[completion validation](validation/wav-digital-completion-2026-11-01.md).
+This is source work; no deployment or release publication is part of this delivery.
+
 ## Inbox recovery and review corrections — delivered, 2026-10-31
 
 All five review findings are addressed. Malformed receipts become isolated reviewable

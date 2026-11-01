@@ -4,11 +4,12 @@ members = ["crates/*"]
 default-members = ["crates/collector-server"]
 
 [workspace.package]
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+junk-libs-pcm = { path = "crates/junk-libs-pcm" }
 junk-libs-music = { git = "https://github.com/AberrantWolf/junk-libs", rev = "0becbd0c382df3d494244c7ccc20de05cba580cf" }
 collector-api-types = { path = "crates/collector-api-types" }
 collector-core = { path = "crates/collector-core" }

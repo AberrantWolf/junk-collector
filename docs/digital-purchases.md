@@ -12,6 +12,43 @@ MusicBrainz models. Its [dependency assessment](digital-album-matching-evaluatio
 records compatibility checks and upstream defects; see the matching workflow below
 for configuration and limits.
 
+## WAV addition and completion — 2026-11-01
+
+Digital ingestion also accepts integer PCM WAV originals: 16/24-bit mono/stereo,
+8–192 kHz, strict RIFF or checked WAVE_FORMAT_EXTENSIBLE PCM. Preserve exact WAV
+bytes and select **Prepare FLAC after import**, or prepare FLAC later in the
+entry's Music editor. The configured FLAC encoder is required only for preparation.
+Prepared FLAC retains sample rate, channels and bit depth and is independently
+compared against source PCM before publication. MP3 and FLAC originals continue to
+play directly, including in mixed packages, without redundant conversion.
+
+WAV INFO and ID3v2.2/v2.3/v2.4 tags and embedded covers now feed the same
+metadata/artwork workflow as FLAC/MP3. Manual metadata remains authoritative.
+Explicit audio matching fingerprints WAV PCM directly, without an encoder, and
+honors album inclusion/exclusion choices. Matching supplies identity candidates;
+it does not verify the catalog or prove a complete release match.
+
+For previously retained digital packages, open the Music editor, choose
+**Analyze retained digital audio**, then **Analyze retained audio**. The durable
+Job records file analysis and refreshes automatic metadata/artwork in place;
+originals, Captures, physical inventory and manual edits survive. Repeating analysis
+reuses artwork and does not restore explicitly deleted artwork.
+
+The prepared FLAC download includes current accepted album/track details, available
+cover preview and a descriptive filename. This is a temporary metadata repack:
+archived originals and listening derivatives are unchanged, with identical PCM.
+It follows the normal media-access policy, checks source bytes, supports cancellation,
+and admits two concurrent exports per server state with an 8 GiB output bound.
+MP3 originals remain unchanged and need no conversion.
+
+Float/compressed WAV, multichannel, RF64 and continuous-image/CUE splitting remain
+unsupported codec/layout forms, rather than inherent limitations of WAV. The
+supported integer PCM matrix above is the delivered boundary. See
+[current completion validation](validation/wav-digital-completion-2026-11-01.md)
+and the [initial delivery](validation/wav-digital-originals-2026-10-31.md).
+The dated FLAC/MP3-only delivery record below retains its original scope; WAV
+preparation is the explicit exception to its direct-original playback policy.
+
 ## Portable ownership and listening identity
 
 A digital package uses an ordinary Music Item and Capture, with optional

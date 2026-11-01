@@ -1,0 +1,17 @@
+[package]
+name = "junk-libs-pcm"
+version.workspace = true
+edition.workspace = true
+license = "MIT AND LGPL-2.1-or-later"
+
+[dependencies]
+junk-libs-disc.workspace = true
+junk-libs-core.workspace = true
+claxon = "0.4.3"
+junk-libs-audio = { workspace = true, features = ["decode-compressed"] }
+junk-libs-music = { workspace = true, features = ["fingerprint"] }
+chromaprint-next = { git = "https://github.com/attilagyorffy/chromaprint-next", rev = "7a384eee09caf17b4f6241f481dd784c2e937d9a" }
+symphonia-core = "0.5.5"
+symphonia-metadata = "0.5.5"
+sha2.workspace = true
+encoding_rs = "0.8"

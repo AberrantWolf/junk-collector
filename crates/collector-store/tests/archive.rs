@@ -13747,7 +13747,7 @@ impl collector_app::AudioConversionPort for DerivativeFixtureEncoder {
     fn convert(
         &self,
         recipe: &ConversionRecipe,
-        _: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        _: &mut dyn junk_libs_pcm::IntegerPcmReader,
         scratch: &mut dyn collector_app::ConversionScratch,
         _: &mut dyn ProcessingExecutionContext,
     ) -> Result<collector_app::ConversionValidation> {
@@ -13786,8 +13786,8 @@ impl collector_app::AudioConversionPort for DerivativeFixtureEncoder {
 fn derivative_command(import: &ImportView, position: u16) -> collector_app::PrepareMusicDerivative {
     collector_app::PrepareMusicDerivative {
         representation_id: import.representation_id,
-        selection: music::CdPackageSelection {
-            package_kind: music::CdPackageKind::Cue,
+        selection: music::AudioPackageSelection {
+            package_kind: music::AudioPackageKind::Cue,
             anchor_file_index: 0,
         },
         track_position: position,
@@ -14934,7 +14934,7 @@ impl collector_app::AudioConversionPort for CorruptDerivativeEncoder {
     fn convert(
         &self,
         recipe: &ConversionRecipe,
-        source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        source: &mut dyn junk_libs_pcm::IntegerPcmReader,
         scratch: &mut dyn collector_app::ConversionScratch,
         execution: &mut dyn ProcessingExecutionContext,
     ) -> Result<collector_app::ConversionValidation> {
@@ -15083,7 +15083,7 @@ impl collector_app::AudioConversionPort for ConcurrentDerivativeEncoder {
     fn convert(
         &self,
         recipe: &ConversionRecipe,
-        source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        source: &mut dyn junk_libs_pcm::IntegerPcmReader,
         scratch: &mut dyn collector_app::ConversionScratch,
         execution: &mut dyn ProcessingExecutionContext,
     ) -> Result<collector_app::ConversionValidation> {
@@ -28341,17 +28341,43 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
 }
 #[test]
 fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_rewriting_masters() {
+    digital_matching_full_workflow(false);
+}
+#[test]
+fn wav_completion_matching_uses_original_pcm_and_retains_retry_apply_workflow() {
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
+        return;
+    }
+    digital_matching_full_workflow(true);
+}
+fn digital_matching_full_workflow(wav: bool) {
     use collector_app::{AcquireMetadataCommand, FindDigitalAlbums, ResolveMetadataCommand};
     use collector_modules::music::*;
     let (root, store, actor, base, collection) = setup();
     let flac = include_bytes!("fixtures/digital-matching/01.flac");
+    let decoded;
+    let (first_name, first_bytes) = if wav {
+        let output = std::process::Command::new("flac")
+            .args(["--decode", "--stdout", "--silent"])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/digital-matching/01.flac"
+            ))
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        decoded = output.stdout;
+        ("01.wav", decoded.as_slice())
+    } else {
+        ("01.flac", flac.as_slice())
+    };
     let mp3 = include_bytes!("fixtures/digital-matching/02.mp3");
     let detail = admit_digital_test_package(
         &base,
         &actor,
         collection.id,
-        &["01.flac", "02.mp3"],
-        &[flac, mp3],
+        &[first_name, "02.mp3"],
+        &[first_bytes, mp3],
     );
     let item = detail.summary.target_item_id.unwrap();
     let saved = store.item(item).unwrap();
@@ -28515,7 +28541,7 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
             .recorded_music_track_availability(&actor, item)
             .unwrap()[0]
             .title,
-        "01.flac",
+        first_name,
         "discovery cannot apply metadata"
     );
     let selection = service
@@ -28565,7 +28591,7 @@ fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_re
         ["Matched first", "Matched second"]
     );
     let capture = store.item(item).unwrap().captures[0].clone();
-    for (index, expected) in [flac.as_slice(), mp3.as_slice()].into_iter().enumerate() {
+    for (index, expected) in [first_bytes, mp3.as_slice()].into_iter().enumerate() {
         assert_eq!(
             resource_bytes(
                 service
@@ -28885,4 +28911,631 @@ fn archive_loss_after_encoding_retains_master_and_durable_request_for_restart() 
         serde_json::to_value(master_before).unwrap()
     );
     store.reindex().unwrap();
+}
+
+#[test]
+fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
+    use collector_app::MusicTrackAvailabilityState;
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
+        return;
+    }
+    let (_root, store, actor, service, collection) = setup();
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .unwrap();
+    let service = service.with_audio_converter(Arc::new(
+        collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap(),
+    ));
+    let wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let flac = include_bytes!("fixtures/digital-audio/01.flac").as_slice();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let mut stereo = wav.to_vec();
+    stereo[22..24].copy_from_slice(&2u16.to_le_bytes());
+    stereo[28..32].copy_from_slice(&576000u32.to_le_bytes());
+    stereo[32..34].copy_from_slice(&6u16.to_le_bytes());
+    let detail = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "03.wav", "04.wav", "02.mp3"],
+        &[flac, wav, &stereo, mp3],
+    );
+    let item_id = detail.summary.target_item_id.unwrap();
+    let item = store.item(item_id).unwrap();
+    assert!(item.specimens.is_empty());
+    let source = item.captures[0].representations[0].id;
+    let original = resource_bytes(service.representation(&actor, item_id, source, 1).unwrap());
+    assert_eq!(original, wav);
+    let rows = service
+        .recorded_music_track_availability(&actor, item_id)
+        .unwrap();
+    let wave = rows.iter().find(|r| r.track_position == 2).unwrap();
+    assert_eq!(wave.sample_rate(), 96000);
+    assert_eq!(wave.audio_format.as_ref().unwrap().channels, 1);
+    assert_eq!(
+        wave.audio_format.as_ref().unwrap().bits_per_sample,
+        Some(24)
+    );
+    assert!(wave.can_prepare);
+    assert!(matches!(
+        wave.state,
+        MusicTrackAvailabilityState::Unavailable { .. }
+    ));
+    assert!(
+        rows.iter()
+            .filter(|r| !matches!(r.track_position, 2 | 3))
+            .all(|r| r.profile.is_none() && !r.can_prepare)
+    );
+    let plan = service
+        .music_album_preparation_plan(&actor, item_id)
+        .unwrap();
+    assert!(plan.can_submit, "{plan:?}");
+    let request = collector_app::PrepareMusicAlbum {
+        source_representation_ids: vec![source],
+    };
+    let key = command();
+    let batch = service
+        .prepare_music_album(&actor, item_id, request.clone(), &key)
+        .unwrap();
+    provider_drain(&service);
+    let batch = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(batch.succeeded, 4, "{batch:?}");
+    assert_eq!(
+        batch
+            .members
+            .iter()
+            .filter(|m| m.state == collector_app::MusicPreparationMemberState::Succeeded)
+            .count(),
+        2
+    );
+    assert_eq!(
+        batch
+            .members
+            .iter()
+            .filter(|m| m.state == collector_app::MusicPreparationMemberState::AlreadyAvailable)
+            .count(),
+        2
+    );
+    assert_eq!(
+        service
+            .prepare_music_album(&actor, item_id, request, &key)
+            .unwrap()
+            .batch_id,
+        batch.batch_id
+    );
+    let item = store.item(item_id).unwrap();
+    assert_eq!(item.captures[0].representations.len(), 3);
+    let rows = service
+        .recorded_music_track_availability(&actor, item_id)
+        .unwrap();
+    let wave = rows.iter().find(|r| r.track_position == 2).unwrap();
+    let MusicTrackAvailabilityState::Available {
+        representation_id,
+        file_index,
+        ..
+    } = wave.state
+    else {
+        panic!("{wave:?}")
+    };
+    let encoded = resource_bytes(
+        service
+            .representation(&actor, item_id, representation_id, file_index)
+            .unwrap(),
+    );
+    let mut source_pcm =
+        junk_libs_pcm::WavReader::open(std::io::Cursor::new(wav), &mut || Ok(())).unwrap();
+    junk_libs_pcm::validate_flac(
+        &[(0, 96000)],
+        &mut source_pcm,
+        &mut std::io::Cursor::new(&encoded),
+        96000,
+        &mut || Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item_id, None)
+            .unwrap()
+            .tracks
+            .len(),
+        4
+    );
+    store.reindex().unwrap();
+    let rows = service
+        .recorded_music_track_availability(&actor, item_id)
+        .unwrap();
+    assert!(
+        rows.iter()
+            .all(|r| matches!(r.state, MusicTrackAvailabilityState::Available { .. }))
+    );
+    assert_eq!(
+        resource_bytes(service.representation(&actor, item_id, source, 1).unwrap()),
+        wav
+    );
+}
+
+#[test]
+fn wav_preservation_without_encoder_and_private_audio_do_not_advertise_playback_or_leak() {
+    use collector_app::MusicTrackAvailabilityState;
+    let (_root, store, actor, service, collection) = setup();
+    let wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let detail = admit_digital_test_package_with_visibility(
+        &service,
+        &actor,
+        collection.id,
+        &["03.wav"],
+        &[wav],
+        Some(Visibility::Curators),
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let source = store.item(item).unwrap().captures[0].representations[0].id;
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].can_prepare);
+    assert!(matches!(
+        rows[0].state,
+        MusicTrackAvailabilityState::Unavailable { .. }
+    ));
+    assert_eq!(
+        resource_bytes(service.representation(&actor, item, source, 0).unwrap()),
+        wav
+    );
+    let viewer = Principal {
+        user_id: store
+            .create_user("wav-viewer", "a long wav viewer password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    store
+        .grant(collection.id, viewer.user_id, Role::Viewer)
+        .unwrap();
+    assert!(
+        service
+            .recorded_music_track_availability(&viewer, item)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(service.representation(&viewer, item, source, 0).is_err());
+    assert!(
+        service
+            .prepare_music_album(
+                &viewer,
+                item,
+                collector_app::PrepareMusicAlbum {
+                    source_representation_ids: vec![source]
+                },
+                &command()
+            )
+            .is_err()
+    );
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let capture = store.item(item).unwrap().captures[0].id;
+    let job = service
+        .prepare_configured_music_track(
+            &actor,
+            item,
+            capture,
+            collector_app::PrepareMusicTrack {
+                source_representation_id: source,
+                profile: ConversionProfile::Flac,
+            },
+            1,
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    let MusicTrackAvailabilityState::Available {
+        representation_id, ..
+    } = rows[0].state
+    else {
+        panic!("{rows:?}")
+    };
+    assert!(
+        service
+            .representation(&viewer, item, representation_id, 0)
+            .is_err(),
+        "a private WAV's FLAC must stay private even through a direct media URL"
+    );
+    assert!(
+        service
+            .recorded_music_track_availability(&viewer, item)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        service
+            .export_music_flac(&viewer, item, source, 1, &mut || Ok(()))
+            .is_err()
+    );
+    let malformed = &wav[..wav.len() - 1];
+    let broken = admit_digital_test_package(
+        &service,
+        &actor,
+        collection.id,
+        &["broken.wav"],
+        &[malformed],
+    );
+    assert_eq!(broken.import.phase, ImportPhase::Published);
+    assert!(
+        service
+            .recorded_music_track_availability(&actor, broken.summary.target_item_id.unwrap())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn wav_preparation_cancellation_and_changed_source_never_publish_success() {
+    for corrupt in [false, true] {
+        let (root, store, actor, service, collection) = setup();
+        let encoder = Arc::new(DerivativeFixtureEncoder::new());
+        let service = service.with_audio_converter(encoder.clone());
+        let wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+        let detail =
+            admit_digital_test_package(&service, &actor, collection.id, &["03.wav"], &[wav]);
+        let item = detail.summary.target_item_id.unwrap();
+        let capture = &store.item(item).unwrap().captures[0];
+        let source = capture.representations[0].id;
+        if corrupt {
+            let path = files_named(&root.path().join("archive"), "03.wav")
+                .pop()
+                .unwrap();
+            let mut changed = wav.to_vec();
+            changed[44] ^= 1;
+            std::fs::write(path, changed).unwrap();
+        }
+        // Catalog reads and admission use frozen observations, not live payload scans.
+        assert!(
+            service
+                .recorded_music_track_availability(&actor, item)
+                .unwrap()[0]
+                .can_prepare
+        );
+        let job = service
+            .prepare_configured_music_track(
+                &actor,
+                item,
+                capture.id,
+                collector_app::PrepareMusicTrack {
+                    source_representation_id: source,
+                    profile: ConversionProfile::Flac,
+                },
+                1,
+                &command(),
+            )
+            .unwrap();
+        if !corrupt {
+            service.cancel_job(&actor, job, &command()).unwrap();
+        }
+        provider_drain(&service);
+        assert_eq!(
+            service.job(&actor, job).unwrap().state,
+            if corrupt {
+                JobState::Failed
+            } else {
+                JobState::Cancelled
+            }
+        );
+        assert_eq!(encoder.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            store.item(item).unwrap().captures[0].representations.len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn wav_completion_tagged_original_artwork_native_flac_and_portable_export() {
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
+        return;
+    }
+    let (_root, store, actor, service, collection) = setup();
+    let tool = collector_providers::ConfiguredEncoder::probe(
+        collector_providers::EncoderKind::Flac,
+        "flac",
+    )
+    .unwrap();
+    let service = service.with_audio_converter(Arc::new(
+        collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap(),
+    ));
+    let bytes = include_bytes!("fixtures/digital-audio/03-tagged.wav");
+    let detail = admit_digital_test_package(&service, &actor, collection.id, &["03.wav"], &[bytes]);
+    let id = detail.summary.target_item_id.unwrap();
+    let shown = service.item_presented(&actor, id).unwrap();
+    assert_eq!(shown.title, "Tagged WAV album");
+    assert_eq!(shown.subtitle, "Tagged WAV artist");
+    assert!(shown.primary_artwork.is_some());
+    let capture = &store.item(id).unwrap().captures[0];
+    let source = capture.representations[0].id;
+    let rows = service
+        .recorded_music_track_availability(&actor, id)
+        .unwrap();
+    assert_eq!(
+        (
+            &*rows[0].title,
+            rows[0].disc_position,
+            rows[0].display_position
+        ),
+        ("WAV title", Some(2), Some(7))
+    );
+    let batch = service
+        .prepare_music_album(
+            &actor,
+            id,
+            collector_app::PrepareMusicAlbum {
+                source_representation_ids: vec![source],
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service
+            .music_preparation_batch(&actor, batch.batch_id)
+            .unwrap()
+            .failed,
+        0
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, id)
+        .unwrap();
+    let collector_app::MusicTrackAvailabilityState::Available {
+        representation_id,
+        file_index,
+        ..
+    } = rows[0].state
+    else {
+        panic!("{rows:?}")
+    };
+    let retained = resource_bytes(
+        service
+            .representation(&actor, id, representation_id, file_index)
+            .unwrap(),
+    );
+    let exported = service
+        .export_music_flac(&actor, id, source, 1, &mut || Ok(()))
+        .unwrap();
+    assert!(exported.download_name.contains("Tagged WAV album"));
+    assert!(exported.download_name.ends_with(".flac"));
+    let output = resource_bytes(exported);
+    let audio = junk_libs_audio_for_export_test(output.clone());
+    assert_eq!(audio.tag("title"), Some("WAV title"));
+    assert_eq!(audio.tag("album"), Some("Tagged WAV album"));
+    assert_eq!(audio.tag("artist"), Some("Tagged WAV artist"));
+    assert_eq!(audio.tag("disc_number"), Some("2"));
+    assert_eq!(audio.tag("track_number"), Some("7"));
+    assert_eq!(audio.pictures.len(), 1);
+    let mut source_pcm =
+        junk_libs_pcm::WavReader::open(std::io::Cursor::new(bytes), &mut || Ok(())).unwrap();
+    junk_libs_pcm::validate_flac(
+        &[(0, 96000)],
+        &mut source_pcm,
+        &mut std::io::Cursor::new(output),
+        96000,
+        &mut || Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        resource_bytes(service.representation(&actor, id, source, 0).unwrap()),
+        bytes
+    );
+    assert_eq!(
+        resource_bytes(
+            service
+                .representation(&actor, id, representation_id, file_index)
+                .unwrap()
+        ),
+        retained
+    );
+    assert!(
+        service
+            .export_music_flac(&actor, id, source, 1, &mut || Err(Error::JobCancelled))
+            .is_err()
+    );
+    let missing = CollectionService::new(store.clone(), Arc::new(Registry::default()));
+    assert_eq!(
+        resource_bytes(
+            missing
+                .export_music_flac(&actor, id, source, 1, &mut || Ok(()))
+                .unwrap()
+        ),
+        retained,
+        "missing modules must retain authorized historical FLAC downloads"
+    );
+    let review = service.metadata_review(&actor, id).unwrap();
+    service.update_metadata_authority(&actor,id,UpdateMetadataAuthorityCommand {expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides{overrides:ModuleData{module:ModuleId("org.junk.music".into()),schema_version:1,payload:RawJson::from_value(serde_json::json!({"artist":"My artist","track_overrides":[{"source_representation_id":source,"track_position":1,"title":"私のタイトル","disc_position":3,"display_position":9}]}))}}},&command()).unwrap();
+    let exported = service
+        .export_music_flac(&actor, id, source, 1, &mut || Ok(()))
+        .unwrap();
+    assert!(exported.download_name.starts_with("03-09"));
+    assert!(exported.download_name.contains("私のタイトル"));
+    let tags = junk_libs_audio_for_export_test(resource_bytes(exported));
+    assert_eq!(tags.tag("title"), Some("私のタイトル"));
+    assert_eq!(tags.tag("artist"), Some("My artist"));
+    assert_eq!(tags.tag("album_artist"), Some("My artist"));
+    assert_eq!(tags.tag("track_number"), Some("9"));
+    store.reindex().unwrap();
+    assert_eq!(
+        service.item_presented(&actor, id).unwrap().primary_artwork,
+        shown.primary_artwork
+    );
+}
+fn junk_libs_audio_for_export_test(bytes: Vec<u8>) -> junk_libs_audio::FileAudioInfo {
+    junk_libs_audio::inspect_file_audio(
+        junk_libs_audio::ByteSource::new(
+            std::io::Cursor::new(bytes),
+            junk_libs_audio::MediaHint::new(None, Some("flac"), None),
+        ),
+        &mut || Ok(()),
+    )
+    .unwrap()
+}
+
+#[test]
+fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority() {
+    let (_root, store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let bytes = include_bytes!("fixtures/digital-audio/03-tagged.wav");
+    let import = service
+        .create_provisional_import(
+            &actor,
+            CreateImportCommand {
+                collection_id: collection.id,
+                source: ImportSourceSummary {
+                    kind: ImportSourceKind::Browser,
+                    label: None,
+                    package_name: "Retained legacy WAV".into(),
+                },
+                files: vec![UploadFile {
+                    visibility: Some(Visibility::Shared),
+                    name: "legacy.wav".into(),
+                    bytes: ByteLength(bytes.len() as u64),
+                    sha256: None,
+                }],
+                association: CaptureAssociation {
+                    item_id: Some(saved.id),
+                    ..Default::default()
+                },
+                expected_item_revision: Some(saved.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, import.id, 0, 0, bytes)
+        .unwrap();
+    let current = service.provisional_import(&actor, import.id).unwrap();
+    let reviewed = service
+        .review_provisional_import(
+            &actor,
+            import.id,
+            ReviewImportCommand {
+                expected_revision: current.revision,
+                identity: ImportIdentityDecision::Unidentified,
+                association: current.association,
+                expected_item_revision: Some(saved.revision),
+            },
+            &command(),
+        )
+        .unwrap();
+    service
+        .enqueue_import_publication(&actor, reviewed.id, &command())
+        .unwrap();
+    provider_drain(&service);
+    let import = service.provisional_import(&actor, import.id).unwrap();
+    assert_eq!(import.phase, ImportPhase::Published);
+    let id = saved.id;
+    let before = store.item(id).unwrap();
+    assert!(
+        service
+            .recorded_music_track_availability(&actor, id)
+            .unwrap()
+            .is_empty()
+    );
+    let request = collector_app::StartProcessingCommand {
+        operation: OperationId::new("org.junk.music.import-analysis").unwrap(),
+        operation_version: 1,
+        representation_id: import.representation_id,
+        snapshot_id: None,
+        selection: RawJson::from_value(serde_json::json!({})),
+    };
+    let key = command();
+    let job = service
+        .enqueue_processing_operation(&actor, import.capture_id, request.clone(), &key)
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, job).unwrap().state,
+        JobState::Completed,
+        "{:?}",
+        service.job(&actor, job).unwrap()
+    );
+    assert_eq!(
+        service
+            .enqueue_processing_operation(&actor, import.capture_id, request.clone(), &key)
+            .unwrap(),
+        job
+    );
+    let rows = service
+        .recorded_music_track_availability(&actor, id)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "WAV title");
+    let artwork = service.item_presented(&actor, id).unwrap().primary_artwork;
+    assert!(artwork.is_some());
+    let review = service.metadata_review(&actor, id).unwrap();
+    service
+        .update_metadata_authority(
+            &actor,
+            id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: review.revision,
+                change: MetadataAuthorityChange::SetFieldOverride {
+                    field: MetadataField::Title,
+                    value: "My accepted album".into(),
+                    language: None,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .enqueue_processing_operation(&actor, import.capture_id, request, &command())
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, job).unwrap().state,
+        JobState::Completed,
+        "{:?}",
+        service.job(&actor, job).unwrap()
+    );
+    let after = store.item(id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&after.specimens).unwrap(),
+        serde_json::to_value(&before.specimens).unwrap()
+    );
+    assert_eq!(after.captures.len(), before.captures.len());
+    assert_eq!(
+        after.captures[0].representations.len(),
+        before.captures[0].representations.len()
+    );
+    assert_eq!(
+        service.item_presented(&actor, id).unwrap().title,
+        "My accepted album"
+    );
+    assert_eq!(
+        service.item_presented(&actor, id).unwrap().primary_artwork,
+        artwork
+    );
+    assert_eq!(
+        resource_bytes(
+            service
+                .representation(&actor, id, import.representation_id, 0)
+                .unwrap()
+        ),
+        bytes
+    );
+    store.reindex().unwrap();
+    assert_eq!(
+        service.item_presented(&actor, id).unwrap().title,
+        "My accepted album"
+    );
+    assert_eq!(
+        service
+            .recorded_music_track_availability(&actor, id)
+            .unwrap()[0]
+            .title,
+        "WAV title"
+    );
 }

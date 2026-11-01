@@ -81,7 +81,8 @@ pub struct MusicDiscAssignment {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum CdPackageKind {
+pub enum AudioPackageKind {
+    Wav,
     CueAudio,
     Cue,
     Redumper,
@@ -89,15 +90,15 @@ pub enum CdPackageKind {
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CdPackageSelection {
-    pub package_kind: CdPackageKind,
+pub struct AudioPackageSelection {
+    pub package_kind: AudioPackageKind,
     pub anchor_file_index: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AccurateRipSelection {
-    pub package_kind: CdPackageKind,
+    pub package_kind: AudioPackageKind,
     pub anchor_file_index: usize,
     pub snapshot_id: collector_core::SnapshotId,
     #[serde(default = "default_maximum_offset")]
@@ -110,11 +111,11 @@ fn default_maximum_offset() -> i32 {
 
 #[derive(Deserialize)]
 struct MusicImportAnalysisInput {
-    #[serde(rename = "import_id")]
-    _import_id: collector_core::ImportId,
-    #[serde(rename = "representation_id")]
-    _representation_id: collector_core::RepresentationId,
-    #[serde(rename = "files")]
+    #[serde(default, rename = "import_id")]
+    _import_id: Option<collector_core::ImportId>,
+    #[serde(default, rename = "representation_id")]
+    _representation_id: Option<collector_core::RepresentationId>,
+    #[serde(default, rename = "files")]
     _files: Vec<serde_json::Value>,
     #[serde(default, rename = "snapshot_id")]
     _snapshot_id: Option<collector_core::SnapshotId>,
@@ -135,7 +136,7 @@ pub struct MusicImportAnalysisOutput {
     limitations: Vec<String>,
     pub observations: Vec<RawJson>,
     #[serde(default)]
-    pub selection: Option<CdPackageSelection>,
+    pub selection: Option<AudioPackageSelection>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1501,17 +1502,20 @@ fn analyze_selection(
     host: &dyn crate::ModuleHost,
     access: PackageAccess,
     inventory: &PackageInventory,
-    selection: &CdPackageSelection,
+    selection: &AudioPackageSelection,
 ) -> ModuleResult<CdProcessingResult> {
     match selection.package_kind {
-        CdPackageKind::CueAudio => Err(ModuleError::UnavailableCapability(
+        AudioPackageKind::Wav => Err(ModuleError::UnavailableCapability(
+            "Digital WAV originals do not have CD verification coordinates".into(),
+        )),
+        AudioPackageKind::CueAudio => Err(ModuleError::UnavailableCapability(
             "Playback-only game CD audio does not support whole-disc verification".into(),
         )),
-        CdPackageKind::Cue => {
+        AudioPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
             analyze_cue_package(&cue, id, inventory)
         }
-        CdPackageKind::Redumper => {
+        AudioPackageKind::Redumper => {
             let file = anchor_file(inventory, selection.anchor_file_index)?;
             analyze_redumper_package(file.id, inventory, |id| host.package_file(access, id))
         }
@@ -1553,22 +1557,27 @@ fn open_pcm_selection(
     host: &dyn crate::ModuleHost,
     access: PackageAccess,
     inventory: &PackageInventory,
-    selection: &CdPackageSelection,
+    selection: &AudioPackageSelection,
 ) -> ModuleResult<(PackagePcmReader, Vec<DiscPcmTrack>, CdProcessingResult)> {
     let layout = analyze_selection(host, access, inventory, selection)?;
     let (reader, tracks) = match selection.package_kind {
-        CdPackageKind::CueAudio => {
+        AudioPackageKind::Wav => {
+            return Err(ModuleError::UnavailableCapability(
+                "Digital WAV originals do not have CD verification coordinates".into(),
+            ));
+        }
+        AudioPackageKind::CueAudio => {
             return Err(ModuleError::UnavailableCapability(
                 "Playback-only game CD audio does not support whole-disc verification".into(),
             ));
         }
-        CdPackageKind::Cue => {
+        AudioPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, inventory, selection.anchor_file_index)?;
             let (reader, tracks) =
                 open_cue_pcm_package(&cue, id, inventory, |file| host.package_file(access, file))?;
             (PackagePcmReader::Cue(reader), tracks)
         }
-        CdPackageKind::Redumper => {
+        AudioPackageKind::Redumper => {
             let file = anchor_file(inventory, selection.anchor_file_index)?;
             let (reader, tracks) = open_redumper_pcm_package(file.id, inventory, |file| {
                 host.package_file(access, file)
@@ -1586,23 +1595,26 @@ fn open_pcm_selection(
 pub fn open_conversion_pcm_selection(
     host: &dyn crate::ModuleHost,
     access: PackageAccess,
-    selection: &CdPackageSelection,
+    selection: &AudioPackageSelection,
 ) -> ModuleResult<ConversionPcmSource> {
     let inventory = host.package_inventory(access)?;
     match selection.package_kind {
-        CdPackageKind::CueAudio => crate::disc_audio::open_conversion(
+        AudioPackageKind::Wav => Err(ModuleError::Invalid(
+            "WAV conversion needs a recorded file track".into(),
+        )),
+        AudioPackageKind::CueAudio => crate::disc_audio::open_conversion(
             host,
             access,
             &inventory,
             selection.anchor_file_index,
         ),
-        CdPackageKind::Cue => {
+        AudioPackageKind::Cue => {
             let (id, cue) = read_cue(host, access, &inventory, selection.anchor_file_index)?;
             open_cue_conversion_pcm_package(&cue, id, &inventory, |file| {
                 host.package_file(access, file)
             })
         }
-        CdPackageKind::Redumper => {
+        AudioPackageKind::Redumper => {
             let file = anchor_file(&inventory, selection.anchor_file_index)?;
             let (reader, windows) = open_redumper_pcm_package(file.id, &inventory, |member| {
                 host.package_file(access, member)
@@ -1747,7 +1759,7 @@ fn verify_selection(
             "maximum AccurateRip offset is out of bounds".into(),
         ));
     }
-    let package = CdPackageSelection {
+    let package = AudioPackageSelection {
         package_kind: selection.package_kind,
         anchor_file_index: selection.anchor_file_index,
     };
@@ -1814,16 +1826,16 @@ fn verify_selection(
 /// Detect the one supported CD package anchor without opening any archive path.
 /// Application read/command services use this to present and prepare the same
 /// music-owned track mapping as processing jobs.
-fn package_anchors(names: &[PackageFileName]) -> Vec<(usize, CdPackageKind)> {
+fn package_anchors(names: &[PackageFileName]) -> Vec<(usize, AudioPackageKind)> {
     names
         .iter()
         .enumerate()
         .filter_map(|(index, name)| {
             let lower = name.as_str().to_ascii_lowercase();
             if lower.ends_with(".cue") {
-                Some((index, CdPackageKind::Cue))
+                Some((index, AudioPackageKind::Cue))
             } else if lower.ends_with(".toc") {
-                Some((index, CdPackageKind::Redumper))
+                Some((index, AudioPackageKind::Redumper))
             } else {
                 None
             }
@@ -1831,7 +1843,7 @@ fn package_anchors(names: &[PackageFileName]) -> Vec<(usize, CdPackageKind)> {
         .collect()
 }
 
-pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSelection> {
+pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<AudioPackageSelection> {
     let anchors = package_anchors(
         &inventory
             .files
@@ -1845,7 +1857,7 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<CdPackageSel
                 .into(),
         ));
     };
-    Ok(CdPackageSelection {
+    Ok(AudioPackageSelection {
         package_kind: *package_kind,
         anchor_file_index: *anchor_file_index,
     })
@@ -1874,6 +1886,17 @@ impl CollectionModule for Music {
                     .collect::<Vec<_>>(),
             )
         {
+            plan.files = inventory
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| files::is_audio_name(f.display_name.as_str()))
+                .map(|(index, file)| crate::IngestAnchorChoice {
+                    file_index: index,
+                    label: file.display_name.as_str().into(),
+                    selected: true,
+                })
+                .collect();
             return Ok(plan);
         }
         plan.file(inventory, "anchor_file_index", |n| {
@@ -1920,7 +1943,7 @@ impl CollectionModule for Music {
                 .map(|v| v.message),
         );
         match operation.as_str() {
-            CD_STRUCTURE_OPERATION => plan.normalize::<CdPackageSelection>()?,
+            CD_STRUCTURE_OPERATION => plan.normalize::<AudioPackageSelection>()?,
             ACCURATERIP_VERIFICATION_OPERATION => {
                 let value: serde_json::Value = plan
                     .selection
@@ -2051,8 +2074,9 @@ impl CollectionModule for Music {
             .map(|(index, kind)| IngestAnchorChoice {
                 file_index: *index,
                 label: match kind {
-                    CdPackageKind::Cue | CdPackageKind::CueAudio => "BIN/CUE",
-                    CdPackageKind::Redumper => "Redumper TOC",
+                    AudioPackageKind::Cue | AudioPackageKind::CueAudio => "BIN/CUE",
+                    AudioPackageKind::Redumper => "Redumper TOC",
+                    AudioPackageKind::Wav => "WAV original",
                 }
                 .into(),
                 selected: anchor_file_index
@@ -2088,14 +2112,14 @@ impl CollectionModule for Music {
         }
         match selected.as_slice() {
             [] => issue(IngestBlockerKind::MissingAnchor, "CD analysis needs a CUE or redumper TOC anchor. Originals can still be preserved.".into()),
-            [(index, CdPackageKind::Redumper)] => {
+            [(index, AudioPackageKind::Redumper)] => {
                 let base = &names[*index].as_str()[..names[*index].as_str().len()-4];
                 for extension in ["scram", "state", "subcode"] {
                     let required = format!("{base}.{extension}");
                     if !names.iter().any(|name| name.as_str().eq_ignore_ascii_case(&required)) { issue(IngestBlockerKind::MissingCompanion, format!("Missing redumper companion {required}; add it for analysis or preserve without analysis.")); }
                 }
             }
-            [(_, CdPackageKind::Cue)] if names.len()==1 => issue(IngestBlockerKind::MissingCompanion, "The CUE has no companion data file. Add its referenced files or preserve without analysis.".into()),
+            [(_, AudioPackageKind::Cue)] if names.len()==1 => issue(IngestBlockerKind::MissingCompanion, "The CUE has no companion data file. Add its referenced files or preserve without analysis.".into()),
             [_] => {},
             _ => issue(IngestBlockerKind::AmbiguousAnchors, "Multiple CD anchors: choose the CUE or Redumper TOC to analyze. The whole package will be preserved either way.".into()),
         }
@@ -2334,7 +2358,7 @@ impl CollectionModule for Music {
         let inventory = host.package_inventory(access)?;
         let result = match request.capability.as_str() {
             CD_STRUCTURE_OPERATION => {
-                let selection: CdPackageSelection = request
+                let selection: AudioPackageSelection = request
                     .input
                     .parse()
                     .map_err(|error| ModuleError::Invalid(error.to_string()))?;
@@ -2390,7 +2414,7 @@ impl CollectionModule for Music {
                                     "selected CD anchor is not part of the frozen package".into(),
                                 )
                             })?;
-                        CdPackageSelection {
+                        AudioPackageSelection {
                             package_kind,
                             anchor_file_index,
                         }

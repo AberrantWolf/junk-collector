@@ -25,7 +25,8 @@ user decisions and calls application commands rather than composing a second pip
 
 Full selected checks and 30 browser journeys pass. Independent clean-context review
 and its verified corrections have no remaining actionable findings; see
-[delivery evidence](validation/inbox-recovery-2026-10-31.md). No deployment was performed.
+[delivery evidence](validation/inbox-recovery-2026-10-31.md). Signed source `0bec4af` is now installed
+on Fi; [deployment evidence](validation/fi-inbox-recovery-deployment-2026-10-31.md) records retained state.
 
 ## Connected Bridge folder editing — 2026-10-31
 
@@ -663,6 +664,39 @@ See [implementation and supported matrix](digital-purchases.md) and
 and image splitting remain outside this initial delivery. Actual Chrome and native
 GUI streaming, seeking, downloads and retained offline use passed on the named
 clients; broader LAN/device qualification remains HL-04.
+
+## WAV digital originals — 2026-10-31
+
+WAV packages reuse digital Capture ownership, immutable file-track observations,
+per-file visibility and ordinary guided/bulk intake. `AudioPackageSelection` names
+both file and CD-layout conversion inputs; WAV sources never acquire CD geometry
+or verification claims. Music maps strict integer WAV inspection to its existing
+file manifest. The narrow reusable `junk-libs-pcm` workspace crate owns RIFF parsing,
+integer PCM readers, the existing CD-reader adapter and independent native-format
+FLAC sample comparison. It has no Collector or I/O-location dependencies. This
+extraction is co-located in the workspace; existing pinned junk-libs crates and
+sibling consumers are unchanged.
+
+Application policy offers explicit FLAC preparation for WAV while retaining exact
+WAV masters; FLAC/MP3 originals still play directly. The existing durable derivative
+and album jobs carry actual sample rate, channels and bit depth in sealed recipes.
+The process adapter streams bounded raw integer PCM to the configured FLAC encoder,
+then independently decodes and compares every sample before normal journaled
+publication. Original and prepared file identities remain distinct. Admission and
+availability resolve recorded manifests/fingerprints; worker source hashing,
+parsing, encoding, validation and final hashing remain cancellable. Source visibility
+also gates prepared-track availability. No storage migration or source conversion
+is required: retained WAV bytes remain untouched, and only new analysis/preparation
+adds observations and derivatives. Previously preserved unanalyzed WAVs need fresh
+analysis through the retained digital-audio operation to acquire file-track observations.
+
+Supported inputs are RIFF PCM or checked extensible PCM, 16/24-bit mono/stereo,
+8–192 kHz, at most 24 hours per file and 4,096 chunks. Float/compressed WAV, RF64,
+multichannel and continuous image/CUE splitting remain unsupported. WAV INFO/ID3
+metadata, embedded artwork, direct PCM matching, retained-source analysis and
+metadata-aware FLAC export are covered by the completion boundaries below. See
+[initial validation](validation/wav-digital-originals-2026-10-31.md) and
+[completion validation](validation/wav-digital-completion-2026-11-01.md).
 
 ## Stopped-server backup and recovery contract — HL-03
 
@@ -1856,3 +1890,27 @@ searchable disclosure; normal-height controls align at the top and bulk commands
 appear after selection. These are frontend observation/navigation changes, with
 existing application authorization and polling unchanged. See
 [acceptance](validation/configurable-workers-2026-10-21.md).
+
+## WAV completion boundaries — source implementation, 2026-11-01
+
+Shared `junk-libs-pcm` mechanisms read bounded RIFF INFO/ID3 chunks, normalize
+metadata/artwork and compute the existing Chromaprint envelope from integer WAV
+PCM. Collector music maps identities and retains the same source-bound matching
+and metadata policy. A retained-source digital-analysis operation reuses ordinary
+processing Jobs and archive observations, then shared application enrichment. It
+does not replace a source, manufacture an Import or overwrite manual authority.
+A metadata-aware FLAC download freezes authorized current album/track/artwork
+inputs, repacks FLAC metadata into opaque temporary scratch, validates consumed
+source bytes and supplies a distinct output digest/filename. Stored originals,
+prepared media, recipe identities and playback/cache contracts remain intact.
+
+Export admission holds one of two server-state permits through repack and response
+reader lifetime; cancellation cannot release a permit while its blocking work still
+runs. Shared readers enforce metadata/frame bounds and cooperative checkpoints.
+Enrichment is claim/generation fenced after observation commit, uses the exact
+frozen manifest and reuses authorized accepted artwork through existing effects.
+No compatibility migration or destructive conversion of existing data is required.
+
+Saved export URLs retain read access to authorized historical media when the owner
+module or schema cannot execute: serve the recorded FLAC with ordinary transfer
+integrity checking, without requiring metadata reconstruction or write eligibility.

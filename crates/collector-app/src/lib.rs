@@ -7,6 +7,7 @@ pub use disc_audio::game_audio_search_projection;
 mod digital_matching;
 pub use digital_matching::*;
 mod file_music;
+mod music_export;
 pub use file_music::{
     UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
 };

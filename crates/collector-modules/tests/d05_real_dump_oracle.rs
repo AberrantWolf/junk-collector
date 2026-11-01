@@ -3,7 +3,7 @@ use collector_core::{
     PackageInventoryFile, PackageScope, RepresentationId,
 };
 use collector_modules::music::{
-    AccurateRipDatabaseIdentity, AudioVerificationStatus, CdPackageKind, CdProcessingResult,
+    AccurateRipDatabaseIdentity, AudioPackageKind, AudioVerificationStatus, CdProcessingResult,
     InterpretAccurateRipInput, analyze_cue_package, analyze_redumper_package,
     interpret_accuraterip_summary, open_cue_pcm_package, open_redumper_pcm_package,
 };
@@ -29,7 +29,7 @@ struct Oracle {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PackageOracle {
-    kind: CdPackageKind,
+    kind: AudioPackageKind,
     anchor: String,
     files: Vec<String>,
     expected_layout_sha256: String,
@@ -131,8 +131,10 @@ fn owned_cd_dump_matches_declared_layout_and_accuraterip_oracles() {
             Box<dyn junk_libs_disc::CdPcmReader>,
             _,
         ) = match package.kind {
-            CdPackageKind::CueAudio => panic!("Playback geometry is outside the whole-disc oracle"),
-            CdPackageKind::Cue => {
+            AudioPackageKind::Wav | AudioPackageKind::CueAudio => {
+                panic!("Playback geometry is outside the whole-disc oracle")
+            }
+            AudioPackageKind::Cue => {
                 let mut cue = String::new();
                 open(anchor_id)
                     .unwrap()
@@ -143,7 +145,7 @@ fn owned_cd_dump_matches_declared_layout_and_accuraterip_oracles() {
                     open_cue_pcm_package(&cue, anchor_id, &inventory, open).expect("open CUE PCM");
                 (layout, Box::new(reader), tracks)
             }
-            CdPackageKind::Redumper => {
+            AudioPackageKind::Redumper => {
                 let layout = analyze_redumper_package(anchor_id, &inventory, open)
                     .expect("analyze redumper package");
                 let (reader, tracks) = open_redumper_pcm_package(anchor_id, &inventory, open)

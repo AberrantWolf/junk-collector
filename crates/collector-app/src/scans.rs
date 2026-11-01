@@ -157,6 +157,14 @@ impl CollectionService {
                 vec![]
             }
         };
+        if command.operation.as_str() == "org.junk.music.import-analysis" {
+            let item = self
+                .reader
+                .item(capture.association.item_id.ok_or(Error::NotFound)?)?;
+            let mut selection: serde_json::Value = command.selection.parse()?;
+            selection["item_generation"] = serde_json::json!(item.lifecycle.generation);
+            command.selection = RawJson::from_value(selection);
+        }
         let selection: serde_json::Value = command
             .selection
             .parse()
@@ -321,7 +329,7 @@ impl CollectionService {
             let old = self.processing.observations(&ProcessingQuery {
                 collection_id: capture.collection_id,
                 source: inventory.scope,
-                source_fingerprint: frozen.source_fingerprint,
+                source_fingerprint: frozen.source_fingerprint.clone(),
                 operation: Some(plan.command.operation.clone()),
                 after: None,
                 limit: 1,
@@ -422,6 +430,7 @@ impl CollectionService {
             .processing_record(frozen.observation_id)
             .is_ok()
         {
+            self.enrich_retained_file_analysis(claim, &frozen)?;
             return Ok(serde_json::json!({"observation_id":frozen.observation_id}));
         }
         frozen.validate()?;
@@ -550,9 +559,9 @@ impl CollectionService {
         let observation = ProcessingObservation {
             id: frozen.observation_id,
             collection_id: frozen.collection_id,
-            operation: frozen.operation,
+            operation: frozen.operation.clone(),
             operation_version: frozen.operation_version,
-            source_fingerprint: frozen.source_fingerprint,
+            source_fingerprint: frozen.source_fingerprint.clone(),
             snapshot_id: frozen.snapshot_id,
             support,
             raw_observations: vec![],
@@ -574,6 +583,10 @@ impl CollectionService {
                 import_rebinding: None,
             },
         )?;
+        if frozen.operation.as_str() == "org.junk.music.import-analysis" {
+            self.report_processing_phase(claim, "refreshing_metadata")?;
+        }
+        self.enrich_retained_file_analysis(claim, &frozen)?;
         Ok(serde_json::json!({"observation_id":frozen.observation_id}))
     }
 }

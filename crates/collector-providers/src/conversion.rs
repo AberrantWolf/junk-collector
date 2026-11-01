@@ -200,12 +200,21 @@ impl AudioConversionPort for ProcessAudioConverter {
     fn convert(
         &self,
         recipe: &ConversionRecipe,
-        source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+        source: &mut dyn junk_libs_pcm::IntegerPcmReader,
         scratch: &mut dyn ConversionScratch,
         execution: &mut dyn ProcessingExecutionContext,
     ) -> Result<ConversionValidation> {
         checkpoint(execution)?;
         recipe.validate()?;
+        let format = source.format();
+        if format.sample_rate != recipe.input_format.sample_rate
+            || format.channels != recipe.input_format.channels
+            || format.bits != recipe.input_format.bits_per_sample
+        {
+            return Err(Error::Invalid(
+                "PCM reader format differs from recipe".into(),
+            ));
+        }
         let tool = self.tool(&recipe.settings).ok_or_else(|| {
             Error::Unavailable(format!("configured {} tool is unavailable", recipe.encoder))
         })?;
@@ -226,14 +235,17 @@ impl AudioConversionPort for ProcessAudioConverter {
         let result = (|| -> Result<ConversionValidation> {
             let source_frames = checked_source_frames(recipe, source.total_frames())?;
             let input_bytes = source_frames
-                .checked_mul(4)
+                .checked_mul(
+                    recipe.input_format.channels as u64
+                        * u64::from(recipe.input_format.bits_per_sample / 8),
+                )
                 .ok_or_else(|| Error::Invalid("conversion input length overflow".into()))?;
             let output_limit = input_bytes
                 .checked_mul(2)
                 .and_then(|bytes| bytes.checked_add(1024 * 1024))
                 .unwrap_or(MAX_OUTPUT_BYTES)
                 .min(MAX_OUTPUT_BYTES);
-            let arguments = encoder_arguments(&recipe.settings, input_bytes);
+            let arguments = encoder_arguments(&recipe.settings, input_bytes, &recipe.input_format);
             let mut command = isolated_command(&current_tool.path);
             let mut child = command
                 .args(&arguments)
@@ -311,7 +323,7 @@ impl AudioConversionPort for ProcessAudioConverter {
                         .iter()
                         .map(|track| (track.start.0, track.length.0))
                         .collect::<Vec<_>>();
-                    let validation = junk_libs_audio::validation::validate_flac(
+                    let validation = junk_libs_pcm::validate_flac(
                         &tracks,
                         source,
                         scratch,
@@ -357,7 +369,11 @@ impl AudioConversionPort for ProcessAudioConverter {
     }
 }
 
-fn encoder_arguments(settings: &ConversionSettings, input_bytes: u64) -> Vec<String> {
+fn encoder_arguments(
+    settings: &ConversionSettings,
+    input_bytes: u64,
+    format: &collector_core::PcmSampleFormat,
+) -> Vec<String> {
     match settings {
         ConversionSettings::Flac { level } => vec![
             "--stdout".into(),
@@ -365,9 +381,9 @@ fn encoder_arguments(settings: &ConversionSettings, input_bytes: u64) -> Vec<Str
             "--force-raw-format".into(),
             "--endian=little".into(),
             "--sign=signed".into(),
-            "--channels=2".into(),
-            "--bps=16".into(),
-            "--sample-rate=44100".into(),
+            format!("--channels={}", format.channels),
+            format!("--bps={}", format.bits_per_sample),
+            format!("--sample-rate={}", format.sample_rate),
             format!("--compression-level-{level}"),
             format!("--input-size={input_bytes}"),
             "-".into(),
@@ -423,13 +439,13 @@ fn checked_source_frames(recipe: &ConversionRecipe, available: u64) -> Result<u6
 }
 
 fn write_selected_pcm(
-    source: &mut (dyn junk_libs_disc::CdPcmReader + Send),
+    source: &mut dyn junk_libs_pcm::IntegerPcmReader,
     tracks: &[collector_core::ConversionTrack],
     mut output: impl Write,
     stopped: &AtomicBool,
 ) -> std::io::Result<()> {
-    let mut frames = vec![[0_i16; 2]; IO_FRAMES];
-    let mut bytes = vec![0_u8; IO_FRAMES * 4];
+    let frame_bytes = source.format().frame_bytes();
+    let mut bytes = vec![0_u8; IO_FRAMES * frame_bytes];
     for track in tracks {
         source
             .seek_frame(track.start.0)
@@ -441,7 +457,7 @@ fn write_selected_pcm(
             }
             let wanted = usize::try_from(remaining.min(IO_FRAMES as u64)).unwrap();
             let count = source
-                .read_frames(&mut frames[..wanted])
+                .read_pcm(&mut bytes[..wanted * frame_bytes])
                 .map_err(std::io::Error::other)?;
             if count > wanted {
                 return Err(std::io::Error::other(
@@ -454,14 +470,7 @@ fn write_selected_pcm(
                     "authorized PCM ended inside a recipe track",
                 ));
             }
-            for (frame, raw) in frames[..count]
-                .iter()
-                .zip(bytes.as_chunks_mut::<4>().0.iter_mut())
-            {
-                raw[..2].copy_from_slice(&frame[0].to_le_bytes());
-                raw[2..].copy_from_slice(&frame[1].to_le_bytes());
-            }
-            output.write_all(&bytes[..count * 4])?;
+            output.write_all(&bytes[..count * frame_bytes])?;
             remaining -= count as u64;
         }
     }

@@ -5,8 +5,10 @@ it does not automatically alter inventory or infer possession from a receipt.
 Installed on Fi on 2026-10-31; see [local account setup](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31)
 and [deployment evidence](validation/fi-email-deployment-2026-10-31.md).
 
-Folder editing and inbox recovery are source deliveries dated 2026-10-31 and have not been deployed;
-see [folder editing](validation/mail-folder-editing-2026-10-31.md) and
+Folder editing and inbox recovery are installed on Fi from signed source `0bec4af`;
+the existing profile and paused connection were preserved. See
+[deployment](validation/fi-inbox-recovery-deployment-2026-10-31.md),
+[folder editing](validation/mail-folder-editing-2026-10-31.md) and
 [recovery validation](validation/inbox-recovery-2026-10-31.md).
 
 ## Boundaries

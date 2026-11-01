@@ -26,6 +26,8 @@ tempfile.workspace = true
 tracing = "0.1"
 
 [dev-dependencies]
+junk-libs-audio = { workspace = true, features = ["decode-compressed"] }
+junk-libs-pcm.workspace = true
 rusqlite = { workspace = true, features = ["hooks"] }
 junk-libs-disc.workspace = true
 collector-modules.workspace = true

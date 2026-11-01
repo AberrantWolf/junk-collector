@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "collector-api-types"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "chrono",
  "collector-core",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "collector-app"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -648,6 +648,7 @@ dependencies = [
  "junk-libs-core",
  "junk-libs-disc",
  "junk-libs-music",
+ "junk-libs-pcm",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -660,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "collector-cd-identity"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "junk-libs-disc",
  "junk-libs-disc-id",
@@ -670,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "collector-client"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -691,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "collector-core"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "chrono",
  "hex",
@@ -707,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "collector-media"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "anyhow",
  "axum",
@@ -733,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "collector-modules"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "collector-core",
  "junk-libs-accuraterip",
@@ -743,6 +744,7 @@ dependencies = [
  "junk-libs-disc-id",
  "junk-libs-game-formats",
  "junk-libs-music",
+ "junk-libs-pcm",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -754,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "collector-providers"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "collector-app",
  "collector-core",
@@ -767,6 +769,7 @@ dependencies = [
  "junk-libs-dat",
  "junk-libs-disc",
  "junk-libs-music",
+ "junk-libs-pcm",
  "libc",
  "reqwest",
  "serde",
@@ -779,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "collector-server"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "anyhow",
  "axum",
@@ -823,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "collector-store"
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.15"
 dependencies = [
  "anyhow",
  "argon2",
@@ -835,8 +838,10 @@ dependencies = [
  "fs2",
  "hex",
  "image",
+ "junk-libs-audio 0.1.0 (git+https://github.com/AberrantWolf/junk-libs?rev=317517c430744e4f1196e30850b37b3f13c10560)",
  "junk-libs-core",
  "junk-libs-disc",
+ "junk-libs-pcm",
  "rand 0.8.8",
  "rusqlite",
  "serde",
@@ -1908,6 +1913,22 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "url",
+]
+
+[[package]]
+name = "junk-libs-pcm"
+version = "0.1.0-beta.15"
+dependencies = [
+ "chromaprint-next",
+ "claxon",
+ "encoding_rs",
+ "junk-libs-audio 0.1.0 (git+https://github.com/AberrantWolf/junk-libs?rev=317517c430744e4f1196e30850b37b3f13c10560)",
+ "junk-libs-core",
+ "junk-libs-disc",
+ "junk-libs-music",
+ "sha2 0.10.9",
+ "symphonia-core",
+ "symphonia-metadata",
 ]
 
 [[package]]

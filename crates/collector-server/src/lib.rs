@@ -83,6 +83,7 @@ pub struct AppState {
     pub rate_limits: Arc<RateLimits>,
     artwork_preview_slots: Arc<tokio::sync::Semaphore>,
     catalog_upload_slots: Arc<tokio::sync::Semaphore>,
+    music_export_slots: Arc<tokio::sync::Semaphore>,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -112,6 +113,7 @@ impl AppState {
             rate_limits: Arc::new(RateLimits::default()),
             artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             catalog_upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            music_export_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             passkeys: passkeys::Configuration::Disabled(passkeys::UnavailableReason::NotConfigured),
         }
     }
@@ -689,6 +691,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(music_track_availability))
         .routes(routes!(music_album_coverage))
         .routes(routes!(media))
+        .routes(routes!(music_flac_export))
 }
 
 fn curation_api_router() -> OpenApiRouter<AppState> {
@@ -2690,6 +2693,88 @@ async fn media(
     })
     .await?;
     file_response(resource, headers, method != Method::HEAD).await
+}
+
+struct LeasedExportReader {
+    reader: Box<dyn collector_app::MediaReader>,
+    _slot: tokio::sync::OwnedSemaphorePermit,
+}
+impl std::io::Read for LeasedExportReader {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(bytes)
+    }
+}
+impl std::io::Seek for LeasedExportReader {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.reader.seek(position)
+    }
+}
+struct CancelExport(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for CancelExport {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+#[utoipa::path(get,path="/api/v1/items/{id}/music-exports/{source}/{track}",params(("id"=ItemId,Path),("source"=RepresentationId,Path),("track"=u16,Path)),responses((status=200,content_type="audio/flac"),(status=403),(status=404),(status=409),(status=503)))]
+async fn music_flac_export(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((item, source, position)): Path<(ItemId, RepresentationId, u16)>,
+) -> ApiResult<Response> {
+    if !state.direct_media && !state.remote_media_allowed {
+        return Err(
+            Error::Unavailable("Local media access is required for this download".into()).into(),
+        );
+    }
+    let actor = principal(&state, &headers)?;
+    let slot = state
+        .music_export_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Error::Unavailable("FLAC downloads are busy; try again shortly".into()))?;
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _cancel = CancelExport(flag.clone());
+    let resource = blocking(move || {
+        let mut resource =
+            state
+                .service
+                .export_music_flac(&actor, item, source, position, &mut || {
+                    if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        Err(Error::JobCancelled)
+                    } else {
+                        Ok(())
+                    }
+                })?;
+        resource.reader = Box::new(LeasedExportReader {
+            reader: resource.reader,
+            _slot: slot,
+        });
+        Ok(resource)
+    })
+    .await?;
+    let filename = resource
+        .download_name
+        .as_bytes()
+        .iter()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-_.".contains(b) {
+                (*b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect::<String>();
+    let mut response = file_response(resource, headers, true).await?;
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename*=UTF-8''{filename}"))
+            .map_err(|_| Error::Invalid("Invalid export filename".into()))?,
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    Ok(response)
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/music-tracks", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MusicTrackAvailability>), (status = 403), (status = 404)))]

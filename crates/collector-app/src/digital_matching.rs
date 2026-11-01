@@ -37,7 +37,7 @@ impl FrozenDigitalMatching {
             || self.tracks.len() > junk_libs_music::MAX_TRACKS
         {
             return Err(Error::Invalid(
-                "choose an album with 1..=256 shared FLAC/MP3 tracks".into(),
+                "choose an album with 1..=256 shared supported digital tracks".into(),
             ));
         }
         for source in &self.sources {

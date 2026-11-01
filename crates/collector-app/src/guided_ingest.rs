@@ -360,7 +360,12 @@ impl CollectionService {
             let (preparation_available, preparation_reason) = if eligibility.owner.0
                 == "org.junk.music"
             {
-                if file_audio {
+                if file_audio
+                    && !package
+                        .files
+                        .iter()
+                        .any(|file| file.name.to_ascii_lowercase().ends_with(".wav"))
+                {
                     (false, Some("Purchased audio plays directly after import; preparation is unnecessary.".into()))
                 } else if analysis_blocked {
                     (

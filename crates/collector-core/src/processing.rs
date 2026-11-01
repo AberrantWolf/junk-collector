@@ -756,11 +756,15 @@ impl ConversionRecipe {
         match &self.settings {
             ConversionSettings::Flac { .. }
                 if self.encoder != "flac"
-                    || self.input_format != PcmSampleFormat::CDDA_I16_LE_STEREO
-                    || self.output_format != PcmSampleFormat::CDDA_I16_LE_STEREO =>
+                    || self.input_format != self.output_format
+                    || !matches!(self.input_format.channels, 1 | 2)
+                    || !matches!(self.input_format.bits_per_sample, 16 | 24)
+                    || !(8000..=192000).contains(&self.input_format.sample_rate)
+                    || !self.input_format.signed
+                    || !self.input_format.little_endian =>
             {
                 return Err(Error::Invalid(
-                    "FLAC recipe must use flac with unchanged CD-DA integer PCM".into(),
+                    "FLAC recipe must preserve supported integer PCM".into(),
                 ));
             }
             ConversionSettings::Opus { .. }

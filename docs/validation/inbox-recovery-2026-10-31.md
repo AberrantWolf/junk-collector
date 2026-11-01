@@ -1,5 +1,9 @@
 # Inbox connector recovery and review corrections — 2026-10-31
 
+Deployment follow-up: reviewed source `0bec4af` is installed on Fi with the existing
+Bridge profile and paused connection preserved; see [deployment evidence](fi-inbox-recovery-deployment-2026-10-31.md).
+The predeployment record below retains its original qualification scope.
+
 Source delivery in the working tree based on `56b6618`; includes the earlier
 [folder editing](mail-folder-editing-2026-10-31.md) change. No deployment, production
 mail access, or release-image qualification was performed.

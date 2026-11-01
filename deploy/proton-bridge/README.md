@@ -2,6 +2,12 @@
 
 ## Current Fi installation — 2026-10-31
 
+The reviewed inbox recovery update (`0bec4af`) is installed. Its existing Bridge
+profile/credentials and paused connection/cursor are retained; Bridge's image and
+home were not replaced. Connected profiles now offer **Edit scanned folders**,
+**Rescan configured folders**, and **Revalidate Bridge connection**. See
+[deployment and preservation evidence](../../docs/validation/fi-inbox-recovery-deployment-2026-10-31.md).
+
 The merged implementation is installed on **Fi**, alongside Proton Bridge 3.18.0
 in the existing `junk-collector` Compose stack. Collector private state, Bridge
 home and the mail profile are on Fi's local SSD; the archive remains on FatChocobo
@@ -59,8 +65,9 @@ Fi's guarded systemd unit owns lifecycle, including Bridge. Mail data is under
 for complete paired recovery points. The installed
 operator helper is `/opt/junk-collector-beta14/scripts/fi-mail.py`; its wrapper is
 `/home/link/bin/collector-mail`. Check state with its `status` command over `ssh -t`.
-Account login, authenticated restart persistence and actual mailbox/read-only
-history acceptance still need your local test. The original isolated build/setup
+The existing logged-in Bridge resumed syncing after the qualified update.
+Actual personal receipt calibration and archived-folder coverage remain operator
+acceptance; the saved connection remains paused. The original isolated build/setup
 procedure below remains useful for another installation.
 
 ## Verified feasibility and remaining qualification

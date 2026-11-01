@@ -1,13 +1,47 @@
-## Active: deploy reviewed inbox recovery to Fi — 2026-10-31
+## Active: beta.15 publication and Fi update — 2026-11-01
 
-User authorizes deploying the reviewed folder editing/inbox recovery candidate,
-preserving the existing Bridge connection, private profile/credentials, scan cursors,
-suggestions and accepted purchase history. Build one release-mode deployment image
-from committed source, qualify those exact bytes with disposable state, retain a
-complete stopped-writer Fi/NAS recovery pair, then update the retained stack.
-Keep Bridge's image/home and unrelated services unchanged. Record before/cutoff/
-after state without printing credentials or messages, verify persisted history and
-working runtime/assets, and update delivery/status/evidence together.
+User authorizes committing and pushing the complete candidate since beta.14,
+cutting beta.15 and installing its validated release image on Fi. Include the
+private purchase inbox/Bridge work, WAV digital-release support and all intervening
+fixes. Validate the complete release scope through the existing multi-platform
+container workflow. Preserve the Fi/NAS recovery pair, identity/configuration,
+accounts, archive/imports, Jobs, Bridge profiles and unrelated services. Update core
+and media with the same qualified immutable image; retain current topology.
+
+## WAV digital-release completion — delivered in source, 2026-11-01
+
+All four user-selected support gaps are implemented: bounded WAV INFO/ID3 metadata
+and artwork, direct PCM audio matching honoring excluded alternates, portable FLAC
+downloads with accepted metadata/artwork, and in-place analysis/enrichment of
+retained digital packages. Exact originals/listening media, manual authority,
+private-source redaction and physical inventory are preserved. Existing durable
+processing/provider/publication effects own the workflow; exports use authorized,
+bounded temporary scratch. Beta.15 publication/deployment is now authorized above. See
+[completion and acceptance](validation/wav-digital-completion-2026-11-01.md).
+
+## WAV digital originals — delivered in source, 2026-10-31
+
+User-selected addition to the digital-original pipeline: strict integer PCM WAV
+intake, exact original retention and native-format FLAC preparation through existing
+album/track Jobs. Mixed MP3/FLAC originals remain direct and are not reencoded.
+Workspace/Clippy, all 30 browser journeys and 13 native consumer tests passed.
+The complete delivery, supported format boundary and validation are recorded in
+[WAV delivery](validation/wav-digital-originals-2026-10-31.md). Float/multichannel WAV,
+RF64 and continuous-image splitting remain broader codec/layout work under HL-13.
+The completion above delivers tags, artwork and fingerprint matching. Publication
+and Fi deployment are authorized by the active assignment above. Independent active
+assignments below retain their scope and authorization.
+
+## Reviewed inbox recovery installed on Fi — 2026-10-31
+
+Signed source `0bec4af` is pushed to main and installed as a single qualified
+release-mode core/media image. Exact-image old-profile/history upgrade and browser
+acceptance pass. A complete stopped-writer Fi/NAS recovery pair is retained. The
+saved Bridge profile/credentials, paused connection, revision/cursor and existing
+receipt state are unchanged; Bridge's image/home and seven unrelated containers
+are retained. Public health and served bytes pass. See
+[deployment and preservation evidence](validation/fi-inbox-recovery-deployment-2026-10-31.md).
+No new registry release or tag was published. Independent active work remains below.
 
 ## Inbox connector recovery and review corrections — delivered, 2026-10-31
 

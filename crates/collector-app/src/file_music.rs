@@ -81,6 +81,27 @@ impl CollectionService {
             .processing
             .metadata_authority(item.collection_id, item.id)?;
         let edits = file_track_overrides(item, authority.as_ref())?;
+        let active = self.jobs.active_derivative_jobs(capture.id)?;
+        let fingerprint = self
+            .processing
+            .recorded_source(item.collection_id, PackageScope::Representation(source.id))?;
+        let can_write = self
+            .content_write_eligibility_for_job(user, Some(item.collection_id), Some(item.id))
+            .is_ok();
+        let mut retained = Vec::new();
+        for representation in capture
+            .representations
+            .iter()
+            .filter(|r| r.source == Some(source.id) && r.profile == Some(ConversionProfile::Flac))
+        {
+            match self.processing.recipe(RecipeId(representation.id.0)) {
+                Ok(recipe) if recipe.source_fingerprint == fingerprint => {
+                    retained.push((representation, recipe))
+                }
+                Ok(_) | Err(Error::NotFound) => {}
+                Err(error) => return Err(error),
+            }
+        }
         let mut rows = Vec::new();
         for track in &manifest.tracks {
             let edit = edits.iter().find(|edit| {
@@ -123,6 +144,62 @@ impl CollectionService {
                 None if alternate => collector_api_types::MusicAlbumSelection::NeedsReview,
                 None => collector_api_types::MusicAlbumSelection::Included,
             };
+            let wav = audio.codec == "wav";
+            let encoder = self.encoder_availability(&ConversionProfile::Flac);
+            let can_prepare =
+                wav && can_write && matches!(encoder, EncoderAvailability::Available { .. });
+            let coordinate = ConversionTrack {
+                position: track.position,
+                start: PcmFrame(0),
+                length: PcmFrame(audio.decoded_frames.ok_or(Error::Conflict)?),
+            };
+            let published = retained
+                .iter()
+                .find(|(_, recipe)| recipe.tracks.as_slice() == [coordinate.clone()]);
+            let state = if wav {
+                if let Some((representation, _)) = published {
+                    let output = representation.files.first().ok_or(Error::Conflict)?;
+                    let inventory = self.processing.package_inventory(
+                        item.collection_id,
+                        PackageScope::Representation(representation.id),
+                    )?;
+                    MusicTrackAvailabilityState::Available {
+                        representation_id: representation.id,
+                        file_id: inventory.files.first().ok_or(Error::Conflict)?.id,
+                        file_index: 0,
+                        length: output.bytes,
+                        media_type: "audio/flac".into(),
+                        digest: output.digest.clone(),
+                    }
+                } else if active.iter().any(|job| {
+                    job.input.recipe.source_fingerprint == fingerprint
+                        && job.input.recipe.tracks.as_slice() == [coordinate.clone()]
+                        && matches!(job.input.recipe.settings, ConversionSettings::Flac { .. })
+                }) {
+                    MusicTrackAvailabilityState::Preparing
+                } else {
+                    MusicTrackAvailabilityState::Unavailable {
+                        reason: match encoder {
+                            EncoderAvailability::Unavailable { reason } => reason,
+                            _ => "Prepare FLAC to listen to this WAV original.".into(),
+                        },
+                    }
+                }
+            } else {
+                MusicTrackAvailabilityState::Available {
+                    representation_id: source.id,
+                    file_id: track.file_id,
+                    file_index: track.file_index,
+                    length: file.bytes,
+                    media_type: if audio.codec == "flac" {
+                        "audio/flac"
+                    } else {
+                        "audio/mpeg"
+                    }
+                    .into(),
+                    digest: file.digest.clone(),
+                }
+            };
             rows.push(MusicTrackAvailability {
                 album_selection,
                 display_position: edit.and_then(|e| e.display_position).or_else(|| {
@@ -131,7 +208,11 @@ impl CollectionService {
                         .and_then(|value| value.split('/').next()?.parse().ok())
                 }),
                 audio_format: Some(collector_api_types::MusicAudioFormat {
-                    codec: audio.codec.clone(),
+                    codec: if wav {
+                        "flac".into()
+                    } else {
+                        audio.codec.clone()
+                    },
                     sample_rate: audio.sample_rate,
                     channels: audio.channels,
                     bits_per_sample: audio.bits_per_sample,
@@ -150,21 +231,9 @@ impl CollectionService {
                 start_frame: PcmFrame(0),
                 frame_count: PcmFrame(audio.decoded_frames.ok_or(Error::Conflict)?),
                 title,
-                profile: None,
-                can_prepare: false,
-                state: MusicTrackAvailabilityState::Available {
-                    representation_id: source.id,
-                    file_id: track.file_id,
-                    file_index: track.file_index,
-                    length: file.bytes,
-                    media_type: if audio.codec == "flac" {
-                        "audio/flac"
-                    } else {
-                        "audio/mpeg"
-                    }
-                    .into(),
-                    digest: file.digest.clone(),
-                },
+                profile: wav.then_some(ConversionProfile::Flac),
+                can_prepare,
+                state,
             });
         }
         Ok(rows)
@@ -180,15 +249,37 @@ impl CollectionService {
         record: &ImportRecord,
         item: &Item,
     ) -> Result<bool> {
-        let Some(manifest) =
-            self.recorded_file_tracks(item.collection_id, record.view.representation_id)?
-        else {
+        self.apply_file_source_metadata(
+            &FileMetadataContext {
+                user_id: intent.user_id,
+                source: record.view.representation_id,
+                capture: record.view.capture_id,
+                token: intent.import_id.to_string(),
+                owner: ItemEffectSource::GuidedImport(intent.import_id),
+                created_at: intent.created_at,
+                job: None,
+            },
+            item,
+            None,
+        )
+    }
+    fn apply_file_source_metadata(
+        &self,
+        context: &FileMetadataContext,
+        item: &Item,
+        manifest: Option<FileTrackManifest>,
+    ) -> Result<bool> {
+        let resolved = match manifest {
+            Some(manifest) => Some(manifest),
+            None => self.recorded_file_tracks(item.collection_id, context.source)?,
+        };
+        let Some(manifest) = resolved else {
             return Ok(false);
         };
         let observation_id = ObservationId(deterministic_inventory_uuid(
-            intent.user_id,
+            context.user_id,
             "file-tags",
-            &intent.import_id.to_string(),
+            &context.token,
         ));
         if self
             .processing
@@ -196,14 +287,14 @@ impl CollectionService {
         {
             return Ok(true);
         }
-        let capture = self.reader.capture(record.view.capture_id)?;
-        if capture.association.item_id != Some(item.id) || item.deleted || intent.cancelled {
+        let capture = self.reader.capture(context.capture)?;
+        if capture.association.item_id != Some(item.id) || item.deleted {
             return Err(Error::Conflict);
         }
         let source = capture
             .representations
             .iter()
-            .find(|r| r.id == record.view.representation_id)
+            .find(|r| r.id == context.source)
             .ok_or(Error::Conflict)?;
         let public_tracks = manifest
             .tracks
@@ -252,7 +343,8 @@ impl CollectionService {
                     member.id,
                 )?,
                 imports: self.provisional_imports.clone(),
-                import_id: intent.import_id,
+                jobs: self.jobs.clone(),
+                owner: context.owner,
                 read_bytes: 0,
             };
             let mut bytes = Vec::new();
@@ -264,7 +356,7 @@ impl CollectionService {
             if bytes.len() as u64 != file.bytes.0 || Digest::sha256(&bytes) != file.digest {
                 return Err(Error::Conflict);
             }
-            artwork = Some(self.publish_file_cover(intent, item, source.id, index, &bytes)?);
+            artwork = self.publish_file_cover(context, item, source.id, index, &bytes)?;
             break;
         }
         if artwork.is_none()
@@ -276,7 +368,7 @@ impl CollectionService {
                 .package_inventory(item.collection_id, scope)?;
             let expected = self.processing.recorded_source(item.collection_id, scope)?;
             let checkpoint =
-                || self.check_file_enrichment(intent.import_id, item.id, item.lifecycle.generation);
+                || self.check_file_enrichment(context, item.id, item.lifecycle.generation);
             if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())? != expected {
                 return Err(Error::Conflict);
             }
@@ -289,30 +381,36 @@ impl CollectionService {
                     .processing
                     .package_file(item.collection_id, scope, member.id)?,
                 imports: self.provisional_imports.clone(),
-                import_id: intent.import_id,
+                jobs: self.jobs.clone(),
+                owner: context.owner,
                 read_bytes: 0,
             };
-            let decoder = junk_libs_audio::AudioDecoder::open(junk_libs_audio::ByteSource::new(
-                reader,
-                junk_libs_audio::MediaHint::new(
-                    Some(member.bytes.0),
-                    member.display_name.as_str().rsplit('.').next(),
-                    None,
-                ),
-            ))
-            .map_err(|e| Error::Unavailable(e.to_string()))?;
+            let info = if track.audio.codec == "wav" {
+                junk_libs_pcm::WavReader::open(reader, &mut || {
+                    checkpoint().map_err(std::io::Error::other)
+                })
+                .map_err(|e| Error::Unavailable(e.to_string()))?
+                .metadata
+            } else {
+                let decoder =
+                    junk_libs_audio::AudioDecoder::open(junk_libs_audio::ByteSource::new(
+                        reader,
+                        junk_libs_audio::MediaHint::new(
+                            Some(member.bytes.0),
+                            member.display_name.as_str().rsplit('.').next(),
+                            None,
+                        ),
+                    ))
+                    .map_err(|e| Error::Unavailable(e.to_string()))?;
+                decoder.inspection
+            };
             checkpoint()?;
             if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())? != expected {
                 return Err(Error::Conflict);
             }
-            if let Some((_, bytes)) = decoder.inspection.pictures.first() {
-                artwork = Some(self.publish_file_cover(
-                    intent,
-                    item,
-                    source.id,
-                    track.file_index,
-                    bytes,
-                )?);
+            if let Some((_, bytes)) = info.pictures.first() {
+                artwork =
+                    self.publish_file_cover(context, item, source.id, track.file_index, bytes)?;
             }
         }
         let shared_files = source
@@ -338,29 +436,49 @@ impl CollectionService {
             .metadata_authority(item.collection_id, item.id)?
             .map_or(Revision(0), |r| r.revision);
         let command = RefreshMetadataCommand {
-            source_import: Some(intent.import_id),
+            source_import: match context.owner {
+                ItemEffectSource::GuidedImport(id) => Some(id),
+                _ => None,
+            },
             expected_revision: revision,
             observation: MetadataRefreshObservation {
                 id: observation_id,
                 outcome: MetadataRefreshOutcome::Candidates,
                 candidates: vec![candidate],
                 raw_observation: RawJson::from_value(
-                    serde_json::json!({"import_id": intent.import_id, "source_representation_id": source.id}),
+                    serde_json::json!({"source_operation": context.token, "source_representation_id": source.id}),
                 ),
-                observed_at: intent.created_at,
+                observed_at: context.created_at,
             },
         };
         let actor = Principal {
-            user_id: intent.user_id,
+            user_id: context.user_id,
             administrator: false,
             device_id: None,
         };
-        self.refresh_metadata(
-            &actor,
-            item.id,
-            command,
-            &CommandContext::new(format!("file-tags-{}", intent.import_id))?,
-        )?;
+        self.check_file_enrichment(context, item.id, item.lifecycle.generation)?;
+        if let Some(claim) = &context.job {
+            let eligibility = self.content_write_eligibility_for_job(
+                context.user_id,
+                Some(item.collection_id),
+                Some(item.id),
+            )?;
+            self.refresh_metadata_effect(
+                item,
+                &eligibility.owner,
+                &command,
+                &self.metadata_language(context.user_id)?,
+                Some(claim),
+                self.processing.as_ref(),
+            )?;
+        } else {
+            self.refresh_metadata(
+                &actor,
+                item.id,
+                command,
+                &CommandContext::new(format!("file-tags-{}", context.token))?,
+            )?;
+        }
         Ok(true)
     }
 }
@@ -449,95 +567,210 @@ pub fn file_music_search_projection(
     Ok(songs.into_values().collect())
 }
 
+struct FileMetadataContext {
+    user_id: UserId,
+    source: RepresentationId,
+    capture: CaptureId,
+    token: String,
+    owner: ItemEffectSource,
+    created_at: chrono::DateTime<Utc>,
+    job: Option<JobClaim>,
+}
+fn check_metadata_owner(
+    imports: &dyn ProvisionalImportPort,
+    jobs: &dyn JobPort,
+    owner: ItemEffectSource,
+) -> Result<()> {
+    let cancelled = match owner {
+        ItemEffectSource::GuidedImport(id) => imports
+            .guided_ingest_intent(id)?
+            .is_none_or(|i| i.cancelled),
+        ItemEffectSource::Job { id, claim } => {
+            jobs.cancellation_requested(id, &claim.to_string())?
+        }
+        _ => {
+            return Err(Error::Invalid(
+                "File metadata requires durable request ownership".into(),
+            ));
+        }
+    };
+    if cancelled {
+        return Err(Error::JobCancelled);
+    }
+    Ok(())
+}
 impl CollectionService {
-    fn check_file_enrichment(&self, import: ImportId, item: ItemId, generation: u64) -> Result<()> {
-        let intent = self
-            .provisional_imports
-            .guided_ingest_intent(import)?
-            .ok_or(Error::NotFound)?;
+    fn check_file_enrichment(
+        &self,
+        context: &FileMetadataContext,
+        item: ItemId,
+        generation: u64,
+    ) -> Result<()> {
+        check_metadata_owner(
+            self.provisional_imports.as_ref(),
+            self.jobs.as_ref(),
+            context.owner,
+        )?;
         let current = self.reader.item(item)?;
-        if intent.cancelled || current.deleted || current.lifecycle.generation != generation {
+        if current.deleted || current.lifecycle.generation != generation {
             return Err(Error::JobCancelled);
         }
-        self.content_write_eligibility_for_user(intent.user_id, current.collection_id)?;
+        self.content_write_eligibility_for_job(
+            context.user_id,
+            Some(current.collection_id),
+            Some(item),
+        )?;
         Ok(())
     }
     fn publish_file_cover(
         &self,
-        intent: &GuidedIngestIntent,
+        owner: &FileMetadataContext,
         item: &Item,
         source: RepresentationId,
         file_index: usize,
         bytes: &[u8],
-    ) -> Result<AssetId> {
+    ) -> Result<Option<AssetId>> {
         validate_asset_upload(&AssetKind::Cover, "Embedded cover", bytes)?;
-        self.check_file_enrichment(intent.import_id, item.id, item.lifecycle.generation)?;
-        let context = CommandContext::new(format!("file-cover-{}", intent.import_id))?;
-        let id = deterministic_new_asset_id(intent.user_id, context.key());
+        self.check_file_enrichment(owner, item.id, item.lifecycle.generation)?;
+        let context = CommandContext::new(format!("file-cover-{}", owner.token))?;
+        let digest = Digest::sha256(bytes);
+        let matches = self
+            .content
+            .asset_states_for_item(item.id)?
+            .into_iter()
+            .filter(|a| {
+                a.asset.subject == AssetSubject::Item { item_id: item.id }
+                    && a.asset.kind == AssetKind::Cover
+                    && a.asset.file.digest == digest
+            })
+            .collect::<Vec<_>>();
+        let existing = matches.iter().find(|a| !a.deleted);
+        if existing.is_none() && !matches.is_empty() {
+            return Ok(None);
+        }
+        let id = if let Some(asset) = existing {
+            asset.asset.id
+        } else {
+            use sha2::{Digest as _, Sha256};
+            let mut hash = Sha256::new();
+            hash.update(b"collector-file-cover-v1");
+            hash.update(item.id.0.as_bytes());
+            hash.update(digest.hex.as_bytes());
+            let mut id = [0u8; 16];
+            id.copy_from_slice(&hash.finalize()[..16]);
+            id[6] = (id[6] & 15) | 0x50;
+            id[8] = (id[8] & 63) | 0x80;
+            AssetId(uuid::Uuid::from_bytes(id))
+        };
         let actor = Principal {
-            user_id: intent.user_id,
+            user_id: owner.user_id,
             administrator: false,
             device_id: None,
         };
-        self.execute_command(
+        let asset = self.execute_command(
             &actor,
             &context,
             "file.cover",
             &(item.id, source, file_index, Digest::sha256(bytes)),
             |effects| {
-                effects.create_asset(
+                effects.materialize_provider_artwork(
                     id,
                     CreateAssetCommand {
                         collection_id: item.collection_id,
                         subject: AssetSubject::Item { item_id: item.id },
                         kind: AssetKind::Cover,
                         visibility: Visibility::Shared,
-                        alt_text: "Cover from purchased original package".into(),
+                        alt_text: "Cover from digital original package".into(),
                     },
                     bytes,
-                    AssetWriteContext::Item(ItemEffectContext {
+                    ItemEffectContext {
                         item_id: item.id,
                         generation: item.lifecycle.generation,
-                        source: ItemEffectSource::GuidedImport(intent.import_id),
-                    }),
+                        source: owner.owner,
+                    },
+                    None,
                 )
             },
         )?;
-        Ok(id)
+        Ok(Some(asset.asset.id))
+    }
+    pub(crate) fn enrich_retained_file_analysis(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenProcessingJob,
+    ) -> Result<()> {
+        if frozen.operation.as_str() != "org.junk.music.import-analysis" {
+            return Ok(());
+        }
+        let PackageScope::Representation(source) = frozen.source else {
+            return Err(Error::Conflict);
+        };
+        let observed = self.processing.processing_record(frozen.observation_id)?;
+        let analysis: MusicImportAnalysisOutput =
+            observed.observation.typed_result.payload.parse()?;
+        let Some(manifest) = analysis.file_tracks else {
+            return Ok(());
+        };
+        let item = self.reader.item(claim.item_id.ok_or(Error::NotFound)?)?;
+        let input: serde_json::Value = frozen.selection.parse()?;
+        if input.get("item_generation").and_then(|n| n.as_u64()) != Some(item.lifecycle.generation)
+        {
+            return Err(Error::Conflict);
+        }
+        let capture = item
+            .captures
+            .iter()
+            .find(|c| {
+                c.association.item_id == Some(item.id)
+                    && c.representations.iter().any(|r| r.id == source)
+            })
+            .ok_or(Error::Conflict)?;
+        self.apply_file_source_metadata(
+            &FileMetadataContext {
+                user_id: claim.user_id,
+                source,
+                capture: capture.id,
+                token: frozen.observation_id.to_string(),
+                owner: ItemEffectSource::Job {
+                    id: claim.id,
+                    claim: claim.claim_token.parse().map_err(|_| Error::Conflict)?,
+                },
+                created_at: frozen.created_at,
+                job: Some(claim.clone()),
+            },
+            &item,
+            Some(manifest),
+        )?;
+        Ok(())
     }
 }
 struct FileMetadataReader {
     reader: Box<dyn MediaReader>,
     imports: Arc<dyn ProvisionalImportPort>,
-    import_id: ImportId,
+    jobs: Arc<dyn JobPort>,
+    owner: ItemEffectSource,
     read_bytes: u64,
 }
 impl Read for FileMetadataReader {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        if self
-            .imports
-            .guided_ingest_intent(self.import_id)
-            .map_err(std::io::Error::other)?
-            .is_none_or(|intent| intent.cancelled)
-        {
-            return Err(std::io::Error::other("file metadata extraction cancelled"));
-        }
+        check_metadata_owner(self.imports.as_ref(), self.jobs.as_ref(), self.owner)
+            .map_err(std::io::Error::other)?;
         if self.read_bytes >= 64 * 1024 * 1024 {
             return Err(std::io::Error::other(
                 "metadata probing read limit exceeded",
             ));
         }
-        let length = buffer
+        let len = buffer
             .len()
             .min((64 * 1024 * 1024 - self.read_bytes) as usize);
-        let count = self.reader.read(&mut buffer[..length])?;
+        let count = self.reader.read(&mut buffer[..len])?;
         self.read_bytes += count as u64;
         Ok(count)
     }
 }
 impl Seek for FileMetadataReader {
-    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.reader.seek(position)
+    fn seek(&mut self, p: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.reader.seek(p)
     }
 }
 

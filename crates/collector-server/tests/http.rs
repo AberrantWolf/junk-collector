@@ -2497,6 +2497,34 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     .unwrap();
     assert_eq!(available[0]["state"]["status"], "available");
     assert_eq!(available[0]["state"]["media_type"], "audio/flac");
+    let export_path = format!(
+        "/api/v1/items/{}/music-exports/{}/1",
+        item.id, published.representation_id
+    );
+    let export_request = || {
+        Request::builder()
+            .uri(&export_path)
+            .header("authorization", format!("Bearer {viewer_token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let first_export = app.clone().oneshot(export_request()).await.unwrap();
+    assert_eq!(first_export.status(), StatusCode::OK);
+    assert!(
+        first_export.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .ends_with(".flac")
+    );
+    let second_export = app.clone().oneshot(export_request()).await.unwrap();
+    assert_eq!(second_export.status(), StatusCode::OK);
+    let busy = app.clone().oneshot(export_request()).await.unwrap();
+    assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
+    drop(first_export);
+    let next_export = app.clone().oneshot(export_request()).await.unwrap();
+    assert_eq!(next_export.status(), StatusCode::OK);
+    drop(second_export);
+    drop(next_export);
     let representation = available[0]["state"]["representation_id"].as_str().unwrap();
     let length = available[0]["state"]["length"].as_u64().unwrap();
     let digest = available[0]["state"]["digest"]["hex"].as_str().unwrap();
@@ -2656,7 +2684,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
     let mut registry = collector_modules::Registry::default();
     registry.register(Box::new(AbsentFixtureModule)).unwrap();
-    let restarted = AppState::new_with_registry(
+    let mut restarted = AppState::new_with_registry(
         reopened.clone(),
         Pairing {
             server_id: reopened.server_id().unwrap(),
@@ -2666,6 +2694,8 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         },
         Arc::new(registry),
     );
+    // The restarted fixture must retain the original fixture's media listener policy.
+    restarted.direct_media = true;
     let restarted = router(restarted);
     let retained = restarted
         .clone()

@@ -71,17 +71,27 @@ pub fn operate(
         host.checkpoint()?;
         if !files::is_audio_name(file.display_name.as_str()) {
             return Err(ModuleError::Invalid(
-                "fingerprints require FLAC/MP3 files".into(),
+                "fingerprints require supported audio files".into(),
             ));
         }
         let reader = host.package_file(access, file.id)?;
-        let audio = junk_libs_music::fingerprint::compute(
-            junk_libs_music_audio_source(reader, file)?,
-            &mut || {
-                host.checkpoint()
-                    .map_err(|_| junk_libs_music::Error::Cancelled)
-            },
-        )
+        let mut checkpoint = || {
+            host.checkpoint()
+                .map_err(|_| junk_libs_music::Error::Cancelled)
+        };
+        let audio = if file
+            .display_name
+            .as_str()
+            .to_ascii_lowercase()
+            .ends_with(".wav")
+        {
+            junk_libs_pcm::fingerprint::compute(reader, &mut checkpoint)
+        } else {
+            junk_libs_music::fingerprint::compute(
+                junk_libs_music_audio_source(reader, file)?,
+                &mut checkpoint,
+            )
+        }
         .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
         tracks.push(DigitalFileFingerprint {
             file_id: file.id,

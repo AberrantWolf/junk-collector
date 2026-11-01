@@ -23,7 +23,7 @@ impl FileTrackManifest {
         for (i, track) in self.tracks.iter().enumerate() {
             if usize::from(track.position) != i + 1
                 || !files.insert(track.file_id)
-                || !matches!(track.audio.codec.as_str(), "flac" | "mp3")
+                || !matches!(track.audio.codec.as_str(), "flac" | "mp3" | "wav")
                 || track.audio.sample_rate == 0
                 || !matches!(track.audio.channels, 1 | 2)
                 || track.audio.decoded_frames.is_none_or(|n| n == 0)
@@ -35,9 +35,11 @@ impl FileTrackManifest {
     }
 }
 pub fn is_audio_name(name: &str) -> bool {
-    name.rsplit('.')
-        .next()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("flac") || ext.eq_ignore_ascii_case("mp3"))
+    name.rsplit('.').next().is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("flac")
+            || ext.eq_ignore_ascii_case("mp3")
+            || ext.eq_ignore_ascii_case("wav")
+    })
 }
 pub fn is_file_package(names: &[PackageFileName]) -> bool {
     !names.iter().any(|n| {
@@ -70,17 +72,36 @@ pub fn analyze_files(
         host.checkpoint()?;
         let reader = host.package_file(access, file.id)?;
         let extension = file.display_name.as_str().rsplit('.').next();
-        let mut audio = junk_libs_audio::inspect_file_audio(
-            junk_libs_audio::ByteSource::new(
-                reader,
-                junk_libs_audio::MediaHint::new(Some(file.bytes.0), extension, None),
-            ),
-            &mut || {
-                host.checkpoint()
-                    .map_err(|_| junk_libs_audio::AudioDecodeError::Cancelled)
-            },
-        )
-        .map_err(|error| ModuleError::FailedOperation(error.to_string()))?;
+        let mut audio = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("wav")) {
+            use junk_libs_pcm::IntegerPcmReader;
+            let mut wav = junk_libs_pcm::WavReader::open(reader, &mut || {
+                host.checkpoint().map_err(std::io::Error::other)
+            })
+            .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
+            let format = wav.format();
+            junk_libs_audio::FileAudioInfo {
+                codec: "wav".into(),
+                sample_rate: format.sample_rate,
+                channels: format.channels,
+                bits_per_sample: Some(u32::from(format.bits)),
+                decoded_frames: Some(wav.total_frames()),
+                tags: std::mem::take(&mut wav.metadata.tags),
+                pictures: std::mem::take(&mut wav.metadata.pictures),
+                ..Default::default()
+            }
+        } else {
+            junk_libs_audio::inspect_file_audio(
+                junk_libs_audio::ByteSource::new(
+                    reader,
+                    junk_libs_audio::MediaHint::new(Some(file.bytes.0), extension, None),
+                ),
+                &mut || {
+                    host.checkpoint()
+                        .map_err(|_| junk_libs_audio::AudioDecodeError::Cancelled)
+                },
+            )
+            .map_err(|error| ModuleError::FailedOperation(error.to_string()))?
+        };
         tag_bytes += audio
             .tags
             .values()
