@@ -1,7 +1,8 @@
 # Inbox audio compatibility — 2026-11-01
 
-User-requested source delivery, reviewed for beta.17 publication and Fi deployment.
-All selected local source checks pass; exact-source release qualification follows.
+User-requested source delivery, published in beta.17 and installed on Fi.
+All selected local and exact-source release checks pass. See
+[publication and deployment](container-beta17-publication-2026-11-01.md).
 
 ## Delivered behavior
 
@@ -135,7 +136,8 @@ preparation); receipts are `/tmp/audio-review-retry-tests.log` and
 `/tmp/audio-review-package-retry.log`. A second review of the complete final
 diff finds no remaining actionable correctness or preservation gaps. The named
 format/timing limitations above remain explicit, rather than successful-looking
-fallbacks. Exact-source release checks and image acceptance remain required.
+fallbacks. Exact-source release checks and image acceptance subsequently passed;
+see the publication record above.
 
 Release scope includes the previously local selector/popup commit `167d14b` since
 beta.16. Its real intake/mobile/keyboard acceptance is included in full source

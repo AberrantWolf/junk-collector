@@ -1,15 +1,17 @@
-## Inbox audio compatibility — beta.17 candidate, 2026-11-01
+## Inbox audio compatibility — beta.17 published and installed on Fi, 2026-11-01
 
 Checked zero-padded PCM WAV headers, bounded APEv2 MP3 metadata/artwork and the
 upstream empty-channel decoder correction are implemented. Failed digital
 identification retries after preservation/restart without republishing originals;
 requested automatic FLAC preparation resumes. Direct inbox qualification passes
 547 MP3s and 736 WAVs; 12 WAVs with contradictory declared boundaries remain
-explicit failures. Full selected checks pass: 600 Rust tests, strict Clippy,
-web checks/build/models and all 30 browser journeys. No inbox fixtures were added.
-Shared fixes are merged/pushed to junk-libs main. Beta.17 release qualification
-and Fi deployment are authorized and in progress. See
-[delivery evidence](validation/audio-compatibility-2026-11-01.md).
+explicit failures. Exact-source full checks pass: 601 Linux Rust tests, strict
+Clippy, web checks/build/models and all 30 browser journeys, plus both native
+release-image jobs. No inbox fixtures were added. Shared fixes are merged/pushed
+to junk-libs main. Beta.17 is published and installed on Fi with a complete
+stopped-writer recovery pair and retained state/identity. See
+[source evidence](validation/audio-compatibility-2026-11-01.md) and
+[publication/deployment evidence](validation/container-beta17-publication-2026-11-01.md).
 
 ## Import source selector cleanup — source delivery, 2026-11-01
 
@@ -25,7 +27,7 @@ and returns focus to the package button. Background processing continues.
 Disclosure summaries participate in keyboard focus wrapping, and unsaved destination
 changes trigger the shared discard confirmation on Close or Escape.
 See [delivery and validation](validation/import-source-selectors-2026-11-01.md).
-This is local source work; no publication or deployment is included.
+Included in beta.17 and installed on Fi; see the publication record above.
 
 ## Beta.16 published and installed on Fi — 2026-11-01
 
