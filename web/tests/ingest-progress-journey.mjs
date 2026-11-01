@@ -38,8 +38,56 @@ export async function ingestProgressJourney(page,{scratch,holdProvider,collectio
   assert.ok(rows.some(m=>m.import?.work.some(w=>w.state==='running')));
   assert.ok(rows.some(m=>m.import?.work.some(w=>w.state==='queued')));
   await page.screenshot({path:path.join(scratch,'ingest-activity-desktop.png'),fullPage:true});
-  await imports.getByRole('button',{name:'Review import',exact:true}).first().click();
-  await expect(imports.getByText('Copy files from inbox',{exact:true})).toBeVisible();
+  const reviewButtons=imports.getByRole('button',{name:'Review import',exact:true});
+  const review=imports.getByRole('dialog',{name:'Import review',exact:true});
+  const closeReview=review.getByRole('button',{name:'Close import review',exact:true});
+  await reviewButtons.first().click();
+  await expect(closeReview).toBeFocused();await expect(closeReview).toBeInViewport();
+  await expect(review.getByText(`Details: ${names[0]}`,{exact:true})).toBeVisible();
+  await expect(review.getByText('Copy files from inbox',{exact:true})).toBeVisible();
+  await page.screenshot({path:path.join(scratch,'active-import-review-desktop.png')});
+  const correction=review.getByText('Correct destination',{exact:true});
+  await expect(correction).toBeVisible({timeout:60000});
+  await closeReview.focus();await page.keyboard.press('Shift+Tab');await expect(correction).toBeFocused();
+  await page.keyboard.press('Enter');
+  const destination=review.getByRole('region',{name:'Destination entry',exact:true});
+  await destination.getByRole('button',{name:'Leave unattached',exact:true}).click();
+  await expect(review.getByRole('button',{name:'Save destination',exact:true})).toBeVisible();
+  async function confirmDiscard(action,accept){
+   const prompt=page.waitForEvent('dialog',{timeout:5000});const actionDone=action();
+   const dialog=await prompt;assert.match(dialog.message(),/Discard unsaved changes/);
+   if(accept)await dialog.accept();else await dialog.dismiss();await actionDone;
+  }
+  // Both dismissal paths protect the draft, and refusing to discard retains it across polling.
+  await confirmDiscard(()=>closeReview.click(),false);
+  await expect(review).toBeVisible();
+  await page.waitForResponse(response=>response.request().method()==='GET'&&response.url().endsWith(`/ingests/${rows[0].import_id}`));
+  await expect(review.getByRole('button',{name:'Save destination',exact:true})).toBeVisible();
+  await confirmDiscard(()=>page.keyboard.press('Escape'),false);
+  await expect(review.getByRole('button',{name:'Save destination',exact:true})).toBeVisible();
+  await confirmDiscard(()=>closeReview.click(),true);
+  await expect(review).toHaveCount(0);await expect(reviewButtons.first()).toBeFocused();
+  await reviewButtons.first().click();
+  await expect(review.getByText(`Details: ${names[0]}`,{exact:true})).toBeVisible();
+  await review.getByText('Correct destination',{exact:true}).click();
+  await expect(review.getByRole('region',{name:'Destination entry',exact:true}).getByRole('button',{name:'Leave unattached',exact:true})).toBeVisible();
+  await expect(review.getByRole('button',{name:'Save destination',exact:true})).toHaveCount(0);
+  await closeReview.click();await expect(review).toHaveCount(0);await expect(reviewButtons.first()).toBeFocused();
+  await page.setViewportSize({width:390,height:844});
+  await reviewButtons.nth(1).focus();await page.keyboard.press('Enter');
+  await expect(closeReview).toBeFocused();await expect(closeReview).toBeInViewport();
+  await expect(review.getByText(`Details: ${names[1]}`,{exact:true})).toBeVisible();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Import review overflows on mobile');
+  await page.screenshot({path:path.join(scratch,'active-import-review-mobile.png')});
+  // Keyboard focus stays in the popup, and Escape restores the selected package.
+  await closeReview.focus();await page.keyboard.press('Shift+Tab');
+  assert.equal(await review.evaluate(node=>node.contains(document.activeElement)),true,'Focus escaped the review dialog');
+  await page.keyboard.press('Tab');await expect(closeReview).toBeFocused();
+  await page.keyboard.press('Escape');await expect(review).toHaveCount(0);await expect(reviewButtons.nth(1)).toBeFocused();
+  await page.setViewportSize({width:1440,height:1000});
+  await reviewButtons.first().click();await expect(closeReview).toBeFocused();await expect(closeReview).toBeInViewport();
+  await expect(review.getByText(`Details: ${names[0]}`,{exact:true})).toBeVisible();
+  await closeReview.click();await expect(reviewButtons.first()).toBeFocused();
   await page.reload({waitUntil:'domcontentloaded'});
   await expect(imports.getByLabel('Current ingest activity').filter({hasText:/Active.*Find metadata and artwork/}).first()).toBeVisible({timeout:180000});
   await page.setViewportSize({width:390,height:844});

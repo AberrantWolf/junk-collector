@@ -26,7 +26,8 @@ export function useDialogDismiss(onClose:()=>void,enabled=true){
    if(event.key==='Escape'&&(event.target as HTMLElement)?.closest('.info-help')?.querySelector('[aria-expanded="true"]'))return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();latest.current();}
    if(event.key==='Tab'&&element){
-    const controls=[...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(value=>value.getClientRects().length>0);
+    // Collapsed disclosure contents can retain rectangles without being visible.
+    const controls=[...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]')].filter(value=>value.tabIndex>=0&&value.checkVisibility({visibilityProperty:true}));
     const first=controls[0],last=controls.at(-1);
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}

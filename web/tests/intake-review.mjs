@@ -8,7 +8,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {createServer} from 'node:http';
-import {intakeReviewJourney} from './intake-review-journey.mjs';
+import {intakeReviewJourney,inboxSelectorJourney} from './intake-review-journey.mjs';
 import {inboxCleanupJourney} from './inbox-cleanup-journey.mjs';
 import {ingestProgressJourney} from './ingest-progress-journey.mjs';
 import {automaticAlbumGroupingJourney} from './automatic-album-grouping-journey.mjs';
@@ -63,6 +63,7 @@ try{
  await automaticAlbumGroupingJourney(page,{scratch,collectionId:collection,restartServer:async()=>{await stopServer();await startServer();}});
  }else{
  if(!process.env.INGEST_PROGRESS_ONLY){
+ await inboxSelectorJourney(page,{scratch});
  const cleanupFixture=await intakeReviewJourney(page,{scratch,startProviderFixture:()=>{},restartServer:async()=>{await stopServer();await startServer();}});
  await inboxCleanupJourney(page,{...cleanupFixture,scratch,restartServer:async()=>{await stopServer();await startServer();}});
  }

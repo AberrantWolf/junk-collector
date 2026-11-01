@@ -4,6 +4,45 @@
   padding-top: 28px;
 }
 
+.inbox-package-chooser { min-width: 0; margin-block: 16px; }
+.inbox-package-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.inbox-package-toolbar button { padding: 6px 10px; }
+.inbox-package-results {
+  max-height: 22rem;
+  overflow: auto;
+  border-block: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.inbox-package-chooser label.inbox-package-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.inbox-package-chooser .inbox-package-option input {
+  flex: none;
+  width: auto;
+  margin: 0;
+  accent-color: var(--green);
+}
+.inbox-package-option > span { min-width: 0; overflow-wrap: anywhere; }
+.inbox-package-results label + label { border-top: 1px solid var(--line); }
+.inbox-package-results label:hover,
+.inbox-package-results label:has(input:checked) { background: var(--accent); }
+.inbox-package-results label:focus-within { outline: 2px solid var(--green); outline-offset: -2px; }
+.inbox-package-chooser label:has(input:disabled) { cursor: default; opacity: .65; }
+
 .guided-ingest {
   background: color-mix(in srgb, var(--paper) 92%, var(--accent));
   border: 1px solid var(--line);
@@ -257,3 +296,5 @@
 
 .bridge-connect-form .bridge-confirmation { display: flex; align-items: flex-start; gap: .5rem; }
 .bridge-confirmation input { flex: none; margin-top: .25rem; }
+
+.import-review .guided-ingest { margin-bottom: 0; }

@@ -1,3 +1,19 @@
+## Import source selector cleanup — source delivery, 2026-11-01
+
+The shared inbox package chooser aligns folder names beside checkbox/radio controls,
+wraps long names, bounds list scrolling and highlights selected/focused rows. Multiple
+selection adds Select all shown with a native mixed state, shown/selected counts and
+Clear selection. Bulk selection covers loaded search results; More packages does not
+silently select newly loaded rows. Filtering retains earlier selections and clearing
+removes hidden selections too. Single-package imports retain radio selection.
+Review import now opens the selected package in a popup rather than below the
+whole batch. It shows loading/progress, traps keyboard focus, closes with Escape
+and returns focus to the package button. Background processing continues.
+Disclosure summaries participate in keyboard focus wrapping, and unsaved destination
+changes trigger the shared discard confirmation on Close or Escape.
+See [delivery and validation](validation/import-source-selectors-2026-11-01.md).
+This is local source work; no publication or deployment is included.
+
 ## Beta.16 published and installed on Fi — 2026-11-01
 
 Signed source/tag `a6bc202` delivers FLAC/MP3/WAV format-folder discovery and parent

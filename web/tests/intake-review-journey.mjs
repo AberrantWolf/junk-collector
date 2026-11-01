@@ -1,7 +1,44 @@
-import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {expect} from '@playwright/test';
+
+export async function inboxSelectorJourney(page,{scratch}){
+ const names=Array.from({length:52},(_,i)=>`Chooser ${String(i).padStart(2,'0')}${i===0?' '+ 'LongFolderName'.repeat(12):''}`);
+ for(const name of names){const folder=path.join(scratch,'inbox',name);await mkdir(folder);await writeFile(path.join(folder,'note.txt'),'Chooser fixture');}
+ const chooser=page.getByRole('region',{name:'Inbox package chooser'});
+ try{
+  await page.getByRole('combobox',{name:/^Source/}).selectOption('inbox');
+  const rows=chooser.locator('.inbox-package-results input');
+  await expect(rows).toHaveCount(50);
+  const all=chooser.getByRole('checkbox',{name:'Select all shown',exact:true});
+  await all.check();await expect(chooser.getByRole('status')).toContainText('50 selected');
+  await chooser.getByRole('button',{name:'More packages',exact:true}).click();await expect(rows).toHaveCount(52);
+  assert.equal(await all.evaluate(node=>node.indeterminate),true,'Newly loaded rows must not be silently selected');
+  await all.focus();await page.keyboard.press('Space');await expect(chooser.getByRole('status')).toContainText('52 selected');
+  await chooser.getByLabel(names[0],{exact:true}).uncheck();
+  assert.equal(await all.evaluate(node=>node.indeterminate),true);
+  await all.check();await expect(rows.first()).toBeChecked();
+  await chooser.getByLabel('Search inbox packages').fill('Chooser 51');await expect(rows).toHaveCount(1);
+  await all.uncheck();await expect(chooser.getByRole('status')).toContainText('51 selected');
+  await all.check();await expect(chooser.getByRole('status')).toContainText('52 selected');
+  await chooser.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(chooser.getByRole('status')).toContainText('0 selected');
+  await expect(page.getByRole('button',{name:'Review packages',exact:true})).toBeDisabled();
+  await chooser.getByLabel('Search inbox packages').fill('');await expect(rows).toHaveCount(50);
+  for(const [width,height,label] of [[1440,1000,'desktop'],[390,844,'mobile']]){
+   await page.setViewportSize({width,height});await chooser.getByLabel(names[1],{exact:true}).check();
+   const aligned=await chooser.locator('.inbox-package-results label').evaluateAll(labels=>labels.every(label=>{const control=label.querySelector('input').getBoundingClientRect();const text=label.querySelector('span').getBoundingClientRect();return text.left>control.right&&Math.abs((control.top+control.bottom-text.top-text.bottom)/2)<2;}));
+   assert.equal(aligned,true,'Folder names must sit beside and align with their controls');
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Inbox chooser overflows');
+   await chooser.screenshot({path:path.join(scratch,`inbox-selector-${label}.png`)});
+  }
+ }finally{
+  await page.setViewportSize({width:1440,height:1000});
+  for(const name of names)await rm(path.join(scratch,'inbox',name),{recursive:true,force:true});
+  await page.reload({waitUntil:'domcontentloaded'});
+ }
+ console.log('Inbox selector: paginated bulk selection, mixed state, keyboard, filtered selection retention/clear, desktop/mobile alignment and long names passed.');
+}
 
 export async function intakeReviewJourney(page,{scratch,startProviderFixture,restartServer}){
  const nav=page.getByRole('navigation',{name:'Collection tasks'});

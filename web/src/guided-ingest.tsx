@@ -135,10 +135,11 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   if(selected&&selected.revision!==target?.revision)throw new Error('The destination changed. Search for it again and review its current revision before attaching.');
   const value=await request<Detail>(`/ingests/${detail.summary.import_id}/association`,{method:'PUT',body:JSON.stringify({expected_capture_revision:detail.summary.capture_revision,association:{item_id:selected?.id||null,specimen_id:null,component_id:null,carrier_id:null},expected_item_revision:selected?.revision||null})});setDetail(value);targetEdited.current=false;setTarget(selected);setNotice(selected?`Dump attached to ${selected.title}. Other discs are unchanged. Unused automatic placeholders are removed; entries with independent inventory or manual information are kept.`:'Import detached from the entry. Original files are retained.');if(selected)callbacks.current.onPublished(await request<Item>(`/items/${selected.id}`),detail.import.association.item_id||undefined);await open(detail.summary.import_id);
  });}
- return <section className="guided-ingest" data-uploading={!!uploadProgress} aria-labelledby="guided-ingest-heading">
+ return <section className="guided-ingest" data-uploading={!!uploadProgress} data-unsaved={associationChanged} aria-labelledby="guided-ingest-heading">
   <h3 id="guided-ingest-heading">{historyOnly?'Import progress':'Import original files'}</h3>{!historyOnly&&<>
   <p className="muted">Choose a folder of dumps. We find packages in its subfolders, create entries, save the originals, and gather available metadata and artwork.</p>
   </>}
+  {initialImportId&&!detail&&!failure&&<p role="status">Loading import…</p>}
   {failure&&<p role="alert" className="notice error">{failure} Open the import below to resume.</p>}
   {notice&&<p role="status" className="notice">{notice}</p>}
   {queueLabel&&<p><strong>{queueLabel}</strong></p>}
