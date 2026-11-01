@@ -84,6 +84,8 @@ prepared outputs keep their existing identities and 44.1-kHz timeline.
 Browser file/folder selection and configured inboxes use the existing signed
 plan, resumable staging, guided/bulk intents and ordinary publication pipeline.
 Discovery groups disc subfolders and keeps independent nested packages disjoint.
+The format-folder behavior below is published in beta.16 and installed on Fi; see
+[publication/deployment evidence](validation/container-beta16-publication-2026-11-01.md).
 Exact case-insensitive `FLAC`, `MP3` and `WAV` folders use the parent album name,
 including `Album/FLAC/Disc 1` and `Album/Disc 1/FLAC`. Sibling encodings remain
 separate packages with format suffixes in review. Parent covers, booklets and other

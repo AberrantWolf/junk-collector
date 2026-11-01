@@ -1,11 +1,13 @@
-## Beta.16 publication and Fi update — requested 2026-11-01
+## Beta.16 published and installed on Fi — 2026-11-01
 
-The user authorized publishing the format-folder discovery delivery as beta.16
-and updating Fi. Exact-source container validation, registry publication and a
-complete stopped-writer Fi/NAS recovery pair precede activation. Preserve existing
-identity, configuration, archive/private state, Bridge connection/history and
-unrelated services. This entry records the requested scope; completion evidence
-will be recorded after publication and live acceptance.
+Signed source/tag `a6bc202` delivers FLAC/MP3/WAV format-folder discovery and parent
+companion retention. Full source qualification (597 tests passed, five existing
+ignores, all 30 browser journeys) and native AMD64/ARM64 release-image checks pass.
+The published sealed image advances `preview`; stable `latest` is unchanged. Fi
+core/media run those same immutable bytes after a complete stopped-writer Fi/NAS
+recovery pair. Identity, config/TLS, 79 Items, 2,585 Jobs, paused Bridge connection/
+profiles and seven unrelated containers are preserved; public/LAN HTTPS and served
+assets pass. See [publication/deployment evidence](validation/container-beta16-publication-2026-11-01.md).
 
 ## Format-folder digital discovery — source delivery, 2026-11-01
 
@@ -15,8 +17,8 @@ Separate albums, named soundtrack sections and alternate encodings stay disjoint
 common parent companions belong once to a deterministic version. Existing archives
 are unchanged. See [behavior and validation](validation/format-folder-discovery-2026-11-01.md).
 Workspace tests (596 passed, five existing ignores), strict Clippy, web/model
-checks and real Chrome purchase/intake-review journeys pass. This change has not
-been published or deployed.
+checks and real Chrome purchase/intake-review journeys pass. Published in beta.16
+and installed on Fi; see the publication record above.
 
 ## Beta.15 published and installed on Fi — 2026-11-01
 

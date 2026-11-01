@@ -54,4 +54,5 @@ browser fixtures as infrastructure. Manual selection uses the full Rust workspac
 and affected purchase/intake browser journeys above. Unrelated broad browser
 journeys, container/tooling qualification and native sibling tests are omitted:
 there are no packaging, toolchain, shared wire-contract or native client changes.
-No release publication or deployment is part of this request.
+Subsequent publication and Fi deployment were explicitly authorized and completed
+as beta.16; see [release/deployment evidence](container-beta16-publication-2026-11-01.md).
