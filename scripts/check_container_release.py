@@ -101,6 +101,12 @@ class ReleaseTests(unittest.TestCase):
             # The migration runbook must ship with its executable/template dependencies.
             for name in ("compose.remote.yaml", "remote.env.example", "remote-preflight.py", "junk-collector-remote.service"):
                 self.assertEqual((destination/name).read_bytes(), (ROOT/"deploy/container"/name).read_bytes())
+            self.assertEqual((destination/"compose.mail.yaml").read_bytes(), (ROOT/"deploy/container/compose.mail.yaml").read_bytes())
+            for name in ("Dockerfile", "entrypoint.sh", "status.py", "bridge_pubkey.asc", "bridge.pol"):
+                self.assertEqual((destination/"proton-bridge"/name).read_bytes(), (ROOT/"deploy/proton-bridge"/name).read_bytes())
+            self.assertEqual((destination/"scripts/configure_proton_mail.py").read_bytes(), (ROOT/"scripts/configure_proton_mail.py").read_bytes())
+            self.assertIn("proton-bridge/README.md", text)
+            self.assertIn("../README.md", (destination/"proton-bridge/README.md").read_text())
             for document in destination.glob("*.md"):
                 self.assertNotIn("../../docs/", document.read_text(), document.name)
             self.assertIn(expected["source"]+"/blob/"+expected["revision"]+"/docs/validation/remote-archive-safety-2026-10-30.md",

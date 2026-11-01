@@ -362,3 +362,15 @@ The existing direct management port 9844 is unchanged. Public media fallback
 defaults to disabled; keep `remote_media_allowed = false` while the public media
 path is unresolved. Public login/library access remains available. See the
 [configuration and trust contract](../../docs/automatic-private-playback.md).
+
+## Optional private email purchase inbox
+
+The release bundle includes `compose.mail.yaml`, the `proton-bridge/` build context
+and `scripts/configure_proton_mail.py`. Use the bundle's pinned Collector image;
+only the optional Bridge image needs a local build. Bridge packaging currently
+supports Linux AMD64. Follow the [Bridge setup and privacy instructions](../proton-bridge/README.md)
+for local login, persistent private storage, certificate pinning and read-only
+receipt scanning. In a source checkout the same build context is under
+`deploy/proton-bridge`; in the extracted bundle it is `proton-bridge`. The setup
+record also describes Fi's existing installation; do not replace its retained
+configuration or credentials with the fresh-install examples.

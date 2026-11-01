@@ -160,10 +160,23 @@ def bundle(root, expected, record, destination):
     destination.mkdir(parents=True, exist_ok=False)
     names = ("compose.yaml", "compose.inbox.yaml", "compose.media.yaml", "Caddyfile.media", "media.md", "initialize-media.sh", ".env.example", "collector.proxy.toml.example",
              "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py",
-             "compose.remote.yaml", "remote.env.example", "remote-preflight.py",
+             "compose.remote.yaml", "remote.env.example", "remote-preflight.py", "compose.mail.yaml",
              "junk-collector-remote.service", "remote-archive.md")
     for name in names:
         shutil.copyfile(root / "deploy/container" / name, destination / name)
+    # The optional mail override must ship with its independently built Bridge context
+    # and local credential-provisioning helper, not just a link to source files.
+    bridge = destination / "proton-bridge"
+    bridge.mkdir()
+    for name in ("Dockerfile", "entrypoint.sh", "status.py", "bridge_pubkey.asc", "bridge.pol", "README.md"):
+        shutil.copyfile(root / "deploy/proton-bridge" / name, bridge / name)
+    scripts = destination / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(root / "scripts/configure_proton_mail.py", scripts / "configure_proton_mail.py")
+    bridge_readme = bridge / "README.md"
+    bridge_readme.write_text(bridge_readme.read_text()
+        .replace("../container/README.md", "../README.md")
+        .replace("../../docs/", expected["source"] + "/blob/" + expected["revision"] + "/docs/"))
     pinned = record["reference"] if expected["channel"] else "junk-collector:local"
     env = destination / ".env.example"
     env.write_text(env.read_text().replace("COLLECTOR_IMAGE=junk-collector:local", "COLLECTOR_IMAGE=" + pinned))
@@ -184,6 +197,7 @@ def bundle(root, expected, record, destination):
             text = before + published + after
             text = text.replace("Registry publication has not yet\nbeen exercised.",
                                 "This bundle's image passed anonymous pulls and both-platform metadata checks;\nactual Portainer pull/redeploy acceptance is a separate deployment check.")
+        text = text.replace("../proton-bridge/README.md", "proton-bridge/README.md")
         text = text.replace("../../docs/", expected["source"] + "/blob/" + expected["revision"] + "/docs/")
         path.write_text(text)
     (destination / "release-image.json").write_text(json.dumps(record, indent=2) + "\n")
