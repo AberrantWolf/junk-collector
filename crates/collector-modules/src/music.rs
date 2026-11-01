@@ -2,6 +2,7 @@ use crate::disc_audio::{ConversionPcmSource, ConversionPcmTrack};
 use collector_core::PackageFileName;
 pub mod catalog;
 pub mod digital_matching;
+mod discovery;
 pub mod files;
 use catalog::{DbarOutcome, DbarSnapshotObservation, ParsedDbarSnapshot};
 pub use digital_matching::*;
@@ -1999,63 +2000,9 @@ impl CollectionModule for Music {
         &self,
         names: &[PackageFileName],
     ) -> Vec<crate::import_discovery::DiscoveredImportPackage> {
-        let mut packages = crate::import_discovery::discover(names, false);
-        let mut used = packages
-            .iter()
-            .flat_map(|p| p.file_indices.iter().copied())
-            .collect::<std::collections::BTreeSet<_>>();
-        let mut folders = std::collections::BTreeSet::new();
-        for (index, name) in names.iter().enumerate() {
-            if !used.contains(&index) && files::is_audio_name(name.as_str()) {
-                let folder = name.as_str().rsplit_once('/').map_or("", |(dir, _)| dir);
-                // Disc subfolders of a purchase remain one reviewed package.
-                let (parent, leaf) = folder.rsplit_once('/').unwrap_or(("", folder));
-                let lower = leaf.to_ascii_lowercase();
-                let disc = lower
-                    .strip_prefix("disc")
-                    .or_else(|| lower.strip_prefix("cd"))
-                    .map(|suffix| suffix.trim_start_matches([' ', '_', '-']))
-                    .is_some_and(|suffix| {
-                        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
-                    });
-                let folder = if disc { parent } else { folder };
-                folders.insert(folder.to_owned());
-            }
-        }
-        let mut folders = folders.into_iter().collect::<Vec<_>>();
-        folders.sort_by_key(|folder| std::cmp::Reverse(folder.len()));
-        for folder in folders {
-            let prefix = format!("{folder}/");
-            let file_indices = names
-                .iter()
-                .enumerate()
-                .filter(|(i, n)| {
-                    !used.contains(i)
-                        && (if folder.is_empty() {
-                            true
-                        } else {
-                            n.as_str().starts_with(&prefix)
-                        })
-                })
-                .map(|(i, _)| i)
-                .collect::<Vec<_>>();
-            if file_indices
-                .iter()
-                .any(|i| files::is_audio_name(names[*i].as_str()))
-            {
-                used.extend(file_indices.iter().copied());
-                packages.push(crate::import_discovery::DiscoveredImportPackage {
-                    label: if folder.is_empty() {
-                        "Digital purchase".into()
-                    } else {
-                        folder.rsplit('/').next().unwrap().into()
-                    },
-                    file_indices,
-                });
-            }
-        }
-        packages
+        discovery::discover(names)
     }
+
     fn import_readiness(
         &self,
         names: &[PackageFileName],

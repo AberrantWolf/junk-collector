@@ -1,3 +1,20 @@
+## Digital format-folder discovery — 2026-11-01
+
+Music module intake policy owns logical-path grouping in `music/discovery.rs`.
+It consumes names only, before upload; it does not inspect or hash audio. Exact
+case-insensitive FLAC/MP3/WAV wrapper names and numbered Disc/CD folders collapse
+to an album root in either order. Encoding remains a separate group key; named
+soundtrack sections and independently anchored raw-disc packages stay separate.
+The existing application plan, durable bulk discovery, review, visibility defaults
+and publication pipeline consume the unchanged disjoint package contract.
+
+Companions attach to the deepest discovered album root and, where applicable,
+their enclosing format branch. Common parent companions are assigned once in
+stable encoding order (unwrapped tracks first, then FLAC, MP3, WAV), independent
+of input enumeration. This preserves original paths without duplicating file
+ownership or merging alternate encodings. No archived records are regrouped.
+See [delivery and limits](validation/format-folder-discovery-2026-11-01.md).
+
 ## Inbox connector recovery and review corrections — 2026-10-31
 
 Application mail services own review authorization, typed intake health, older-source

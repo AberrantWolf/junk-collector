@@ -1,3 +1,23 @@
+## Beta.16 publication and Fi update — requested 2026-11-01
+
+The user authorized publishing the format-folder discovery delivery as beta.16
+and updating Fi. Exact-source container validation, registry publication and a
+complete stopped-writer Fi/NAS recovery pair precede activation. Preserve existing
+identity, configuration, archive/private state, Bridge connection/history and
+unrelated services. This entry records the requested scope; completion evidence
+will be recorded after publication and live acceptance.
+
+## Format-folder digital discovery — source delivery, 2026-11-01
+
+Digital folder discovery uses parent album names for FLAC/MP3/WAV wrappers,
+retains parent artwork/booklets and groups numbered discs in either wrapper order.
+Separate albums, named soundtrack sections and alternate encodings stay disjoint;
+common parent companions belong once to a deterministic version. Existing archives
+are unchanged. See [behavior and validation](validation/format-folder-discovery-2026-11-01.md).
+Workspace tests (596 passed, five existing ignores), strict Clippy, web/model
+checks and real Chrome purchase/intake-review journeys pass. This change has not
+been published or deployed.
+
 ## Beta.15 publication and Fi update — 2026-11-01
 
 Beta.15 includes the complete Collector change since beta.14: private email purchase

@@ -84,6 +84,17 @@ prepared outputs keep their existing identities and 44.1-kHz timeline.
 Browser file/folder selection and configured inboxes use the existing signed
 plan, resumable staging, guided/bulk intents and ordinary publication pipeline.
 Discovery groups disc subfolders and keeps independent nested packages disjoint.
+Exact case-insensitive `FLAC`, `MP3` and `WAV` folders use the parent album name,
+including `Album/FLAC/Disc 1` and `Album/Disc 1/FLAC`. Sibling encodings remain
+separate packages with format suffixes in review. Parent covers, booklets and other
+companions join the album; nested independent albums/sections keep their own files.
+Files within a format branch stay with that version. Common parent companions are
+included once, with unwrapped tracks if present, otherwise the first format in
+FLAC/MP3/WAV order. Review can attach the other version to the same album if wanted.
+Discovery does not guess decorated names such as `FLAC 24-bit` or arbitrary section
+names. If the selected paths contain no parent album name, the format name remains
+the fallback. Existing archived packages are unchanged. See
+[format-folder discovery acceptance](validation/format-folder-discovery-2026-11-01.md).
 Review exposes destination/group, file order, visibility and private purchase
 facts before admission. Reviewed inbox order/visibility survive rescans; inventory
 changes fail admission/recovery. Submitted purchase inputs and receipts survive

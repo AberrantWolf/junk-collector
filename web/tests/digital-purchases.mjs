@@ -242,5 +242,44 @@ try{
  assert.deepEqual(afterAnalysis.captures,beforeAnalysis.captures);assert.equal(afterAnalysis.primary_artwork,beforeAnalysis.primary_artwork);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:path.join(scratch,'wav-metadata-mobile.png'),fullPage:true});
- assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis and mobile layout. Artifacts: ${scratch}`);
+ // Steam-style format wrappers: real folder discovery, review and publication.
+ const steam=path.join(scratch,'Steam soundtracks');
+ for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3','Game Name OST/Booklet','Other Album/WAV'])await mkdir(path.join(steam,folder),{recursive:true});
+ await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Game Name OST/FLAC/Disc 1/01.flac'));
+ await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Game Name OST/MP3/01.mp3'));
+ await copyFile(wavFile,path.join(steam,'Other Album/WAV/01.wav'));
+ await copyFile(path.join(fixture,'cover.png'),path.join(steam,'Game Name OST/cover.png'));
+ await writeFile(path.join(steam,'Game Name OST/Booklet/booklet.txt'),'PRIVATE STEAM BOOKLET');
+ await page.goto(`${origin}/imports?collection=${collection}`);
+ await imports.getByLabel('Choose folders',{exact:true}).setInputFiles(steam);
+ await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ const packageRows=imports.locator('.intake-review-row');await expect(packageRows).toHaveCount(3);
+ const flacRow=packageRows.filter({has:page.getByText('Game Name OST (FLAC)',{exact:true})});
+ const mp3Row=packageRows.filter({has:page.getByText('Game Name OST (MP3)',{exact:true})});
+ const otherRow=packageRows.filter({has:page.getByText('Other Album',{exact:true})});
+ await expect(flacRow).toHaveCount(1);await expect(mp3Row).toHaveCount(1);await expect(otherRow).toHaveCount(1);
+ await flacRow.getByText('Files and analysis',{exact:true}).click();
+ await expect(flacRow.getByLabel(/Curators only: .*Booklet\/booklet.txt/)).toBeChecked();
+ await expect(flacRow.getByLabel(/Curators only: .*cover.png/)).not.toBeChecked();
+ await expect(mp3Row.getByText(/cover.png/)).toHaveCount(0);
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.screenshot({path:path.join(scratch,'format-discovery-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
+ await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
+ const steamIntake=new URL(page.url()).searchParams.get('item');
+ let steamMembers;
+ await expect.poll(async()=>{steamMembers=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,steamIntake);return steamMembers.filter(m=>m.import?.outcome==='succeeded').length;},{timeout:45000}).toBe(3);
+ assert.equal(new Set(steamMembers.map(m=>m.import.target_item_id)).size,3);
+ const flacMember=steamMembers.find(m=>m.plan.default_title==='Game Name OST (FLAC)');
+ let steamAlbum;
+ await expect.poll(async()=>{steamAlbum=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),flacMember.import.target_item_id);return !!steamAlbum.primary_artwork;},{timeout:45000}).toBe(true);
+ assert.equal(steamAlbum.captures.length,1);assert.equal(steamAlbum.specimens.length,0);
+ const steamFiles=steamAlbum.captures[0].representations[0].files;
+ assert.equal(steamFiles.length,3);
+ assert.ok(steamFiles.some(file=>file.name.endsWith('/Booklet/booklet.txt')&&file.visibility==='curators'));
+ assert.ok(steamFiles.some(file=>file.name.endsWith('/cover.png')&&(file.visibility??'shared')==='shared'));
+ assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');
+ // Immediate Library refresh exposes the newly imported version and its track.
+ await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
+ await tracks.getByText('1. FLAC original',{exact:true}).waitFor();
+ assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery with disjoint encodings/parent companions and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}
