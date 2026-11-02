@@ -13,7 +13,9 @@ claim/revision fenced. Candidate readiness is independent of optional artwork.
 Interactive catalog lock contention is a typed `CatalogBusy` outcome (`503` /
 `catalog_busy` at HTTP). The shared web request adapter retries GET/HEAD up to
 three times with short bounded delays, retaining the submitted account and abort
-signal. Exhausted contention and other failures remain visible. This retry policy
+signal. A revision changing during a read is the same transient outcome; submitted
+command revisions and stale pagination scopes retain their conflict semantics.
+Exhausted contention and other failures remain visible. This retry policy
 does not resubmit mutation commands.
 
 ## Declared WAV segment and trailing originals — 2026-11-02

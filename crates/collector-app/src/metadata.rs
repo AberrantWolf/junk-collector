@@ -908,7 +908,7 @@ impl CollectionService {
             .map(|(view, _)| view.clone());
         if let Some(view) = cached {
             if generation != self.care.metadata_read_clock()? {
-                return Err(Error::Conflict);
+                return Err(Error::CatalogBusy);
             }
             return Ok(view);
         }
@@ -956,7 +956,7 @@ impl CollectionService {
             current_candidates,
         };
         if generation != self.care.metadata_read_clock()? {
-            return Err(Error::Conflict);
+            return Err(Error::CatalogBusy);
         }
         let bytes = serde_json::to_vec(&view)
             .map_err(|e| Error::Storage(e.to_string()))?
@@ -1473,7 +1473,7 @@ impl CollectionService {
             }
         }
         if read_revision != self.metadata_read_revision(actor, item_id)?.revision {
-            return Err(Error::Conflict);
+            return Err(Error::CatalogBusy);
         }
         Ok(MetadataReviewView {
             read_revision,

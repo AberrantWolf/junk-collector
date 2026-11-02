@@ -178,7 +178,7 @@ impl CollectionService {
             items.push(source.entry);
         }
         if revision != self.care.library_revision()? {
-            return Err(Error::Conflict);
+            return Err(Error::CatalogBusy);
         }
         Ok(Page {
             items,

@@ -134,3 +134,23 @@ strict workspace/all-target Clippy, architecture/format and focused actual Chrom
 `integration`, `browse`, `digital-matching` and `storage` journeys. The latest
 compact Metadata page timings are 4 ms and 2 ms locally. Self-review of retry
 bounds, account/cancellation fences and cursor recovery found no further issue.
+
+
+The replacement [Checks run 41475307033](https://github.com/AberrantWolf/junk-collector/actions/runs/41475307033)
+passes the earlier integration failure but reaches a second race while opening
+later albums during the three-album queue test: metadata's before/after read epoch
+changes and is reported as a command-style `revision_conflict`. These read-only
+consistency fences now return `CatalogBusy`, so the bounded read adapter retries
+them. Actual submitted command revisions, metadata authority, role checks and
+stale pagination scopes retain their strict conflict behavior. The digital UI
+journey injects transient snapshot changes while opening each later album as well
+as the initial detail, requiring normal admission and completion afterward.
+Both replacement image gates passed; validation 41475331485 was cancelled after
+its source browser gate failed. No rejected candidate was published or installed.
+
+This read-race repair passes all 30 Store unit tests, four digital-album regressions,
+affected application/Store/server-consumer strict Clippy, architecture/format and
+actual Chrome smoke, digital-matching and metadata-review journeys. Forced transient
+changes while opening all later albums recover and all three requests complete.
+Metadata page requests measured 12 ms and 2 ms locally. Self-review confirms only
+read consistency outcomes changed; mutation and stale-scope fences remain intact.
