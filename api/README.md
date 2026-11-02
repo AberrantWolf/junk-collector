@@ -1,5 +1,11 @@
 # API v1 contract and Wave 1 migration
 
+Player consumers: see [album metadata and artwork](../docs/album-metadata-consumers.md)
+for the authenticated read sequence, artwork IDs/revisions, pending states,
+independent thumbnail loading and failure diagnosis. See
+[layered Library refresh](../docs/layered-library-refresh.md) for pagination and
+lazy track reads.
+
 `openapi.v1.json` is generated from the same annotated route groups used to
 compose the server. `web/src/generated/api.ts` is generated from that document;
 neither file is hand-edited.

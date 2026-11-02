@@ -1,3 +1,19 @@
+## Album artwork consumer flow — source repair, 2026-11-02
+
+A player-only artwork report exposed two Trash Amp orchestration gaps: a failed
+final title refresh skipped artwork for already published rows, and successful
+covers were withheld until the entire batch settled. The isolated native repair
+publishes/persists each cover, retains successes through later failure/cancellation,
+and keeps request errors and source fences intact. Collector's existing
+Asset/revision/thumbnail contract needs no wire change; the new
+[consumer guide](album-metadata-consumers.md) documents correct reads and diagnosis.
+[Validation and limits](validation/album-artwork-consumers-2026-11-02.md) record
+140 passing native tests, strict Clippy and actual macOS refresh/render acceptance.
+Trash Amp main now includes the validated repair at `595710b` (fast-forward from
+`02bf8a8`); the worktree remains at `/private/tmp/trash-amp-album-art`. It is not
+installed. No production update or iPhone qualification is included, and the precise
+live symptom's cause has not been independently confirmed.
+
 ## Beta.18 published and installed on Fi — 2026-11-02
 
 Grouped intake copy setup now precedes the first child publication revision freeze,
