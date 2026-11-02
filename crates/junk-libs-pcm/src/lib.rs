@@ -82,22 +82,22 @@ pub struct WavReader<R> {
     data: u64,
     frames: u64,
     position: u64,
+    trailing_bytes: u64,
     pub metadata: junk_libs_audio::FileAudioInfo,
 }
 impl<R: Read + Seek + Send> WavReader<R> {
-    /// Strict RIFF/WAVE PCM, including WAVE_FORMAT_EXTENSIBLE integer PCM.
+    /// Checked RIFF/WAVE PCM, including WAVE_FORMAT_EXTENSIBLE integer PCM.
+    /// Bytes outside the declared RIFF segment are reported, never interpreted.
     /// Chunk sizes are checked before reads/allocation; metadata is skipped in
     /// bounded seeks, never allocated. The caller supplies cooperative cancellation.
     pub fn open(mut reader: R, checkpoint: &mut dyn FnMut() -> io::Result<()>) -> io::Result<Self> {
         checkpoint()?;
-        let end = reader.seek(SeekFrom::End(0))?;
+        let file_end = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
         let mut header = [0; 12];
         reader.read_exact(&mut header)?;
-        if &header[..4] != b"RIFF"
-            || &header[8..] != b"WAVE"
-            || u64::from(u32::from_le_bytes(header[4..8].try_into().unwrap())) + 8 != end
-        {
+        let end = u64::from(u32::from_le_bytes(header[4..8].try_into().unwrap())) + 8;
+        if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" || end < 12 || end > file_end {
             return Err(invalid("invalid RIFF/WAVE length or signature"));
         }
         let mut format = None;
@@ -238,8 +238,15 @@ impl<R: Read + Seek + Send> WavReader<R> {
             data,
             frames: size / frame_bytes,
             position: 0,
+            trailing_bytes: file_end - end,
             metadata,
         })
+    }
+
+    /// Uninterpreted bytes after the complete declared RIFF segment. These are
+    /// part of the original file, but never part of this reader's PCM or metadata.
+    pub fn trailing_bytes(&self) -> u64 {
+        self.trailing_bytes
     }
 }
 impl<R: Read + Seek + Send> IntegerPcmReader for WavReader<R> {
@@ -379,6 +386,74 @@ mod tests {
             assert_eq!(reader.read_pcm(&mut result).unwrap(), 1);
             assert!(reader.seek_frame(2).is_err());
         }
+    }
+    #[test]
+    fn complete_riff_with_uninterpreted_suffix_keeps_exact_pcm_and_bounds_reads() {
+        struct Bounded {
+            bytes: Cursor<Vec<u8>>,
+            riff_end: u64,
+        }
+        impl Read for Bounded {
+            fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+                assert!(self.bytes.position() + output.len() as u64 <= self.riff_end);
+                self.bytes.read(output)
+            }
+        }
+        impl Seek for Bounded {
+            fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+                self.bytes.seek(position)
+            }
+        }
+        for (channels, bits, pcm) in [(1, 24, vec![0, 0, 128]), (2, 16, vec![0, 128, 255, 127])] {
+            let mut bytes = wave(channels, bits, &pcm);
+            let riff_end = bytes.len() as u64;
+            // Includes an incomplete frame, fake metadata and a second WAV.
+            // None may be visited or used to extend the declared audio.
+            bytes.extend(b"\xffID3\xffLIST\xff");
+            bytes.extend(wave(channels, bits, &pcm));
+            let trailing = bytes.len() as u64 - riff_end;
+            let mut reader = WavReader::open(
+                Bounded {
+                    bytes: Cursor::new(bytes),
+                    riff_end,
+                },
+                &mut || Ok(()),
+            )
+            .unwrap();
+            assert_eq!(reader.trailing_bytes(), trailing);
+            assert!(reader.metadata.tags.is_empty());
+            assert!(reader.metadata.pictures.is_empty());
+            assert_eq!(reader.total_frames(), 1);
+            let mut output = [0; 48];
+            assert_eq!(reader.read_pcm(&mut output).unwrap(), 1);
+            assert_eq!(&output[..pcm.len()], pcm);
+            assert_eq!(reader.read_pcm(&mut output).unwrap(), 0);
+            reader.seek_frame(0).unwrap();
+            assert_eq!(reader.read_pcm(&mut output).unwrap(), 1);
+            assert_eq!(&output[..pcm.len()], pcm);
+            assert!(reader.seek_frame(2).is_err());
+        }
+    }
+    #[test]
+    fn suffix_cannot_complete_or_repair_malformed_declared_riff() {
+        let good = wave(2, 16, &[0; 8]);
+        // All bytes physically exist, but the PCM chunk crosses the RIFF boundary.
+        for declared_end in [0, 8, 11, 12, 36, 43, good.len() - 1, good.len() + 1] {
+            let mut bad = good.clone();
+            bad[4..8].copy_from_slice(&(declared_end as u32).saturating_sub(8).to_le_bytes());
+            bad.extend(b"ID3\0\0\0\0\0");
+            assert!(
+                WavReader::open(Cursor::new(bad), &mut || Ok(())).is_err(),
+                "end {declared_end}"
+            );
+        }
+        let reader = WavReader::open(Cursor::new(good), &mut || Ok(())).unwrap();
+        assert_eq!(reader.trailing_bytes(), 0);
+        // The required pad exists physically, but is outside the declared RIFF.
+        let mut missing_pad = wave(1, 24, &[0, 0, 128]);
+        let declared_end = missing_pad.len() - 1;
+        missing_pad[4..8].copy_from_slice(&((declared_end - 8) as u32).to_le_bytes());
+        assert!(WavReader::open(Cursor::new(missing_pad), &mut || Ok(())).is_err());
     }
     #[test]
     fn padded_pcm_format_keeps_samples_and_refuses_unknown_extensions() {

@@ -134,7 +134,7 @@ pub struct MusicImportAnalysisOutput {
     #[serde(default)]
     pub file_tracks: Option<files::FileTrackManifest>,
     candidates: Vec<serde_json::Value>,
-    limitations: Vec<String>,
+    pub limitations: Vec<String>,
     pub observations: Vec<RawJson>,
     #[serde(default)]
     pub selection: Option<AudioPackageSelection>,
@@ -2336,9 +2336,9 @@ impl CollectionModule for Music {
                     return Ok(OperationOutput {
                         value: RawJson::from_value(
                             serde_json::to_value(MusicImportAnalysisOutput {
+                                limitations: files::limitations(&manifest),
                                 file_tracks: Some(manifest),
                                 candidates: vec![],
-                                limitations: vec![],
                                 observations: vec![],
                                 selection: None,
                             })

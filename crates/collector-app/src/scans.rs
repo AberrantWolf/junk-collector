@@ -517,7 +517,17 @@ impl CollectionService {
             return Err(Error::JobCancelled);
         }
         let (support, payload, limitations) = match operated {
-            Ok(output) => (OperationSupport::Supported, output.value, vec![]),
+            Ok(output) => {
+                let limitations = if frozen.operation.as_str() == "org.junk.music.import-analysis" {
+                    output
+                        .value
+                        .parse::<collector_modules::music::MusicImportAnalysisOutput>()?
+                        .limitations
+                } else {
+                    vec![]
+                };
+                (OperationSupport::Supported, output.value, limitations)
+            }
             Err(ModuleError::UnavailableCapability(reason)) => (
                 OperationSupport::UnavailableDependency {
                     dependency: module.0.clone(),

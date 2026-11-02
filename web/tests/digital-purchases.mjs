@@ -156,7 +156,9 @@ try{
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  // WAV is a digital original; the normal intake option prepares native-format FLAC.
  const wavFile=path.join(scratch,'03.wav');
- await copyFile(path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03.wav'),wavFile);
+ const cleanWav=await readFile(path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03.wav'));
+ const suffixedWav=Buffer.concat([cleanWav,Buffer.from('ID3\xffuninterpreted trailer\xff','latin1')]);
+ await writeFile(wavFile,suffixedWav);
  await page.goto(`${origin}/imports?collection=${collection}`);
  await imports.getByLabel("Choose one package's files").setInputFiles(wavFile);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
@@ -167,10 +169,27 @@ try{
  await page.waitForURL(url=>url.searchParams.has('item'));
  const wavIntake=new URL(page.url()).searchParams.get('item');
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,wavIntake),{timeout:60000}).toBe('completed');
+ await imports.getByRole('button',{name:'Review import',exact:true}).click();
+ const wavReview=page.getByRole('dialog',{name:'Import review',exact:true});
+ await expect(wavReview).toContainText('trailing bytes outside their declared RIFF segment');
+ await page.reload();
+ await imports.getByRole('button',{name:'Review import',exact:true}).click();
+ await expect(wavReview).toContainText('trailing bytes outside their declared RIFF segment');
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.screenshot({path:path.join(scratch,'wav-trailing-warning-mobile.png'),fullPage:true});
+ await wavReview.getByRole('button',{name:'Close import review',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1000});
  const wavItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items[0].import.target_item_id,wavIntake);
  const wavStored=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),wavItem);
  assert.equal(wavStored.specimens.length,0);assert.equal(wavStored.captures[0].purchase.store,'WAV store');
  assert.equal(wavStored.captures[0].representations.length,2);
+ const wavSource=wavStored.captures[0].representations.find(rep=>rep.files.some(file=>file.name==='03.wav'));
+ const originalDigest=await page.evaluate(async ({item,source})=>{
+  const response=await fetch(`/api/v1/items/${item}/representations/${source}/0`);if(!response.ok)throw Error('Original WAV download failed');
+  const bytes=await response.arrayBuffer();return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+ },{item:wavItem,source:wavSource.id});
+ assert.equal(originalDigest,createHash('sha256').update(suffixedWav).digest('hex'));
  const wavRows=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-tracks`)).json()),wavItem);
  assert.equal(wavRows.length,1);assert.equal(wavRows[0].audio_format.sample_rate,96000);
  assert.equal(wavRows[0].audio_format.bits_per_sample,24);assert.equal(wavRows[0].audio_format.channels,1);

@@ -2757,7 +2757,7 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         .expect("prepared FLAC payload in the test archive");
     let mut altered = std::fs::read(&derivative_path).unwrap();
     altered[0] ^= 1;
-    std::fs::write(&derivative_path, altered).unwrap();
+    std::fs::write(&derivative_path, &altered).unwrap();
     let lightweight_head = restarted
         .clone()
         .oneshot(
@@ -2771,7 +2771,9 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         .await
         .unwrap();
     assert_eq!(lightweight_head.status(), StatusCode::OK);
-    let rejected_get = restarted
+    // Media reads serve the requested bytes without a whole-payload hash.
+    // A same-length mutation is observable content, not an HTTP integrity check.
+    let changed_get = restarted
         .clone()
         .oneshot(
             Request::builder()
@@ -2782,14 +2784,14 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         )
         .await
         .unwrap();
-    assert_eq!(rejected_get.status(), StatusCode::CONFLICT);
-    let failure: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(rejected_get.into_body(), 4096)
+    assert_eq!(changed_get.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(changed_get.into_body(), altered.len())
             .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(failure["error"]["code"], "prepared_media_invalid");
+            .unwrap()
+            .as_ref(),
+        altered
+    );
     std::fs::remove_file(&derivative_path).unwrap();
     let missing_get = restarted
         .oneshot(

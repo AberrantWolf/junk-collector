@@ -9,6 +9,12 @@ pub struct FileTrack {
     pub file_id: PackageFileId,
     pub embedded_artwork: bool,
     pub audio: junk_libs_audio::FileAudioInfo,
+    /// Preserved original bytes outside a complete declared RIFF segment.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wav_trailing_bytes: u64,
+}
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileTrackManifest {
@@ -27,6 +33,7 @@ impl FileTrackManifest {
                 || track.audio.sample_rate == 0
                 || !matches!(track.audio.channels, 1 | 2)
                 || track.audio.decoded_frames.is_none_or(|n| n == 0)
+                || (track.wav_trailing_bytes != 0 && track.audio.codec != "wav")
             {
                 return Err(ModuleError::Invalid("invalid file track manifest".into()));
             }
@@ -72,6 +79,7 @@ pub fn analyze_files(
         host.checkpoint()?;
         let reader = host.package_file(access, file.id)?;
         let extension = file.display_name.as_str().rsplit('.').next();
+        let mut wav_trailing_bytes = 0;
         let mut audio = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("wav")) {
             use junk_libs_pcm::IntegerPcmReader;
             let mut wav = junk_libs_pcm::WavReader::open(reader, &mut || {
@@ -79,6 +87,7 @@ pub fn analyze_files(
             })
             .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
             let format = wav.format();
+            wav_trailing_bytes = wav.trailing_bytes();
             junk_libs_audio::FileAudioInfo {
                 codec: "wav".into(),
                 sample_rate: format.sample_rate,
@@ -126,11 +135,26 @@ pub fn analyze_files(
             file_index: index,
             file_id: file.id,
             audio,
+            wav_trailing_bytes,
         });
     }
     let result = FileTrackManifest { tracks };
     result.validate()?;
     Ok(result)
+}
+
+pub fn limitations(manifest: &FileTrackManifest) -> Vec<String> {
+    let affected = manifest
+        .tracks
+        .iter()
+        .filter(|t| t.wav_trailing_bytes != 0)
+        .count();
+    if affected == 0 {
+        return vec![];
+    }
+    vec![format!(
+        "WAV warning: {affected} file(s) contain trailing bytes outside their declared RIFF segment. The complete originals are preserved; playback and preparation use only the declared audio. Trailing bytes are not interpreted as audio or metadata."
+    )]
 }
 
 /// Source-local descriptive defaults. These never acquire CD/catalog identity strength.

@@ -779,9 +779,9 @@ try{
  for(const [index,route] of orderingRoutes.entries())await page.route(route,handler=>handler.fulfill({json:[orderingSummary,{summary:orderingSummary,items:orderedFixture.rows,next_cursor:null},orderedFixture.coverage,orderedFixture.plan][index]}));
  await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor();
- assert.deepEqual(await restoredCurator.locator('.album-coverage .album-medium > strong').allTextContents(),['Disc 1','Disc 2']);
- assert.deepEqual(await restoredCurator.locator('.album-preparation fieldset legend').allTextContents(),['Album disc 1','Album disc 2']);
- assert.deepEqual(await restoredCurator.locator('.music-disc > header strong').allTextContents(),['Album disc 1','Album disc 2']);
+ await expect(restoredCurator.locator('.album-coverage .album-medium > strong')).toHaveText(['Disc 1','Disc 2']);
+ await expect(restoredCurator.locator('.album-preparation fieldset legend')).toHaveText(['Album disc 1','Album disc 2']);
+ await expect(restoredCurator.locator('.music-disc > header strong')).toHaveText(['Album disc 1','Album disc 2']);
  for(const route of orderingRoutes)await page.unroute(route);
  await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor({state:'hidden'});

@@ -1,3 +1,20 @@
+## WAV declared-segment playback — source implementation, 2026-11-02
+
+User-approved policy accepts a complete internally valid RIFF/WAVE segment with
+uninterpreted trailing bytes. Exact originals remain preserved/downloadable;
+identification, fingerprints and native-format FLAC preparation consume only the
+declared PCM. Music records per-file trailing-byte counts and presents an analysis
+warning through existing import review and recorded checks, including retained
+analysis. Truncation, internal boundary/format failures and unsupported layouts
+still fail closed. This resolves the pending policy for the twelve Sea of Thieves
+WAVs noted in beta.17; existing production failures are not retried automatically.
+[Investigation and validation](validation/wav-trailing-bytes-2026-11-02.md) records
+610 passing Rust tests, strict Clippy and all 30 selected browser journeys, plus
+65 mounted WAV inspections and exact PCM comparison against FFmpeg for two tracks.
+Review additionally covers preserved retry warnings/FLAC, suffix-only source
+corruption and required padding outside the RIFF boundary; focused checks pass.
+No release or deployment is included.
+
 ## Digital album proposal presentation — source update, 2026-11-02
 
 Digital album proposals show edition notes such as Steam in a distinct badge,

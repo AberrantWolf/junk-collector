@@ -1,3 +1,24 @@
+## Declared WAV segment and trailing originals — 2026-11-02
+
+The shared `junk-libs-pcm` reader owns a bounded interpretation of one complete
+RIFF/WAVE segment. The declared RIFF end must be within the actual file; every
+chunk, required pad and PCM frame must fit inside that segment. Bytes after it
+are counted without reading, parsing or interpreting them as audio or metadata.
+All existing format, size, chunk-count and cancellation checks remain in force.
+Fingerprinting, preparation and independent FLAC sample comparison share this
+reader and therefore the same declared PCM boundary.
+
+The Music module records `wav_trailing_bytes` on each affected file track and
+emits an analysis warning. Absent/zero means no recorded suffix warning, including
+older retained manifests. Application import/retained-analysis publication carries
+the warning through existing Import and processing summaries. Existing curator
+review/history displays it; listener reads do not open originals or recompute it.
+Whole-file source fingerprints and preserved/downloadable originals still cover
+all bytes. This is usable declared audio with an uninterpreted suffix, not a
+claim that the entire original is structurally clean or catalog verified.
+No originals are rewritten, existing observations converted, or failed Jobs
+retried automatically. See [investigation and validation](validation/wav-trailing-bytes-2026-11-02.md).
+
 ## Grouped import copy setup — 2026-11-02
 
 Application guided intake establishes all physical copies in the accepted destination

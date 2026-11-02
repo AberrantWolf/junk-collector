@@ -29185,7 +29185,10 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
     let service = service.with_audio_converter(Arc::new(
         collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap(),
     ));
-    let wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let clean_wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let mut original_with_suffix = clean_wav.to_vec();
+    original_with_suffix.extend(b"ID3\xffuninterpreted trailer\xff");
+    let wav = original_with_suffix.as_slice();
     let flac = include_bytes!("fixtures/digital-audio/01.flac").as_slice();
     let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
     let mut stereo = wav.to_vec();
@@ -29198,6 +29201,14 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
         collection.id,
         &["01.flac", "03.wav", "04.wav", "02.mp3"],
         &[flac, wav, &stereo, mp3],
+    );
+    assert_eq!(
+        service
+            .provisional_import(&actor, detail.summary.import_id)
+            .unwrap()
+            .limitations
+            .len(),
+        1
     );
     let item_id = detail.summary.target_item_id.unwrap();
     let item = store.item(item_id).unwrap();
@@ -29284,7 +29295,7 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
             .unwrap(),
     );
     let mut source_pcm =
-        junk_libs_pcm::WavReader::open(std::io::Cursor::new(wav), &mut || Ok(())).unwrap();
+        junk_libs_pcm::WavReader::open(std::io::Cursor::new(clean_wav), &mut || Ok(())).unwrap();
     junk_libs_pcm::validate_flac(
         &[(0, 96000)],
         &mut source_pcm,
@@ -29300,6 +29311,22 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
             .tracks
             .len(),
         4
+    );
+    let summaries = service
+        .capture_processing_summaries(&actor, item.captures[0].id, source, None, 20)
+        .unwrap();
+    let analysis = summaries
+        .items
+        .iter()
+        .find(|s| s.operation.as_str() == "org.junk.music.import-analysis")
+        .unwrap();
+    assert_eq!(analysis.limitations.len(), 1);
+    let output: collector_modules::music::MusicImportAnalysisOutput =
+        analysis.result.parse().unwrap();
+    let manifest = output.file_tracks.unwrap();
+    assert_eq!(
+        manifest.tracks[1].wav_trailing_bytes,
+        (wav.len() - clean_wav.len()) as u64
     );
     store.reindex().unwrap();
     let rows = service
@@ -29643,7 +29670,9 @@ fn junk_libs_audio_for_export_test(bytes: Vec<u8>) -> junk_libs_audio::FileAudio
 fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority() {
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
-    let bytes = include_bytes!("fixtures/digital-audio/03-tagged.wav");
+    let mut original_with_suffix = include_bytes!("fixtures/digital-audio/03-tagged.wav").to_vec();
+    original_with_suffix.extend(b"LIST\xffuninterpreted trailer\xff");
+    let bytes = original_with_suffix.as_slice();
     let import = service
         .create_provisional_import(
             &actor,
@@ -29757,6 +29786,17 @@ fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority
         "{:?}",
         service.job(&actor, job).unwrap()
     );
+    let warnings = service
+        .capture_processing_summaries(
+            &actor,
+            import.capture_id,
+            import.representation_id,
+            None,
+            20,
+        )
+        .unwrap();
+    assert!(!warnings.items.is_empty());
+    assert!(warnings.items.iter().all(|s| s.limitations.len() == 1));
     let after = store.item(id).unwrap();
     assert_eq!(
         serde_json::to_value(&after.specimens).unwrap(),
@@ -29784,6 +29824,17 @@ fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority
         bytes
     );
     store.reindex().unwrap();
+    let warnings = service
+        .capture_processing_summaries(
+            &actor,
+            import.capture_id,
+            import.representation_id,
+            None,
+            20,
+        )
+        .unwrap();
+    assert!(!warnings.items.is_empty());
+    assert!(warnings.items.iter().all(|s| s.limitations.len() == 1));
     assert_eq!(
         service.item_presented(&actor, id).unwrap().title,
         "My accepted album"
@@ -29805,6 +29856,9 @@ fn guided_failed_file_analysis_retries_after_preservation_without_republishing()
 #[test]
 fn preserved_file_analysis_retry_rejects_changed_archived_bytes() {
     preserved_file_analysis_retry(true, false);
+    if std::env::var_os("COLLECTOR_TEST_FLAC").is_some() {
+        preserved_file_analysis_retry(true, true);
+    }
 }
 
 #[test]
@@ -29816,9 +29870,11 @@ fn preserved_file_analysis_retry_resumes_requested_wav_preparation() {
 
 fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
     let (root, store, actor, service, collection) = setup();
-    let wav = include_bytes!("fixtures/digital-audio/03.wav");
+    let clean_wav = include_bytes!("fixtures/digital-audio/03.wav");
+    let mut wav = clean_wav.to_vec();
+    wav.extend(b"ID3\xffuninterpreted trailer\xff");
     let bytes: &[u8] = if prepare {
-        wav
+        &wav
     } else {
         include_bytes!("fixtures/digital-audio/embedded.flac")
     };
@@ -30039,6 +30095,33 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
         rows[0].state,
         collector_app::MusicTrackAvailabilityState::Available { .. }
     ));
+    if prepare {
+        assert_eq!(detail.import.limitations.len(), 1);
+        let collector_app::MusicTrackAvailabilityState::Available {
+            representation_id,
+            file_index,
+            ..
+        } = &rows[0].state
+        else {
+            unreachable!()
+        };
+        let encoded = resource_bytes(
+            service
+                .representation(&actor, item_id, *representation_id, *file_index)
+                .unwrap(),
+        );
+        let mut source =
+            junk_libs_pcm::WavReader::open(std::io::Cursor::new(clean_wav), &mut || Ok(()))
+                .unwrap();
+        junk_libs_pcm::validate_flac(
+            &[(0, 96000)],
+            &mut source,
+            &mut std::io::Cursor::new(encoded),
+            96000,
+            &mut || Ok(()),
+        )
+        .unwrap();
+    }
     assert_eq!(
         detail.summary.outcome,
         collector_app::IngestStepState::Succeeded
@@ -30079,6 +30162,17 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
     let reindexed = service
         .recorded_music_track_availability(&actor, item_id)
         .unwrap();
+    if prepare {
+        assert_eq!(
+            service
+                .ingest_detail(&actor, id)
+                .unwrap()
+                .import
+                .limitations
+                .len(),
+            1
+        );
+    }
     assert!(matches!(
         reindexed[0].state,
         collector_app::MusicTrackAvailabilityState::Available { file_index, .. }
