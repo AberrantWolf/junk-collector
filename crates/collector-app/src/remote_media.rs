@@ -106,7 +106,6 @@ impl CollectionService {
                 digest: Digest::sha256(text.as_bytes()),
                 inline: Some(text),
                 media_type: "application/octet-stream".into(),
-                verify_on_transfer: false,
             }
         };
         let grant = Grant {

@@ -1,3 +1,27 @@
+## Layered library refresh and playback reads — source implementation, 2026-11-02
+
+[The layered contract](layered-library-refresh.md) uses one compact Library query
+for web and native album pages, independently queried counts, stateless revision-bound
+cursors and bounded JSON. Tracks have a separate role/language/policy/source-fenced
+projection and lightweight header. Background publication drives cache invalidation;
+HTTP reads never start scans or read/hash original audio. Live import overlays are
+batched and row authorization is checked per collection, with a final revision fence.
+Collector stores no client refresh session, progress counter or cache inventory.
+
+Web and Trash Amp own progressive results, progress, cache comparison, cancellation
+and retries. Trash Amp's separate worktree loads tracks on album open, searches
+recorded songs online without enumerating every album, and fetches artwork/list
+contents independently. Its per-album cache merges with an in-flight title refresh
+at the client commit boundary. Current source/selection guards reject late callbacks.
+
+Core HTTP, private playback, the direct media service and Trash Amp offline playback
+consume requested bytes without whole-file verification. Open/seek/length failures
+and premature EOF remain real request/read failures. Published digests describe
+recorded identity, not a fresh integrity attestation. Import/preparation, explicit
+integrity checks and download-completion validation retain their separate policies.
+[Delivery and qualification](validation/layered-library-refresh-2026-11-02.md) records
+source limits and the unmerged native worktree; no deployment is included.
+
 ## Digital format-folder discovery — 2026-11-01
 
 Music module intake policy owns logical-path grouping in `music/discovery.rs`.
@@ -155,6 +179,15 @@ later album selection edits cannot silently change the frozen computation.
 Status exposes input staleness from recorded revisions and source fingerprints;
 retry checks the same inputs before queueing. Reviewed application returns its
 committed authority record so automatic artwork follows the newly chosen release.
+Explicit user-reviewed file/slot assignments remain application policy. They are
+validated against the frozen file set and retained complete release snapshot,
+then enter the same durable reviewed metadata input as automatic mappings. The
+frontend presents assignments without inventing audio-recognition evidence.
+Resumed resolution stages recover their outcome from validated provider input,
+independently of disposable authority observation lists. Filling absent artwork
+may advance a selected immutable candidate only when its other content is
+unchanged; manual artwork authority and earlier candidate versions remain intact.
+See [the adoption follow-up](validation/digital-album-adoption-2026-11-02.md).
 [Delivery evidence](validation/digital-album-matching-2026-10-29.md) records acceptance.
 
 ## Change-driven Library summaries — 2026-10-28
@@ -1226,8 +1259,9 @@ retained bytes/evidence without re-encoding or re-authorizing; current Capture
 associations and Item edits survive. Explicit full reindex validates derivative
 references and stored payload identity, without claiming a fresh codec or catalog
 verification. Startup projects derivative metadata without reading their payloads;
-each derivative GET checks the stored length and SHA-256 before transfer, while
-HEAD remains a lightweight availability check. A failed byte check is reported
+playback HEAD/GET checks authorization and opened-file metadata, then reads only
+requested bytes without a whole-file digest pass. Explicit integrity work remains
+separate. A failed byte check is reported
 as prepared-media failure and does not imply that the preserved original changed.
 Music layout selection for availability and admission uses the committed source
 fingerprint to find observations; it is not a live integrity check. It must not

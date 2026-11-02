@@ -9,6 +9,14 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct FindDigitalAlbums {
     pub expected_revision: Revision,
 }
+/// Explicit user-reviewed assignment; it makes no fingerprint recognition claim.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DigitalTrackAssignment {
+    pub key: String,
+    pub medium: u16,
+    pub position: u16,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrozenMatchTrack {
     pub name: String,
@@ -759,6 +767,7 @@ impl CollectionService {
         item: &Item,
         job_id: JobId,
         release_id: &str,
+        assignments: Option<&[DigitalTrackAssignment]>,
     ) -> Result<ReviewedDigitalMatch> {
         let job = self.jobs.job_record(job_id, user)?;
         if job.kind != "digital_album_matching"
@@ -803,12 +812,13 @@ impl CollectionService {
             .find(|m| m.release.id == release_id)
             .ok_or(Error::Conflict)?;
         if !choice.complete_tracklist
-            || choice.ambiguous_mapping
-            || choice.mappings.len() != f.tracks.len()
             || choice.release_tracks != f.tracks.len()
-            || choice.duration_conflicts > 0
+            || assignments.is_none()
+                && (choice.ambiguous_mapping
+                    || choice.mappings.len() != f.tracks.len()
+                    || choice.duration_conflicts > 0)
         {
-            return Err(Error::Invalid("This release needs manual mapping: only complete, unambiguous album mappings can be applied together".into()));
+            return Err(Error::Invalid("This release needs a complete tracklist and a confirmed assignment for every file before it can be applied".into()));
         }
         let snapshot_id = *result.snapshots.get(release_id).ok_or(Error::Conflict)?;
         let record = self.processing.snapshot(SnapshotQuery {
@@ -826,10 +836,39 @@ impl CollectionService {
         if page.releases.first() != Some(&choice.release) {
             return Err(Error::Conflict);
         }
+        if assignments.is_none()
+            && choice.mappings.iter().any(|map| {
+                choice
+                    .release
+                    .media
+                    .iter()
+                    .find(|m| m.position == Some(map.medium))
+                    .and_then(|m| m.tracks.iter().find(|t| t.position == map.position))
+                    .and_then(|t| t.recording_id.as_deref())
+                    != Some(map.recording_id.as_str())
+            })
+        {
+            return Err(Error::Conflict);
+        }
+        let automatic: Vec<_> = choice
+            .mappings
+            .iter()
+            .map(|m| DigitalTrackAssignment {
+                key: m.key.clone(),
+                medium: m.medium,
+                position: m.position,
+            })
+            .collect();
+        let assignments = assignments.unwrap_or(&automatic);
+        if assignments.len() != f.tracks.len() {
+            return Err(Error::Invalid(
+                "Assign every file to a distinct release track before applying this album".into(),
+            ));
+        }
         let mut seen = BTreeSet::new();
         let mut slots = BTreeSet::new();
         let mut tracks = Vec::new();
-        for map in &choice.mappings {
+        for map in assignments {
             let local = f
                 .tracks
                 .iter()
@@ -846,9 +885,6 @@ impl CollectionService {
                 .find(|m| m.position == Some(map.medium))
                 .and_then(|m| m.tracks.iter().find(|t| t.position == map.position))
                 .ok_or(Error::Conflict)?;
-            if track.recording_id.as_deref() != Some(&map.recording_id) {
-                return Err(Error::Conflict);
-            }
             tracks.push(collector_modules::disc_audio::TrackMetadataOverride {
                 source_representation_id: local.source,
                 track_position: local.source_position,

@@ -655,15 +655,6 @@ async fn bounded_read(
         if resource.length != length || format!("\"{}\"", resource.digest.hex) != etag {
             return Err(Error::Conflict);
         }
-        if resource.verify_on_transfer {
-            verify_open_reader(
-                resource.reader.as_mut(),
-                length,
-                &resource.digest,
-                &cancelled,
-            )?;
-            resource.verify_on_transfer = false;
-        }
         resource
             .reader
             .seek(SeekFrom::Start(start))
@@ -683,48 +674,6 @@ async fn bounded_read(
         },
         body,
     ))
-}
-
-// Validation runs once for the retained open handle, never on metadata polling or
-// every range, and stops promptly when the network consumer goes away.
-fn verify_open_reader(
-    reader: &mut dyn collector_app::MediaReader,
-    length: u64,
-    digest: &Digest,
-    cancel: &std::sync::atomic::AtomicBool,
-) -> collector_core::Result<()> {
-    use sha2::{Digest as _, Sha256};
-    reader
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| Error::PreparedMediaInvalid)?;
-    let mut hash = Sha256::new();
-    let mut seen = 0u64;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        if cancel.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(Error::JobCancelled);
-        }
-        let n = reader
-            .read(&mut buffer)
-            .map_err(|_| Error::PreparedMediaInvalid)?;
-        if n == 0 {
-            break;
-        }
-        seen = seen
-            .checked_add(n as u64)
-            .ok_or(Error::PreparedMediaInvalid)?;
-        if seen > length {
-            return Err(Error::PreparedMediaInvalid);
-        }
-        hash.update(&buffer[..n]);
-    }
-    if seen != length || hex::encode(hash.finalize()) != digest.hex {
-        return Err(Error::PreparedMediaInvalid);
-    }
-    reader
-        .seek(SeekFrom::Start(0))
-        .map_err(|_| Error::PreparedMediaInvalid)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -906,7 +855,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ranges_reuse_one_verified_open_handle_and_metadata_never_hashes() {
+    async fn ranges_reuse_open_handle_and_read_only_requested_bytes() {
         use std::io::Cursor;
         use std::sync::atomic::{AtomicUsize, Ordering};
         struct Counted {
@@ -937,7 +886,6 @@ mod tests {
             media_type: "audio/wav".into(),
             digest: Digest::sha256(&data),
             download_name: "fixture.wav".into(),
-            verify_on_transfer: true,
         };
         let local = Arc::new(LocalPlayback {
             descriptor: RwLock::new(LocalPlaybackDescriptor {
@@ -976,7 +924,7 @@ mod tests {
         .map_err(|error| error.0)
         .unwrap();
         assert_eq!(first.1.len(), CHUNK as usize);
-        assert_eq!(count.load(Ordering::Relaxed), data.len() + CHUNK as usize);
+        assert_eq!(count.load(Ordering::Relaxed), CHUNK as usize);
         let second = bounded_read(
             local.clone(),
             "track".into(),
@@ -990,10 +938,7 @@ mod tests {
         .map_err(|error| error.0)
         .unwrap();
         assert_eq!(second.1.len(), CHUNK as usize);
-        assert_eq!(
-            count.load(Ordering::Relaxed),
-            data.len() + CHUNK as usize * 2
-        );
+        assert_eq!(count.load(Ordering::Relaxed), CHUNK as usize * 2);
         let invalid = bounded_read(
             local,
             "track".into(),
@@ -1007,44 +952,7 @@ mod tests {
         .map_err(|error| error.0)
         .unwrap();
         assert_eq!(invalid.0.status, 416);
-        assert_eq!(
-            count.load(Ordering::Relaxed),
-            data.len() + CHUNK as usize * 2
-        );
-    }
-    #[test]
-    fn prepared_media_validation_stops_and_rejects_changed_or_truncated_bytes() {
-        use std::io::Cursor;
-        use std::sync::atomic::AtomicBool;
-        let bytes = b"immutable publication";
-        let digest = Digest::sha256(bytes);
-        assert!(
-            verify_open_reader(
-                &mut Cursor::new(bytes),
-                bytes.len() as u64,
-                &digest,
-                &AtomicBool::new(false)
-            )
-            .is_ok()
-        );
-        assert!(matches!(
-            verify_open_reader(
-                &mut Cursor::new(bytes),
-                bytes.len() as u64,
-                &digest,
-                &AtomicBool::new(true)
-            ),
-            Err(Error::JobCancelled)
-        ));
-        assert!(matches!(
-            verify_open_reader(
-                &mut Cursor::new(b"changed"),
-                bytes.len() as u64,
-                &digest,
-                &AtomicBool::new(false)
-            ),
-            Err(Error::PreparedMediaInvalid)
-        ));
+        assert_eq!(count.load(Ordering::Relaxed), CHUNK as usize * 2);
     }
     #[tokio::test]
     async fn certificate_rollover_refreshes_both_listeners_and_rejects_old_trust() {

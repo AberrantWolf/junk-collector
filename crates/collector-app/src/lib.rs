@@ -273,9 +273,6 @@ pub struct MediaResource {
     pub media_type: String,
     pub digest: Digest,
     pub download_name: String,
-    /// Published derivatives are checked against this digest before GET transfer.
-    /// HEAD remains a lightweight availability check.
-    pub verify_on_transfer: bool,
 }
 
 impl MediaResource {
@@ -406,7 +403,12 @@ pub trait ContentPort: Send + Sync {
         representation: RepresentationId,
         index: usize,
     ) -> Result<MediaResource>;
-    fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource>;
+    fn asset_resource(
+        &self,
+        asset: AssetId,
+        thumbnail: bool,
+        revision: Revision,
+    ) -> Result<MediaResource>;
     fn asset_state(&self, asset: AssetId) -> Result<AssetState>;
     fn asset_states_for_item(&self, item: ItemId) -> Result<Vec<AssetState>>;
     fn archived_item_cover_revisions(
@@ -860,6 +862,7 @@ pub trait ProvisionalImportPort: Send + Sync {
     /// transition gaps; excludes cancelled/settled or terminally blocked imports.
     /// This discloses no private workflow details and never reads media payloads.
     fn item_has_active_ingest(&self, item: ItemId) -> Result<bool>;
+    fn items_with_active_ingest(&self, items: &[ItemId]) -> Result<Vec<ItemId>>;
     fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId>;
     fn inbox_cleanup_status(&self, id: ImportId) -> Result<Option<InboxCleanupView>>;
     fn clean_inbox_source(
@@ -3899,7 +3902,8 @@ impl CollectionService {
         if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
             return Err(Error::Forbidden);
         }
-        self.content.asset_resource(asset_id, thumbnail)
+        self.content
+            .asset_resource(asset_id, thumbnail, state.revision)
     }
     pub fn asset_presented(
         &self,
@@ -3923,6 +3927,7 @@ impl CollectionService {
         collection_id: CollectionId,
         asset_id: AssetId,
         thumbnail: bool,
+        expected_revision: Option<Revision>,
     ) -> Result<MediaResource> {
         let state = self.content.asset_state(asset_id)?;
         if state.collection_id != collection_id || state.deleted {
@@ -3932,7 +3937,11 @@ impl CollectionService {
         if role == Role::Viewer && state.asset.visibility == Visibility::Curators {
             return Err(Error::Forbidden);
         }
-        self.content.asset_resource(asset_id, thumbnail)
+        if expected_revision.is_some_and(|revision| revision != state.revision) {
+            return Err(Error::Conflict);
+        }
+        self.content
+            .asset_resource(asset_id, thumbnail, state.revision)
     }
     pub fn create_asset(
         &self,

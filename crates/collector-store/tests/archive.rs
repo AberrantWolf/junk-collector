@@ -1663,7 +1663,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
         Err(Error::Forbidden)
     ));
     assert!(matches!(
-        service.asset_resource(&viewer, collection.id, artwork.id, true),
+        service.asset_resource(&viewer, collection.id, artwork.id, true, None),
         Err(Error::Forbidden)
     ));
     assert!(matches!(
@@ -1672,7 +1672,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
     ));
     assert!(
         service
-            .asset_resource(&actor, collection.id, artwork.id, true)
+            .asset_resource(&actor, collection.id, artwork.id, true, None)
             .is_ok()
     );
     assert!(
@@ -3974,6 +3974,27 @@ fn standalone_assets_cover_all_subjects_and_keep_independent_history() {
         )
         .unwrap();
     assert_eq!(updated.revision, Revision(2));
+    // The mechanism must reject an asset changed after application authorization.
+    assert!(matches!(
+        ContentPort::asset_resource(store.as_ref(), original_id, true, Revision(1)),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        service.asset_resource(&actor, collection.id, original_id, true, Some(Revision(1))),
+        Err(Error::Conflict)
+    ));
+    assert!(
+        service
+            .asset_resource(
+                &actor,
+                collection.id,
+                original_id,
+                true,
+                Some(updated.revision)
+            )
+            .is_ok()
+    );
+
     assert_eq!(updated.subject, states[0].subject);
     assert_eq!(
         updated.original.as_ref().unwrap().digest,
@@ -15465,13 +15486,127 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
         3,
         "Consolidating choices must preserve immutable source versions."
     );
-    let mut reused_identity = equivalent;
+    let mut reused_identity = equivalent.clone();
     reused_identity.identity = original;
     reused_identity.title.value = "Conflicting reuse".into();
     assert!(matches!(
         service.refresh_metadata(&actor, saved.id, refresh(5, reused_identity), &command()),
         Err(Error::Conflict)
     ));
+    service
+        .publish_cover(
+            &actor,
+            saved.id,
+            saved.revision,
+            &review_cover_image(),
+            "Provider cover fixture".into(),
+            &command(),
+        )
+        .unwrap();
+    let cover = store.asset_states_for_item(saved.id).unwrap()[0].asset.id;
+    let without_cover = equivalent.identity.clone();
+    let mut enriched = equivalent;
+    enriched.identity.provider_record_version = Some("with-cover".into());
+    enriched.artwork = Some(cover);
+    service
+        .refresh_metadata(&actor, saved.id, refresh(5, enriched.clone()), &command())
+        .unwrap();
+    let with_cover = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(
+        with_cover.authority.selected_candidate,
+        Some(enriched.identity.clone())
+    );
+    assert_eq!(with_cover.display.artwork, Some(cover));
+    assert!(with_cover.authority.artwork_choice.is_none());
+    assert!(
+        store
+            .metadata_candidates(collection.id, saved.id)
+            .unwrap()
+            .iter()
+            .any(
+                |c| c.identity.provider_record_version.as_deref() == Some("equivalent-new")
+                    && c.artwork.is_none()
+            ),
+        "enrichment must retain the earlier immutable source version"
+    );
+    // A distinct manual cover keeps authority while the selected source gains artwork.
+    service
+        .publish_cover(
+            &actor,
+            saved.id,
+            saved.revision,
+            &review_cover_image(),
+            "Manual cover fixture".into(),
+            &command(),
+        )
+        .unwrap();
+    let manual_cover = store
+        .asset_states_for_item(saved.id)
+        .unwrap()
+        .iter()
+        .find(|s| s.asset.id != cover)
+        .unwrap()
+        .asset
+        .id;
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: with_cover.revision,
+                change: MetadataAuthorityChange::SetArtworkChoice {
+                    asset_id: manual_cover,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let revision = service.metadata_view(&actor, saved.id).unwrap().revision;
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: without_cover,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    enriched.identity.provider_record_version = Some("with-cover-again".into());
+    let revision = service.metadata_view(&actor, saved.id).unwrap().revision;
+    service
+        .refresh_metadata(
+            &actor,
+            saved.id,
+            refresh(revision.0, enriched.clone()),
+            &command(),
+        )
+        .unwrap();
+    let retained_manual = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(
+        retained_manual.authority.selected_candidate,
+        Some(enriched.identity.clone())
+    );
+    assert_eq!(retained_manual.display.artwork, Some(manual_cover));
+    let mut changed = enriched.clone();
+    changed.identity.provider_record_version = Some("changed-title-and-cover".into());
+    changed.title.value = "Another title".into();
+    let revision = service.metadata_view(&actor, saved.id).unwrap().revision;
+    service
+        .refresh_metadata(&actor, saved.id, refresh(revision.0, changed), &command())
+        .unwrap();
+    store.reindex().unwrap();
+    let retained = service.metadata_view(&actor, saved.id).unwrap();
+    assert_eq!(
+        retained.authority.selected_candidate,
+        Some(enriched.identity)
+    );
+    assert_eq!(retained.display.title.value, "Old title");
+    assert_eq!(retained.authority.artwork_choice, Some(manual_cover));
+    assert_eq!(retained.display.artwork, Some(manual_cover));
 }
 
 #[test]
@@ -23555,7 +23690,8 @@ fn concurrent_cover_creation_converges_across_curators_and_metadata_selection() 
                     &fixture.actor,
                     fixture.collection.id,
                     assets[0].asset.id,
-                    false
+                    false,
+                    None
                 )
                 .unwrap()
         ),
@@ -23747,7 +23883,13 @@ fn explicit_cover_reacquisition_restores_history_but_automatic_refresh_cannot() 
         resource_bytes(
             fixture
                 .service
-                .asset_resource(&fixture.actor, fixture.collection.id, asset.asset.id, false)
+                .asset_resource(
+                    &fixture.actor,
+                    fixture.collection.id,
+                    asset.asset.id,
+                    false,
+                    None
+                )
                 .unwrap()
         ),
         image
@@ -24095,7 +24237,7 @@ fn provider_cover_restoration_recovers_before_and_after_revision_commit() {
         assert_eq!(
             resource_bytes(
                 service
-                    .asset_resource(&actor, collection.id, asset, false)
+                    .asset_resource(&actor, collection.id, asset, false, None)
                     .unwrap()
             ),
             image
@@ -24685,7 +24827,7 @@ fn embedded_purchase_cover_is_an_asset_without_blocking_on_unsupported_companion
     assert_eq!(shown.title, "Purchased album");
     let mut bytes = Vec::new();
     service
-        .asset_resource(&actor, collection.id, artwork, false)
+        .asset_resource(&actor, collection.id, artwork, false, None)
         .unwrap()
         .reader
         .read_to_end(&mut bytes)
@@ -25189,7 +25331,7 @@ fn documents_preserve_bytes_bound_text_and_obey_visibility_reindex_and_archive()
     store.reindex().unwrap();
     for (id, expected) in [(shared.id, pdf.as_slice()), (private.id, text.as_bytes())] {
         let mut resource = service
-            .asset_resource(&viewer, collection.id, id, false)
+            .asset_resource(&viewer, collection.id, id, false, None)
             .unwrap();
         let mut actual = vec![];
         resource.reader.read_to_end(&mut actual).unwrap();
@@ -25205,7 +25347,7 @@ fn documents_preserve_bytes_bound_text_and_obey_visibility_reindex_and_archive()
     store.reindex().unwrap();
     assert!(
         service
-            .asset_resource(&viewer, collection.id, private.id, false)
+            .asset_resource(&viewer, collection.id, private.id, false, None)
             .is_err()
     );
     assert!(
@@ -28259,6 +28401,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
 
 struct DigitalMatchingFixtureProvider {
     fail_lookup: std::sync::atomic::AtomicBool,
+    partial: bool,
     covers: std::sync::Mutex<Vec<String>>,
     fingerprints: std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
     calls: std::sync::atomic::AtomicUsize,
@@ -28300,7 +28443,11 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
                 .entry(query.fingerprint.clone())
                 .or_insert(next);
             (
-                serde_json::json!({"status":"ok","results":[{"score":0.99,"recordings":[{"id":recording(n)}]}]}),
+                if self.partial && n == 2 {
+                    serde_json::json!({"status":"ok","results":[]})
+                } else {
+                    serde_json::json!({"status":"ok","results":[{"score":0.99,"recordings":[{"id":recording(n)}]}]})
+                },
                 serde_json::json!({"schema_version":1,"query":query}),
             )
         } else {
@@ -28341,16 +28488,20 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
 }
 #[test]
 fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_rewriting_masters() {
-    digital_matching_full_workflow(false);
+    digital_matching_full_workflow(false, false);
 }
 #[test]
 fn wav_completion_matching_uses_original_pcm_and_retains_retry_apply_workflow() {
     if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
         return;
     }
-    digital_matching_full_workflow(true);
+    digital_matching_full_workflow(true, false);
 }
-fn digital_matching_full_workflow(wav: bool) {
+#[test]
+fn digital_album_partial_recognition_accepts_only_complete_reviewed_assignments() {
+    digital_matching_full_workflow(false, true);
+}
+fn digital_matching_full_workflow(wav: bool, manual: bool) {
     use collector_app::{AcquireMetadataCommand, FindDigitalAlbums, ResolveMetadataCommand};
     use collector_modules::music::*;
     let (root, store, actor, base, collection) = setup();
@@ -28383,6 +28534,7 @@ fn digital_matching_full_workflow(wav: bool) {
     let saved = store.item(item).unwrap();
     let provider = Arc::new(DigitalMatchingFixtureProvider {
         fail_lookup: true.into(),
+        partial: manual,
         covers: Default::default(),
         fingerprints: Default::default(),
         calls: 0.into(),
@@ -28528,7 +28680,7 @@ fn digital_matching_full_workflow(wav: bool) {
     let result: collector_app::DigitalMatchingResult =
         serde_json::from_value(view.result.clone().unwrap()).unwrap();
     assert_eq!(result.matches.len(), 1);
-    assert_eq!(result.matches[0].mappings.len(), 2);
+    assert_eq!(result.matches[0].mappings.len(), if manual { 1 } else { 2 });
     assert!(!result.matches[0].ambiguous_mapping);
     assert!(result.matches[0].complete_tracklist);
     assert_eq!(
@@ -28544,12 +28696,72 @@ fn digital_matching_full_workflow(wav: bool) {
         first_name,
         "discovery cannot apply metadata"
     );
+    let assignments = manual.then(|| {
+        result
+            .tracks
+            .iter()
+            .map(|t| collector_app::DigitalTrackAssignment {
+                key: format!("{}:{}", t.source, t.file),
+                medium: 1,
+                position: t.source_position,
+            })
+            .collect::<Vec<_>>()
+    });
+    if let Some(valid) = &assignments {
+        let mut duplicate_slot = valid.clone();
+        duplicate_slot[1].position = duplicate_slot[0].position;
+        let mut duplicate_file = valid.clone();
+        duplicate_file[1].key = duplicate_file[0].key.clone();
+        let mut unknown_file = valid.clone();
+        unknown_file[1].key = "other-source:file".into();
+        let mut unknown_track = valid.clone();
+        unknown_track[1].position = 99;
+        let mut unknown_medium = valid.clone();
+        unknown_medium[1].medium = 2;
+        for invalid in [
+            None,
+            Some(vec![]),
+            Some(valid[..1].to_vec()),
+            Some(duplicate_slot),
+            Some(duplicate_file),
+            Some(unknown_file),
+            Some(unknown_track),
+            Some(unknown_medium),
+        ] {
+            assert!(
+                service
+                    .resolve_metadata(
+                        &actor,
+                        item,
+                        ResolveMetadataCommand {
+                            lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                                job_id: job,
+                                release_id: result.matches[0].release.id.clone(),
+                                assignments: invalid,
+                            },
+                            acquire_artwork: false,
+                        },
+                        &command()
+                    )
+                    .is_err(),
+                "partial or invalid mapping must not be admitted"
+            );
+        }
+        assert_eq!(
+            service
+                .recorded_music_track_availability(&actor, item)
+                .unwrap()[0]
+                .title,
+            first_name
+        );
+    }
     let selection = service
         .resolve_metadata(
             &actor,
             item,
             ResolveMetadataCommand {
                 lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    assignments: assignments.clone(),
                     job_id: job,
                     release_id: result.matches[0].release.id.clone(),
                 },
@@ -28629,6 +28841,7 @@ fn digital_matching_full_workflow(wav: bool) {
             item,
             ResolveMetadataCommand {
                 lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    assignments: assignments.clone(),
                     job_id: reused,
                     release_id: result.matches[0].release.id.clone(),
                 },
@@ -28721,6 +28934,7 @@ fn digital_matching_full_workflow(wav: bool) {
             item,
             ResolveMetadataCommand {
                 lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                    assignments: assignments.clone(),
                     job_id: reused,
                     release_id: result.matches[0].release.id.clone()
                 },

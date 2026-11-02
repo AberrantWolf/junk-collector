@@ -15,6 +15,39 @@ pub struct UpdateMetadataPreferences {
 }
 
 pub trait LibraryCarePort: Send + Sync {
+    fn library_item_scope(&self, item: ItemId) -> Result<CollectionId>;
+    fn library_track_count(
+        &self,
+        item: ItemId,
+        namespace: &str,
+        language: &str,
+        role: Role,
+    ) -> Result<Option<(String, u64)>>;
+    fn library_track_cache(
+        &self,
+        item: ItemId,
+        namespace: &str,
+        language: &str,
+        role: Role,
+    ) -> Result<Option<(String, Vec<collector_api_types::MusicTrackAvailability>)>>;
+    fn cache_library_tracks(
+        &self,
+        namespace: &str,
+        language: &str,
+        role: Role,
+        generation: &str,
+        entry: &LibraryEntry,
+        tracks: &[collector_api_types::MusicTrackAvailability],
+    ) -> Result<()>;
+    fn library_revision(&self) -> Result<String>;
+    fn library_count(
+        &self,
+        user: UserId,
+        query: BrowseQuery,
+        namespace: &str,
+        language: &str,
+    ) -> Result<u64>;
+
     fn next_library_entry_build(&self, namespace: &str) -> Result<Option<LibraryEntryBuild>>;
     fn defer_library_entry_build(&self, namespace: &str, build: &LibraryEntryBuild) -> Result<()>;
     fn library_entry_sources(

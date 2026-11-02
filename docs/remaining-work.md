@@ -1,3 +1,56 @@
+## Layered library refresh — source implementation, 2026-11-02
+
+[Main-publication review and complete-source validation](validation/layered-library-refresh-review-2026-11-02.md)
+includes all completed Collector work, including digital album adoption and automatic covers.
+
+The requested web/Trash Amp delivery implements independent counts and compact
+byte-bounded title pages, stateless revision fences, lazy cached tracks and changed
+artwork. Refresh/progress/cache/retry state remains entirely client-side. Whole-file
+verification gates are removed from core HTTP, private playback, direct media and
+Trash Amp offline playback; native streaming also omits its old track-list preflight.
+File failures remain request/reader errors for client recovery. See
+[the contract](layered-library-refresh.md) and
+[qualification and review corrections](validation/layered-library-refresh-2026-11-02.md).
+
+Trash Amp work is isolated on `codex/layered-library-refresh` at
+`/private/tmp/trash-amp-layered-refresh`, with a documented local Collector override.
+Keep that worktree until the user is confident. After the Collector source receives
+its intended commit, replace the native development override with that reviewed Git
+pin before merging; merge and cleanup remain requested for a later confidence gate.
+No deployment is performed. Actual NAS/phone/cellular latency, missing hardware
+oracles and release-image qualification are not inferred from local source tests.
+This is the single queue entry for the delivery; the dated record owns validation
+outcomes, not a second implementation queue.
+
+## Digital album adoption and automatic covers — source delivery, 2026-11-02
+
+Partial recognition can now be completed through an explicit all-file mapping
+editor, with recording scores, durations and confirmation. Adoption applies the
+complete mapping through the existing durable metadata workflow. A reproduced
+resume bug that skipped cover publication is repaired; the selected candidate
+can gain its available cover while manual artwork and immutable history retain
+authority. No score threshold was loosened. A read-only live diagnostic found
+24 matching release durations despite only one correct recording association.
+See [behavior, diagnostic and validation](validation/digital-album-adoption-2026-11-02.md).
+Workspace/Clippy, web/contract and targeted browser checks pass. The combined
+browser run exposed a separate intake copy-setup revision race; its isolated
+rerun and remaining journeys pass, with the failure retained in the record.
+This is not deployed or sealed release qualification.
+
+## Grouped intake copy setup — open, discovered 2026-11-02
+
+During the album-adoption qualification, intake-review failed once when a package
+froze Item revision 1 before another reviewed physical copy was created at revision
+2. A sibling then published evidence at revision 3. The existing publication guard
+refused this inventory change; the intake stayed accepted with one failed import.
+An isolated rerun passed. See [the retained validation failure](validation/digital-album-adoption-2026-11-02.md#validation).
+Make group copy setup and child publication admission consistent without permitting
+unrelated inventory edits. Add a deterministic interleaving test that creates the
+second reviewed copy after the first package freezes its destination. Keep safe
+failure/review and retained originals. This separate admission race was not changed
+by the album-matching/artwork delivery, and a clean combined release run is still
+required before publication.
+
 ## Beta.17 published and installed on Fi — 2026-11-01
 
 The three audio compatibility fixes, preserved-identification retry and inbox
@@ -250,9 +303,10 @@ matching in Trash Amp. See [current status](implementation-status.md) and
 [delivery evidence](validation/digital-album-matching-2026-10-29.md).
 
 Remaining product limits: real AcoustID service recognition needs a configured
-application key and representative user-approved audio; partial/ambiguous matches
-remain suggestions requiring the existing manual metadata tools. This delivery
-supports mono/stereo FLAC and MP3, up to 256 files. Broader codec coverage and
+application key and representative user-approved audio; partial/ambiguous recognition now has an explicit complete mapping editor in the
+2026-11-02 follow-up above. Unequal file/release layouts still require manual
+metadata tools. The original delivery supported mono/stereo FLAC and MP3, up to 256 files;
+WAV support followed on 2026-11-01. Broader codec coverage and
 exhaustive release enumeration are not implemented. Collector publication and
 NAS update are now requested as beta.14; Trash Amp deployment is outside that delivery. The earlier [research evaluation](digital-album-matching-evaluation.md)
 and [probe](digital-album-matching-probe.md) remain dated evidence.

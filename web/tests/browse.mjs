@@ -51,6 +51,8 @@ while True:
  // A pending response must render basic rows immediately and poll to readiness.
  let holdSummary=true;const pendingSummaryRoute=async route=>{const response=await route.fetch();if(!holdSummary){await route.fulfill({response});return;}const body=await response.json();await route.fulfill({response,json:{...body,summary_state:'pending',items:body.items.map(item=>({...item,summary_state:'pending',artwork:null,accuraterip:null,album_playback:null,can_edit:false}))}});};
  await page.route('**/api/v1/library?*',pendingSummaryRoute);
+ // A short busy response must recover without requiring manual Retry.
+ await page.route('**/api/v1/library/summary?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'catalog is busy; retry shortly'}}}),{times:1});
  await page.reload();await page.locator('.collection-row').first().waitFor();
  await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toBeVisible();
  await expect(page.locator('.collection-row').first().getByLabel('Artwork summary updating')).toBeVisible();
@@ -152,6 +154,10 @@ while True:
  // A directly opened detail has no earlier results entry to traverse back to.
  const directWork=await openWork();await directWork.getByRole('button',{name:'Close work history'}).click();await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));assert.equal(new URL(page.url()).searchParams.get('collection'),seed.music);assert.equal(await work.count(),0);
  await page.goto(origin+'/?collection='+seed.music);await page.locator('.collection-row').first().waitFor();
+ // A denied online scope must not keep rendering earlier authorized rows.
+ await page.route('**/api/v1/library?*',route=>route.fulfill({status:403,json:{error:{code:'forbidden',message:'Library access revoked'}}}));
+ await page.getByLabel('Show',{exact:true}).selectOption('wishlist');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.locator('.collection-row').count(),0,'revoked scope retained old rows');
+ await page.unroute('**/api/v1/library?*');
  await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
  // Real unfinished uploads take precedence over playback attention. The list
  // must refresh after cancellation/completion without a manual reload.

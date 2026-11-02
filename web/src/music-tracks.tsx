@@ -63,6 +63,7 @@ function DiscCoverageSource({source,coverage,canAssign,busy,onAssign,onOpenMetad
 
 export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessionExpired,onPrepared,onOpenHistory,onOpenFiles,onOpenMetadata,onOpenAnalysis,onAddToList}:Props){
  const [rows,setRows]=useState<Availability[]>([]);
+ const trackCache=useRef<{revision:string;rows:Availability[]}|undefined>(undefined);
  const canPrepare=canPrepareRequested&&(!item.digital_audio||rows.some(row=>!!row.profile));
  const [coverage,setCoverage]=useState<Coverage>();
  const [assignmentBusy,setAssignmentBusy]=useState<string>();
@@ -94,7 +95,7 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
  }
  useEffect(()=>{
   requests.current=new AbortController();commandKeys.current.clear();initializedDiscs.current.clear();notifiedOutputs.current=undefined;
-  setRows([]);setCoverage(undefined);setError('');setQueueNotice('');setPlayBusy(false);setPendingTracks(new Set());setPlan(undefined);setBatches([]);setDiscSources({});setIncludedDiscs(new Set());setBusy(false);
+  trackCache.current=undefined;setRows([]);setCoverage(undefined);setError('');setQueueNotice('');setPlayBusy(false);setPendingTracks(new Set());setPlan(undefined);setBatches([]);setDiscSources({});setIncludedDiscs(new Set());setBusy(false);
   return()=>{requests.current.abort();playback.current?.abort();};
  },[item.id]);
 
@@ -103,7 +104,21 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;setLoading(true);
   async function load(){
    try{
-    const [next,nextCoverage]=await Promise.all([api<Availability[]>(`/items/${item.id}/music-tracks`,{signal:controller.signal}),item.supports_listening?api<Coverage>(`/items/${item.id}/music-disc-coverage`,{signal:controller.signal}):Promise.resolve(undefined)]);
+    const summary=await api<components['schemas']['TrackSummary']>(`/items/${item.id}/client-tracks/summary`,{signal:controller.signal});
+    if(controller.signal.aborted)return;
+    if(summary.pending){setLoading(true);timer=setTimeout(load,1500);return;}
+    let next=trackCache.current?.revision===summary.tracks_revision?trackCache.current.rows:undefined;
+    if(!next){
+     next=[];let cursor:number|undefined;
+     do {
+      const query=new URLSearchParams({revision:summary.tracks_revision});if(cursor!==undefined)query.set('cursor',String(cursor));
+      const page=await api<components['schemas']['TrackPage']>(`/items/${item.id}/client-tracks?${query}`,{signal:controller.signal});
+      if(controller.signal.aborted)return;if(page.summary.pending||page.summary.tracks_revision!==summary.tracks_revision)throw new Error('Album tracks changed; retrying');
+      next.push(...page.items);cursor=page.next_cursor??undefined;
+     }while(cursor!==undefined);
+     trackCache.current={revision:summary.tracks_revision,rows:next};
+    }
+    const nextCoverage=item.supports_listening?await api<Coverage>(`/items/${item.id}/music-disc-coverage`,{signal:controller.signal}):undefined;
     if(controller.signal.aborted)return;setRows(next);setCoverage(nextCoverage);setLoading(false);
     const outputs=JSON.stringify(next.flatMap(row=>row.state.status==='available'?[row.state.representation_id]:[]).sort());
     if(callbacks.current.onPrepared&&outputs!==notifiedOutputs.current&&outputs!=='[]'){

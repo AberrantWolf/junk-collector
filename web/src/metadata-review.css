@@ -23,3 +23,8 @@
 .digital-match-cover span { display:grid; place-items:center; min-height:5rem; background:var(--panel-muted,#eee); font-size:2rem; }
 .digital-album-matching .candidate > div:last-child { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:480px) { .digital-match-cover { width:3rem; flex-basis:3rem; } }
+
+.digital-mapping-editor { min-width:0; margin-block:1rem; }
+.digital-mapping-editor label { display:grid; gap:.35rem; margin-block:.8rem; overflow-wrap:anywhere; }
+.digital-mapping-editor select { width:100%; min-width:0; max-width:100%; }
+.digital-mapping-editor .inline-check { display:flex; align-items:flex-start; }

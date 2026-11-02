@@ -66,7 +66,6 @@ pub struct MediaFile {
     pub length: u64,
     pub digest: Digest,
     pub media_type: String,
-    pub verify_on_transfer: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -307,6 +306,9 @@ pub struct ClientAlbum {
     pub title: String,
     pub artist: String,
     pub artwork: Option<AssetId>,
+    pub row_revision: String,
+    pub artwork_revision: Option<Revision>,
+    pub summary_pending: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -383,4 +385,37 @@ pub struct EnrollmentCompletion<P> {
     #[serde(flatten)]
     pub issue: NativeCredentialIssue,
     pub pairing: P,
+}
+
+/// Query facts only: no client refresh session or progress state.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CatalogSummary {
+    pub total_items: u64,
+    pub total_is_exact: bool,
+    pub catalog_revision: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ClientAlbumPage {
+    pub items: Vec<ClientAlbum>,
+    pub next_cursor: Option<String>,
+    pub catalog_revision: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TrackPageQuery {
+    pub revision: Option<String>,
+    pub cursor: Option<u32>,
+    pub max_bytes: Option<u32>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TrackSummary {
+    pub tracks_revision: String,
+    pub total_items: Option<u64>,
+    pub pending: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TrackPage {
+    pub summary: TrackSummary,
+    pub items: Vec<MusicTrackAvailability>,
+    pub next_cursor: Option<u32>,
 }

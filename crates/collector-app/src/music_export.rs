@@ -100,7 +100,7 @@ impl CollectionService {
         }
         let mut picture = None;
         if let Some(asset) = item.primary_artwork {
-            let mut cover = self.asset_resource(actor, item.collection_id, asset, true)?;
+            let mut cover = self.asset_resource(actor, item.collection_id, asset, true, None)?;
             if cover.length > 1024 * 1024 {
                 return Err(Error::Invalid("Export cover preview exceeds 1 MiB".into()));
             }
@@ -194,7 +194,6 @@ impl CollectionService {
                 hex: hex::encode(result.output_digest),
             },
             download_name: safe,
-            verify_on_transfer: false,
         })
     }
 }

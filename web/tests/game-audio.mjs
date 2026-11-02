@@ -49,7 +49,14 @@ try{
  await expect(tracks.locator('.music-track')).toHaveCount(trackCount);await tracks.getByText('2. Track 02',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();const editor=page.getByRole('dialog',{name:'Edit entry'});await editor.getByRole('button',{name:'Music',exact:true}).click();
  await clickAction(editor,'Edit track details',0);await editor.getByLabel('Track title',{exact:true}).fill('Game theme');await editor.getByRole('button',{name:'Save track details',exact:true}).click();await editor.getByText('2. Game theme',{exact:true}).waitFor();
- await editor.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();await expect.poll(async()=>{const rows=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-tracks`)).json()),item);return rows.filter(row=>row.profile?.codec==='flac'&&row.state.status==='available').length;},{timeout:process.env.COLLECTOR_GAME_CUE?600000:60000}).toBe(trackCount);
+ await editor.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();await expect.poll(async()=>{const rows=await page.evaluate(async id=>{
+  const rows=[];let cursor,revision;
+  do {const query=new URLSearchParams();if(cursor!==undefined)query.set('cursor',String(cursor));if(revision)query.set('revision',revision);
+   const response=await fetch(`/api/v1/items/${id}/client-tracks?${query}`);if(response.status===409||response.status===503)return [];if(!response.ok)throw Error(`Track page failed: ${response.status}`);
+   const page=await response.json();if(page.summary.pending)return [];revision=page.summary.tracks_revision;rows.push(...page.items);
+   if(page.next_cursor!=null&&cursor!==undefined&&page.next_cursor<=cursor)throw Error('Nonadvancing track cursor');cursor=page.next_cursor??undefined;
+  }while(cursor!==undefined);return rows;
+ },item);return rows.filter(row=>row.profile?.codec==='flac'&&row.state.status==='available').length;},{timeout:process.env.COLLECTOR_GAME_CUE?600000:60000}).toBe(trackCount);
  await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await tracks.getByText('2. Game theme',{exact:true}).waitFor();
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();const player=page.getByRole('region',{name:'Music player'});
  await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');return a&&!a.paused&&a.currentTime>.05;});await player.locator('audio').evaluate(a=>a.currentTime=2);await page.waitForFunction(()=>document.querySelector('.music-player audio')?.currentTime>2.05);

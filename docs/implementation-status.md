@@ -1,3 +1,49 @@
+## Layered library refresh — source implementation, 2026-11-02
+
+[Main-publication review and complete-source validation](validation/layered-library-refresh-review-2026-11-02.md)
+includes all completed Collector work, including digital album adoption and automatic covers.
+
+Web and native album reads now share compact projections, with independent count
+queries, generation-bound stateless cursors and byte-bounded pages. Track headers
+and pages come from a separate source/role/language/tool-policy-fenced projection.
+Web renders title pages progressively, retains visible rows on failed refresh and
+loads track data only when its cached revision changes. Artwork uses revisioned
+URLs and authenticated conditional reads. Counts/pages maintain no client state.
+
+Trash Amp changes are isolated in `/private/tmp/trash-amp-layered-refresh` on
+`codex/layered-library-refresh`. The client owns counts/progress, partial pages,
+pending/revision retries, independent artwork, lazy album/list contents and online
+song search. A completed album load survives the final title-manifest commit.
+Existing source identity, personal queues, downloads and unresolved commands remain.
+
+Whole-file playback verification is removed from all three server serving paths
+and the native offline resolver. Native online playback uses its queued media target
+without fetching an album's track list before each stream. Read/length/EOF errors
+remain visible; existing sequence-fenced player recovery records a failed track and
+advances. Downloads still validate their completed bytes. Same-length corruption
+is not detected by playback before consumption.
+
+See [the contract](layered-library-refresh.md) and
+[delivery evidence and remaining qualification](validation/layered-library-refresh-2026-11-02.md).
+The native worktree uses an explicit local Collector override for coordinated
+qualification. Its final Git dependency pin, merge/cleanup and any deployment remain
+separate from this source implementation.
+
+## Digital album adoption and automatic covers — source delivery, 2026-11-02
+
+Partial recognition can now be completed through an explicit all-file mapping
+editor, with recording scores, durations and confirmation. Adoption applies the
+complete mapping through the existing durable metadata workflow. A reproduced
+resume bug that skipped cover publication is repaired; the selected candidate
+can gain its available cover while manual artwork and immutable history retain
+authority. No score threshold was loosened. A read-only live diagnostic found
+24 matching release durations despite only one correct recording association.
+See [behavior, diagnostic and validation](validation/digital-album-adoption-2026-11-02.md).
+Workspace/Clippy, web/contract and targeted browser checks pass. The combined
+browser run exposed a separate intake copy-setup revision race; its isolated
+rerun and remaining journeys pass, with the failure retained in the record.
+This is not deployed or sealed release qualification.
+
 ## Inbox audio compatibility — beta.17 published and installed on Fi, 2026-11-01
 
 Checked zero-padded PCM WAV headers, bounded APEv2 MP3 metadata/artwork and the
@@ -241,9 +287,9 @@ and Trash Amp enrichment/restoration races.
 Collector now provides explicit audio-based discovery for original-file FLAC/MP3
 albums, with durable cancellable/retryable jobs, source-bound fingerprint reuse,
 AcoustID recording lookup, MusicBrainz release discovery and artwork previews.
-Review shows coverage, durations and one-to-one track assignments. Only complete,
-unambiguous mappings can be applied together through the existing metadata
-workflow. Raw masters and manual metadata retain authority; inventory/source or
+Review shows coverage, durations and one-to-one track assignments. Automatic adoption requires a complete, unambiguous mapping. The 2026-11-02
+follow-up above adds explicit complete mappings for partial/ambiguous recognition
+through the same metadata workflow. Raw masters and manual metadata retain authority; inventory/source or
 metadata-authority changes invalidate stale discoveries. No audio is read during
 browsing, admission or polling.
 
@@ -258,8 +304,8 @@ The [evaluation](digital-album-matching-evaluation.md),
 [delivery evidence](validation/digital-album-matching-2026-10-29.md) record the
 qualification and limits. Published chromaprint-next 0.1.0 is not used: a corrected
 exact revision is pinned. A configured AcoustID application key is required.
-Live AcoustID recognition, other codecs and manual partial/ambiguous mapping are
-not qualified by this delivery. Matches are identity suggestions, not catalog
+The original delivery did not qualify live service recognition or explicit
+partial/ambiguous mapping; the dated 2026-11-02 follow-up records that coverage. Matches are identity suggestions, not catalog
 verification. No deployment is included.
 
 ## Change-driven Library summaries — beta.13 installed, 2026-10-28
@@ -1584,8 +1630,9 @@ The full first release, native clients and public deployment remain later target
 
 - Startup performance follow-up (2026-09-28): startup projects prepared-audio
   metadata without reading its payloads. Derivative GET checks recorded length
-  and SHA-256 before transfer and reports a specific player error on failure.
-  Debug builds optimize SHA-256, and startup logs cumulative recovery, reindex
+  and SHA-256 before transfer in that historical delivery. Whole-file pre-transfer
+  hashing is superseded by the [2026-11-02 layered playback delivery](validation/layered-library-refresh-2026-11-02.md);
+  request/read failures still reach the player. Debug builds optimize SHA-256, and startup logs cumulative recovery, reindex
   and private-reconciliation times. P06 now reuses the maintained projection on
   unchanged startup and uses indexed graph neighborhoods for ordinary writes
   (2026-10-03). Stale/restored archives and missing/corrupt/incomplete projections

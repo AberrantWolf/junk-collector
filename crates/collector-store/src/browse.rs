@@ -118,6 +118,7 @@ pub(crate) struct BrowseRow {
     pub record: Option<String>,
     pub basic: String,
     pub retrying: bool,
+    pub cursor: String,
 }
 
 pub(crate) fn rows(
@@ -126,6 +127,71 @@ pub(crate) fn rows(
     query: BrowseQuery,
     cache: Option<(&str, &str)>,
 ) -> Result<Page<BrowseRow>> {
+    let (sql, values, limit, scope) = query_parts(db, user, query, cache)?;
+    let mut stmt = db.prepare(&sql).map_err(storage)?;
+    let mut rows = stmt
+        .query(rusqlite::params_from_iter(values))
+        .map_err(storage)?;
+    let mut items = Vec::new();
+    let mut next = None;
+    let mut has_more = false;
+    while let Some(row) = rows.next().map_err(storage)? {
+        if items.len() == limit {
+            has_more = true;
+            break;
+        }
+        let item = BrowseRow {
+            id: row
+                .get::<_, String>(4)
+                .map_err(storage)?
+                .parse()
+                .map_err(storage)?,
+            collection_id: row
+                .get::<_, String>(5)
+                .map_err(storage)?
+                .parse()
+                .map_err(storage)?,
+            role: role_from_database(row.get(6).map_err(storage)?)?,
+            generation: row.get(1).map_err(storage)?,
+            record: row.get(0).map_err(storage)?,
+            basic: row.get(7).map_err(storage)?,
+            retrying: row.get(8).map_err(storage)?,
+            cursor: hex::encode(
+                serde_json::to_vec(&Cursor {
+                    scope: scope.clone(),
+                    key: row.get(2).map_err(storage)?,
+                    title: row.get(3).map_err(storage)?,
+                    id: row.get(4).map_err(storage)?,
+                })
+                .map_err(storage)?,
+            ),
+        };
+        next = Some(Cursor {
+            scope: scope.clone(),
+            key: row.get(2).map_err(storage)?,
+            title: row.get(3).map_err(storage)?,
+            id: item.id.to_string(),
+        });
+        items.push(item);
+    }
+    // The loop consumes the lookahead row only when the page is full.
+    let next_cursor = if has_more {
+        next.map(|v| serde_json::to_vec(&v).map(hex::encode).map_err(storage))
+            .transpose()?
+    } else {
+        None
+    };
+    drop(rows);
+    drop(stmt);
+    Ok(Page { items, next_cursor })
+}
+
+fn query_parts(
+    db: &Connection,
+    user: UserId,
+    query: BrowseQuery,
+    cache: Option<(&str, &str)>,
+) -> Result<(String, Vec<rusqlite::types::Value>, usize, String)> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200) as usize;
     let search = query.search.as_deref().unwrap_or("").trim();
     if search.len() > 256 {
@@ -139,6 +205,12 @@ pub(crate) fn rows(
             query.sort,
             query.filter,
             query.listening_only,
+            cache,
+            if cache.is_some() {
+                Some(crate::library::revision(db)?)
+            } else {
+                None
+            },
         ))
         .map_err(storage)?,
     )
@@ -244,7 +316,6 @@ pub(crate) fn rows(
             "1"
         }
     );
-    let mut stmt = db.prepare(&sql).map_err(storage)?;
     use rusqlite::types::Value;
     let mut values = vec![
         Value::from(user.to_string()),
@@ -265,50 +336,31 @@ pub(crate) fn rows(
             Value::from(language.to_owned()),
         ]);
     }
-    let mut rows = stmt
-        .query(rusqlite::params_from_iter(values))
-        .map_err(storage)?;
-    let mut items = Vec::new();
-    let mut next = None;
-    let mut has_more = false;
-    while let Some(row) = rows.next().map_err(storage)? {
-        if items.len() == limit {
-            has_more = true;
-            break;
-        }
-        let item = BrowseRow {
-            id: row
-                .get::<_, String>(4)
-                .map_err(storage)?
-                .parse()
-                .map_err(storage)?,
-            collection_id: row
-                .get::<_, String>(5)
-                .map_err(storage)?
-                .parse()
-                .map_err(storage)?,
-            role: role_from_database(row.get(6).map_err(storage)?)?,
-            generation: row.get(1).map_err(storage)?,
-            record: row.get(0).map_err(storage)?,
-            basic: row.get(7).map_err(storage)?,
-            retrying: row.get(8).map_err(storage)?,
-        };
-        next = Some(Cursor {
-            scope: scope.clone(),
-            key: row.get(2).map_err(storage)?,
-            title: row.get(3).map_err(storage)?,
-            id: item.id.to_string(),
-        });
-        items.push(item);
-    }
-    // The loop consumes the lookahead row only when the page is full.
-    let next_cursor = if has_more {
-        next.map(|v| serde_json::to_vec(&v).map(hex::encode).map_err(storage))
-            .transpose()?
-    } else {
-        None
-    };
-    drop(rows);
-    drop(stmt);
-    Ok(Page { items, next_cursor })
+    Ok((sql, values, limit, scope))
+}
+
+pub(crate) fn count(
+    db: &Connection,
+    user: UserId,
+    mut query: BrowseQuery,
+    namespace: &str,
+    language: &str,
+) -> Result<u64> {
+    query.cursor = None;
+    let (sql, values, _, _) = query_parts(db, user, query, Some((namespace, language)))?;
+    let from = sql
+        .find(" FROM browse_items")
+        .ok_or_else(|| Error::Storage("browse query missing source".into()))?;
+    let end = sql
+        .rfind(" ORDER BY ")
+        .ok_or_else(|| Error::Storage("browse query missing ordering".into()))?;
+    let sql = format!("SELECT COUNT(*){}", &sql[from..end]);
+    let mut stmt = db.prepare(&sql).map_err(storage)?;
+    // Numbered SQL parameters retain gaps even when a predicate does not use them.
+    let count = stmt.parameter_count();
+    stmt.query_row(
+        rusqlite::params_from_iter(values.into_iter().take(count)),
+        |row| row.get(0),
+    )
+    .map_err(storage)
 }

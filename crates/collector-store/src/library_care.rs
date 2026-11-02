@@ -17,6 +17,72 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)
 }
 impl LibraryCarePort for Store {
+    fn library_item_scope(&self, item: ItemId) -> Result<CollectionId> {
+        let db = self.db.read_lock()?;
+        let raw: String = db
+            .query_row(
+                "SELECT collection_id FROM items WHERE id=? AND deleted=0",
+                [item.to_string()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?
+            .ok_or(Error::NotFound)?;
+        raw.parse().map_err(storage)
+    }
+    fn library_track_count(
+        &self,
+        item: ItemId,
+        namespace: &str,
+        language: &str,
+        role: Role,
+    ) -> Result<Option<(String, u64)>> {
+        let db = self.db.read_lock()?;
+        db.query_row("SELECT t.token,json_array_length(t.record) FROM library_track_entries t JOIN library_entry_versions v ON v.item_id=t.item_id AND v.token=t.token WHERE t.item_id=? AND t.namespace=? AND t.language=? AND t.role=?",params![item.to_string(),namespace,language,role as u8], |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)
+    }
+    fn library_track_cache(
+        &self,
+        item: ItemId,
+        namespace: &str,
+        language: &str,
+        role: Role,
+    ) -> Result<Option<(String, Vec<collector_app::MusicTrackAvailability>)>> {
+        let db = self.db.read_lock()?;
+        let row: Option<(String,String)> = db.query_row("SELECT t.token,t.record FROM library_track_entries t JOIN library_entry_versions v ON v.item_id=t.item_id AND v.token=t.token WHERE t.item_id=? AND t.namespace=? AND t.language=? AND t.role=?", params![item.to_string(),namespace,language,role as u8], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
+        row.map(|(token, raw)| Ok((token, serde_json::from_str(&raw).map_err(storage)?)))
+            .transpose()
+    }
+    fn cache_library_tracks(
+        &self,
+        namespace: &str,
+        language: &str,
+        role: Role,
+        generation: &str,
+        entry: &collector_app::LibraryEntry,
+        tracks: &[collector_app::MusicTrackAvailability],
+    ) -> Result<()> {
+        let db = lock(&self.db)?;
+        db.execute("INSERT OR REPLACE INTO library_track_entries SELECT ?1,?2,?3,?4,token,?6 FROM library_entry_versions WHERE item_id=?1 AND token=?5", params![entry.id.to_string(),namespace,language,role as u8,generation,serde_json::to_string(tracks).map_err(storage)?]).map_err(storage)?;
+        db.execute(
+            "DELETE FROM library_track_entries WHERE item_id=? AND namespace<>?",
+            params![entry.id.to_string(), namespace],
+        )
+        .map_err(storage)?;
+        Ok(())
+    }
+    fn library_revision(&self) -> Result<String> {
+        crate::library::revision(&*self.db.read_lock()?)
+    }
+    fn library_count(
+        &self,
+        user: UserId,
+        query: BrowseQuery,
+        namespace: &str,
+        language: &str,
+    ) -> Result<u64> {
+        crate::browse::count(&*self.db.read_lock()?, user, query, namespace, language)
+    }
+
     fn next_library_entry_build(
         &self,
         namespace: &str,
@@ -42,7 +108,7 @@ impl LibraryCarePort for Store {
         namespace: &str,
         language: &str,
     ) -> Result<Page<collector_app::LibraryEntrySource>> {
-        crate::library::sources(&*lock(&self.db)?, user, query, namespace, language)
+        crate::library::sources(&*self.db.read_lock()?, user, query, namespace, language)
     }
     fn cache_library_entry(
         &self,

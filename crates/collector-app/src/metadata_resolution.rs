@@ -205,8 +205,18 @@ impl CollectionService {
             ));
         }
         let (command, reviewed_digital_match) = match command.lookup.clone() {
-            AcquireMetadataCommand::DigitalAlbumChoice { job_id, release_id } => {
-                let reviewed = self.review_digital_match(user, item, job_id, &release_id)?;
+            AcquireMetadataCommand::DigitalAlbumChoice {
+                job_id,
+                release_id,
+                assignments,
+            } => {
+                let reviewed = self.review_digital_match(
+                    user,
+                    item,
+                    job_id,
+                    &release_id,
+                    assignments.as_deref(),
+                )?;
                 (
                     ResolveMetadataCommand {
                         lookup: AcquireMetadataCommand::MusicBrainzRelease {
@@ -435,9 +445,9 @@ impl CollectionService {
             artwork_error: None,
         };
         if frozen.acquisition.request.provider.0 == MUSICBRAINZ_PROVIDER_ID {
-            let mut record =
+            let (mut record, outcome) =
                 self.refresh_resolution_metadata(claim, frozen, snapshot_id, vec![], "text")?;
-            result.outcome = record.observations.last().map(|value| value.outcome);
+            result.outcome = Some(outcome);
             if let Some(reviewed) = &frozen.reviewed_digital_match {
                 record = self.apply_reviewed_digital_metadata(claim, frozen, reviewed)?;
             }

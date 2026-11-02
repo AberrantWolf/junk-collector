@@ -295,6 +295,8 @@ pub enum AcquireMetadataCommand {
     DigitalAlbumChoice {
         job_id: JobId,
         release_id: String,
+        #[serde(default)]
+        assignments: Option<Vec<crate::DigitalTrackAssignment>>,
     },
     MusicBrainzRelease {
         release_id: String,
@@ -2028,7 +2030,10 @@ impl CollectionService {
                     .observation
                     .candidates
                     .iter()
-                    .find(|incoming| metadata_candidates_equivalent(&previous, incoming))
+                    .find(|incoming| {
+                        metadata_candidates_equivalent(&previous, incoming)
+                            || metadata_candidate_adds_artwork(&previous, incoming)
+                    })
                     .map(|incoming| incoming.identity.clone())
                     .unwrap_or(previous.identity),
             );
@@ -2301,22 +2306,13 @@ impl CollectionService {
         snapshot_id: SnapshotId,
         artwork: Vec<ProviderArtworkLink>,
         stage: &str,
-    ) -> Result<MetadataAuthorityRecord> {
+    ) -> Result<(MetadataAuthorityRecord, MetadataRefreshOutcome)> {
         let item = self.resolution_item(claim, frozen)?;
         let observation_id = ObservationId(deterministic_inventory_uuid(
             claim.user_id,
             stage,
             &claim.id.to_string(),
         ));
-        if self
-            .processing
-            .metadata_refresh_observed(item.collection_id, item.id, observation_id)?
-        {
-            return self
-                .processing
-                .metadata_authority(item.collection_id, item.id)?
-                .ok_or(Error::Conflict);
-        }
         let revision = self.authority_or_inventory(&item)?.revision;
         let eligibility =
             self.content_write_eligibility_for_user(claim.user_id, item.collection_id)?;
@@ -2335,7 +2331,21 @@ impl CollectionService {
                     .cancellation_requested(claim.id, &claim.claim_token)
             },
         )?;
-        self.refresh_metadata_effect(
+        // A resumed text stage must recover its outcome from the validated
+        // snapshot, not the authority's disposable observation list. Otherwise
+        // yielding for artwork acquisition can silently skip artwork on resume.
+        let outcome = observation.outcome;
+        if self
+            .processing
+            .metadata_refresh_observed(item.collection_id, item.id, observation_id)?
+        {
+            let record = self
+                .processing
+                .metadata_authority(item.collection_id, item.id)?
+                .ok_or(Error::Conflict)?;
+            return Ok((record, outcome));
+        }
+        let record = self.refresh_metadata_effect(
             &item,
             &eligibility.owner,
             &RefreshMetadataCommand {
@@ -2346,7 +2356,8 @@ impl CollectionService {
             frozen.language.as_str(),
             Some(claim),
             self.processing.as_ref(),
-        )
+        )?;
+        Ok((record, outcome))
     }
 
     pub(crate) fn select_resolution_artwork(
@@ -2540,6 +2551,21 @@ fn metadata_candidates_equivalent(
         && left.provider_priority == right.provider_priority
         && left.observation.parse::<serde_json::Value>().ok()
             == right.observation.parse::<serde_json::Value>().ok()
+}
+
+// Filling an absent cover enriches the accepted choice without changing its
+// text, ranking or source content. Keep both immutable versions; never use this
+// to replace an already accepted cover or advance unrelated metadata changes.
+fn metadata_candidate_adds_artwork(
+    previous: &MetadataCandidateObservation,
+    incoming: &MetadataCandidateObservation,
+) -> bool {
+    if previous.artwork.is_some() || incoming.artwork.is_none() {
+        return false;
+    }
+    let mut enriched = previous.clone();
+    enriched.artwork = incoming.artwork;
+    metadata_candidates_equivalent(&enriched, incoming)
 }
 
 fn safe_candidate_details(candidate: &MetadataCandidateObservation) -> Option<serde_json::Value> {

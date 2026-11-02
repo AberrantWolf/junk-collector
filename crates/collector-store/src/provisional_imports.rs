@@ -464,13 +464,11 @@ impl Store {
 }
 
 impl ProvisionalImportPort for Store {
-    fn item_has_active_ingest(&self, item: ItemId) -> Result<bool> {
+    fn items_with_active_ingest(&self, items: &[ItemId]) -> Result<Vec<ItemId>> {
         let db = lock(&self.db)?;
-        db.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM private.guided_ingest_intents g
+        let mut statement=db.prepare("SELECT DISTINCT g.target_item_id FROM private.guided_ingest_intents g
                 JOIN private.imports i ON i.id=g.import_id
-                WHERE g.target_item_id=?1 AND g.settled=0 AND g.cancelled=0
+                WHERE g.target_item_id IN (SELECT value FROM json_each(?1)) AND g.settled=0 AND g.cancelled=0
                   AND i.phase!='cancelled'
                   AND (
                     EXISTS(SELECT 1 FROM private.jobs j
@@ -481,12 +479,17 @@ impl ProvisionalImportPort for Store {
                         WHERE j.user_id=g.user_id AND json_extract(j.request,'$.import_id')=g.import_id
                           AND j.kind!='inbox_cleanup' AND j.state IN ('failed','cancelled')
                           AND NOT (j.kind='import_analysis' AND i.phase IN ('awaiting_review','published'))))
-                  )
-            )",
-            [item.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(storage)
+                  )").map_err(storage)?;
+        statement
+            .query_map([serde_json::to_string(items).map_err(storage)?], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(storage)?
+            .map(|row| row.map_err(storage)?.parse().map_err(storage))
+            .collect()
+    }
+    fn item_has_active_ingest(&self, item: ItemId) -> Result<bool> {
+        Ok(!self.items_with_active_ingest(&[item])?.is_empty())
     }
 
     fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId> {

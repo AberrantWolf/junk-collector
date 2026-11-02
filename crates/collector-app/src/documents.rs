@@ -23,7 +23,7 @@ impl CollectionService {
                 "This attachment does not have a plain-text preview".into(),
             ));
         }
-        let resource = self.asset_resource(actor, collection, asset, false)?;
+        let resource = self.asset_resource(actor, collection, asset, false, None)?;
         let preview = junk_libs_core::document::text_preview(resource.reader, TEXT_PREVIEW_BYTES)
             .map_err(|e| Error::Invalid(e.to_string()))?;
         Ok(DocumentTextPreview {

@@ -11,7 +11,6 @@ use axum::{
 use collector_api_types::{MediaAuthorizeRequest, MediaFile, MediaHandleRequest, MediaReadTicket};
 use collector_core::Digest;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
     io::{Read, Seek, SeekFrom},
@@ -93,7 +92,6 @@ struct FileHandle {
     file: Mutex<std::fs::File>,
     length: u64,
     modified: SystemTime,
-    validated: tokio::sync::Mutex<bool>,
 }
 impl FileHandle {
     async fn bytes(self: Arc<Self>, position: u64, count: usize) -> Result<Vec<u8>, StatusCode> {
@@ -259,7 +257,6 @@ impl MediaState {
                 file: Mutex::new(file),
                 length,
                 modified: meta.modified().map_err(|_| StatusCode::CONFLICT)?,
-                validated: tokio::sync::Mutex::new(false),
             }))
         })
         .await
@@ -563,33 +560,6 @@ async fn read_inner(
     };
     let (start, end) = selected.unwrap_or((0, info.length.saturating_sub(1)));
     let count = if info.length == 0 { 0 } else { end - start + 1 };
-    if method != Method::HEAD
-        && info.verify_on_transfer
-        && let Some(file) = stream.file.clone()
-    {
-        let mut validated = file.validated.lock().await;
-        if !*validated {
-            let mut hash = Sha256::new();
-            let mut position = 0;
-            while position < info.length {
-                state.authority.recheck(&stream.ticket.handle).await?;
-                let bytes = file
-                    .clone()
-                    .bytes(
-                        position,
-                        ((info.length - position).min(CHUNK as u64)) as usize,
-                    )
-                    .await?;
-                hash.update(&bytes);
-                position += bytes.len() as u64;
-            }
-            if hex::encode(hash.finalize()) != info.digest.hex {
-                file.invalid.store(true, Ordering::Release);
-                return Err(StatusCode::CONFLICT);
-            }
-            *validated = true;
-        }
-    }
     stream.position = start;
     stream.end = if info.length == 0 { 0 } else { end + 1 };
     let body = if method == Method::HEAD {
@@ -782,7 +752,6 @@ mod tests {
             length: 8,
             digest: Digest::sha256(b"original"),
             media_type: "audio/flac".into(),
-            verify_on_transfer: false,
         };
         assert!(state.file(&info).await.is_ok());
         std::fs::remove_file(root.path().join(".archive-identity")).unwrap();
@@ -841,7 +810,6 @@ mod tests {
             length: 8,
             digest: Digest::sha256(b"original"),
             media_type: "audio/flac".into(),
-            verify_on_transfer: false,
         };
         let file = state.file(&info).await.unwrap().unwrap();
         assert_eq!(file.clone().bytes(0, 8).await.unwrap(), b"original");

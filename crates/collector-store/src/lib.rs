@@ -79,6 +79,30 @@ impl<T> Mutex<T> {
             guard: guard.clone(),
         }
     }
+    /// Interactive catalog reads never wait indefinitely behind publication.
+    fn read_lock(&self) -> Result<MutexGuard<'_, T>> {
+        self.guard.check()?;
+        let started = std::time::Instant::now();
+        loop {
+            match self.inner.try_lock() {
+                Ok(value) => {
+                    self.guard.check()?;
+                    return Ok(value);
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err(Error::Unavailable(
+                        "storage lock poisoned; restart required".into(),
+                    ));
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if started.elapsed() >= std::time::Duration::from_millis(200) {
+                        return Err(Error::Unavailable("catalog is busy; retry shortly".into()));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        }
+    }
     fn lock(&self) -> Result<MutexGuard<'_, T>> {
         self.guard.check()?;
         let value = self
@@ -1351,7 +1375,7 @@ impl ContentPort for Store {
         &self,
         target: &collector_app::PlaybackTarget,
     ) -> Result<collector_app::MediaFile> {
-        let (path, file, verify_on_transfer) =
+        let (path, file, _) =
             self.representation_path(target.item_id, target.representation_id, target.file_index)?;
         let root = fs::canonicalize(&self.archive).map_err(storage)?;
         let relative = path.strip_prefix(&root).map_err(|_| Error::Forbidden)?;
@@ -1374,7 +1398,6 @@ impl ContentPort for Store {
                 _ => return Err(Error::Forbidden),
             }
             .into(),
-            verify_on_transfer,
         })
     }
     fn activity(&self, user: UserId, item: ItemId) -> Result<serde_json::Value> {
@@ -1391,10 +1414,9 @@ impl ContentPort for Store {
         representation: RepresentationId,
         index: usize,
     ) -> Result<MediaResource> {
-        let (path, file, verify_on_transfer) =
-            self.representation_path(item, representation, index)?;
+        let (path, file, prepared) = self.representation_path(item, representation, index)?;
         let reader = File::open(&path).map_err(|error| {
-            if verify_on_transfer {
+            if prepared {
                 tracing::error!(%error, "prepared media could not be opened");
                 Error::PreparedMediaInvalid
             } else {
@@ -1404,7 +1426,7 @@ impl ContentPort for Store {
         let length = reader
             .metadata()
             .map_err(|error| {
-                if verify_on_transfer {
+                if prepared {
                     tracing::error!(%error, "prepared media metadata unavailable");
                     Error::PreparedMediaInvalid
                 } else {
@@ -1413,7 +1435,7 @@ impl ContentPort for Store {
             })?
             .len();
         if length != file.bytes.0 {
-            return Err(if verify_on_transfer {
+            return Err(if prepared {
                 Error::PreparedMediaInvalid
             } else {
                 Error::Storage(
@@ -1440,13 +1462,17 @@ impl ContentPort for Store {
             media_type: media_type.into(),
             digest: file.digest,
             download_name: file.name,
-            verify_on_transfer,
         })
     }
 
-    fn asset_resource(&self, asset: AssetId, thumbnail: bool) -> Result<MediaResource> {
+    fn asset_resource(
+        &self,
+        asset: AssetId,
+        thumbnail: bool,
+        revision: Revision,
+    ) -> Result<MediaResource> {
         let (path, media_type, digest, download_name) =
-            self.asset_resource_path(asset, thumbnail)?;
+            self.asset_resource_path(asset, thumbnail, revision)?;
         let reader = File::open(path).map_err(storage)?;
         let length = reader.metadata().map_err(storage)?.len();
         Ok(MediaResource {
@@ -1456,7 +1482,6 @@ impl ContentPort for Store {
             media_type,
             digest,
             download_name,
-            verify_on_transfer: false,
         })
     }
 

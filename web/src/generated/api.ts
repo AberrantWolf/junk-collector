@@ -612,6 +612,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/client/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_library_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-search": {
         parameters: {
             query?: never;
@@ -2052,6 +2068,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item}/client-tracks/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["client_track_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{item}/music-preparation-batches": {
         parameters: {
             query?: never;
@@ -2188,6 +2220,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["preparation_care"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["library_summary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2798,6 +2846,7 @@ export interface components {
             structure_observation_id: components["schemas"]["ObservationId"];
         };
         AcquireMetadataCommand: {
+            assignments?: components["schemas"]["DigitalTrackAssignment"][] | null;
             job_id: components["schemas"]["JobId"];
             release_id: string;
             /** @enum {string} */
@@ -3159,6 +3208,13 @@ export interface components {
             id: string;
             system: string;
         };
+        /** @description Query facts only: no client refresh session or progress state. */
+        CatalogSummary: {
+            catalog_revision: string;
+            total_is_exact: boolean;
+            /** Format: int64 */
+            total_items: number;
+        };
         CatalogUploadEntry: {
             corrections: components["schemas"]["UploadedDatCatalog"][];
             detection: components["schemas"]["CatalogDetection"];
@@ -3203,9 +3259,17 @@ export interface components {
         ClientAlbum: {
             artist: string;
             artwork?: components["schemas"]["AssetId"] | null;
+            artwork_revision?: components["schemas"]["Revision"] | null;
             collection_id: components["schemas"]["CollectionId"];
             id: components["schemas"]["ItemId"];
+            row_revision: string;
+            summary_pending: boolean;
             title: string;
+        };
+        ClientAlbumPage: {
+            catalog_revision: string;
+            items: components["schemas"]["ClientAlbum"][];
+            next_cursor?: string | null;
         };
         ClientCollection: {
             can_browse: boolean;
@@ -3431,6 +3495,14 @@ export interface components {
             order_reference?: string | null;
             source_url?: string | null;
             store?: string | null;
+        };
+        /** @description Explicit user-reviewed assignment; it makes no fingerprint recognition claim. */
+        DigitalTrackAssignment: {
+            key: string;
+            /** Format: int32 */
+            medium: number;
+            /** Format: int32 */
+            position: number;
         };
         DiscAudioManifest: {
             anchor_file_index: number;
@@ -4149,6 +4221,7 @@ export interface components {
             wishlist: boolean;
         };
         LibraryPage: {
+            catalog_revision: string;
             items: components["schemas"]["LibraryEntry"][];
             next_cursor?: string | null;
             summary_state: components["schemas"]["LibrarySummaryState"];
@@ -4913,16 +4986,6 @@ export interface components {
                 identification_job_id?: components["schemas"]["JobId"] | null;
                 inactive_reason?: string | null;
                 snapshot: components["schemas"]["SnapshotRecord"];
-            }[];
-            next_cursor?: string | null;
-        };
-        Page_ClientAlbum: {
-            items: {
-                artist: string;
-                artwork?: components["schemas"]["AssetId"] | null;
-                collection_id: components["schemas"]["CollectionId"];
-                id: components["schemas"]["ItemId"];
-                title: string;
             }[];
             next_cursor?: string | null;
         };
@@ -5808,6 +5871,18 @@ export interface components {
             digest: components["schemas"]["Digest"];
             name: string;
             visibility?: components["schemas"]["Visibility"];
+        };
+        TrackPage: {
+            items: components["schemas"]["MusicTrackAvailability"][];
+            /** Format: int32 */
+            next_cursor?: number | null;
+            summary: components["schemas"]["TrackSummary"];
+        };
+        TrackSummary: {
+            pending: boolean;
+            /** Format: int64 */
+            total_items?: number | null;
+            tracks_revision: string;
         };
         /** Format: uuid */
         TransactionId: string;
@@ -7535,6 +7610,8 @@ export interface operations {
                 search?: string;
                 cursor?: string;
                 limit?: number;
+                revision?: string;
+                max_bytes?: number;
             };
             header?: never;
             path?: never;
@@ -7548,7 +7625,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_ClientAlbum"];
+                    "application/json": components["schemas"]["ClientAlbumPage"];
                 };
             };
         };
@@ -7570,6 +7647,43 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ClientCollection"][];
                 };
+            };
+        };
+    };
+    client_library_summary: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSummary"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7956,7 +8070,9 @@ export interface operations {
     };
     asset_thumbnail: {
         parameters: {
-            query?: never;
+            query?: {
+                revision?: components["schemas"]["Revision"];
+            };
             header?: never;
             path: {
                 collection: components["schemas"]["CollectionId"];
@@ -7984,6 +8100,13 @@ export interface operations {
                     "image/png": unknown;
                 };
             };
+            /** @description Not Modified */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Forbidden */
             403: {
                 headers: {
@@ -7993,6 +8116,13 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12038,6 +12168,46 @@ export interface operations {
     };
     client_music_tracks: {
         parameters: {
+            query?: {
+                revision?: string;
+                cursor?: number;
+                max_bytes?: number;
+            };
+            header?: never;
+            path: {
+                item: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackPage"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    client_track_summary: {
+        parameters: {
             query?: never;
             header?: never;
             path: {
@@ -12053,7 +12223,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MusicTrackAvailability"][];
+                    "application/json": components["schemas"]["TrackSummary"];
                 };
             };
             /** @description Forbidden */
@@ -12365,6 +12535,8 @@ export interface operations {
                 search?: string;
                 cursor?: string;
                 limit?: number;
+                revision?: string;
+                max_bytes?: number;
             };
             header?: never;
             path?: never;
@@ -12457,6 +12629,44 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    library_summary: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                filter?: "all" | "wishlist" | "files_attached" | "playable" | "needs_attention" | "album_playback_needs_attention" | "removed";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogSummary"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -487,7 +487,7 @@ impl IntoResponse for ApiError {
             Error::PreparedMediaInvalid => (
                 StatusCode::CONFLICT,
                 "prepared_media_invalid",
-                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is saved; ask a curator to repair this prepared track.".into(),
+                "Prepared audio is missing, unreadable, or has a different recorded length. The original is saved; ask a curator to repair this prepared track.".into(),
             ),
         };
         (
@@ -678,6 +678,9 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(music_search))
         .routes(routes!(client_collections))
         .routes(routes!(client_albums))
+        .routes(routes!(library_summary))
+        .routes(routes!(client_library_summary))
+        .routes(routes!(client_track_summary))
         .routes(routes!(client_album_playback))
         .routes(routes!(client_music_tracks))
         .routes(routes!(item))
@@ -1629,31 +1632,61 @@ async fn client_collections(
     }
     Ok(Json(values))
 }
-#[utoipa::path(get,path="/api/v1/client/albums",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_api_types::ClientAlbum>)))]
+#[utoipa::path(get,path="/api/v1/client/albums",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query),("revision"=Option<String>,Query),("max_bytes"=Option<u32>,Query)),responses((status=200,body=collector_api_types::ClientAlbumPage)))]
 async fn client_albums(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
-) -> ApiResult<Json<Page<collector_api_types::ClientAlbum>>> {
+) -> ApiResult<Json<collector_api_types::ClientAlbumPage>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.listening_albums(&actor, query)).await?,
     ))
 }
-#[utoipa::path(get,path="/api/v1/items/{item}/client-tracks",params(("item"=ItemId,Path)),responses((status=200,body=Vec<collector_api_types::MusicTrackAvailability>),(status=403)))]
+#[utoipa::path(get,path="/api/v1/items/{item}/client-tracks",params(("item"=ItemId,Path),("revision"=Option<String>,Query),("cursor"=Option<u32>,Query),("max_bytes"=Option<u32>,Query)),responses((status=200,body=collector_api_types::TrackPage),(status=403),(status=409)))]
 async fn client_music_tracks(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(item): Path<ItemId>,
-) -> ApiResult<Json<Vec<collector_api_types::MusicTrackAvailability>>> {
+    Query(query): Query<collector_api_types::TrackPageQuery>,
+) -> ApiResult<Json<collector_api_types::TrackPage>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
-        blocking(move || {
-            state
-                .service
-                .recorded_music_track_availability(&actor, item)
-        })
-        .await?,
+        blocking(move || state.service.library_tracks(&actor, item, query)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/items/{item}/client-tracks/summary",params(("item"=ItemId,Path)),responses((status=200,body=collector_api_types::TrackSummary),(status=403)))]
+async fn client_track_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item): Path<ItemId>,
+) -> ApiResult<Json<collector_api_types::TrackSummary>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.library_track_summary(&actor, item)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/library/summary",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("filter"=inline(Option<BrowseFilter>),Query)),responses((status=200,body=collector_api_types::CatalogSummary),(status=403),(status=409)))]
+async fn library_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<BrowseQuery>,
+) -> ApiResult<Json<collector_api_types::CatalogSummary>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.library_summary(&actor, query)).await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/client/library",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query)),responses((status=200,body=collector_api_types::CatalogSummary),(status=403),(status=409)))]
+async fn client_library_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(mut query): Query<BrowseQuery>,
+) -> ApiResult<Json<collector_api_types::CatalogSummary>> {
+    let actor = principal(&state, &headers)?;
+    query.listening_only = true;
+    Ok(Json(
+        blocking(move || state.service.library_summary(&actor, query)).await?,
     ))
 }
 #[derive(Deserialize)]
@@ -1689,7 +1722,7 @@ async fn music_search(
         blocking(move || state.service.music_search(&actor, collection, query)).await?,
     ))
 }
-#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = collector_app::LibraryPage), (status = 401)))]
+#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query), ("revision"=Option<String>,Query), ("max_bytes"=Option<u32>,Query)), responses((status = 200, body = collector_app::LibraryPage), (status = 401)))]
 async fn library_entries(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2472,7 +2505,7 @@ async fn item_asset(
     let actor = principal(&state, &headers)?;
     let resource =
         blocking(move || state.service.asset(&actor, id, asset, query.thumbnail)).await?;
-    file_response(resource, headers, false).await
+    file_response(resource, headers).await
 }
 
 #[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, body = PresentedAsset), (status = 403), (status = 404)))]
@@ -2497,10 +2530,10 @@ async fn asset_original(
     let resource = blocking(move || {
         state
             .service
-            .asset_resource(&actor, collection, asset, false)
+            .asset_resource(&actor, collection, asset, false, None)
     })
     .await?;
-    file_response(resource, headers, false).await
+    file_response(resource, headers).await
 }
 
 #[utoipa::path(get,path="/api/v1/collections/{collection}/assets/{asset}/text-preview",params(("collection"=CollectionId,Path),("asset"=AssetId,Path)),responses((status=200,body=collector_app::DocumentTextPreview),(status=400),(status=403),(status=404)))]
@@ -2520,20 +2553,25 @@ async fn asset_text_preview(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 403), (status = 404), (status = 416)))]
+#[derive(Default, Deserialize)]
+struct ThumbnailQuery {
+    revision: Option<Revision>,
+}
+#[utoipa::path(get, path = "/api/v1/collections/{collection}/assets/{asset}/thumbnail", params(("collection" = CollectionId, Path), ("asset" = AssetId, Path), ("revision" = Option<Revision>, Query)), responses((status = 200, content_type = "image/png"), (status = 206, content_type = "image/png"), (status = 304), (status = 403), (status = 404), (status = 409), (status = 416)))]
 async fn asset_thumbnail(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
+    Query(query): Query<ThumbnailQuery>,
 ) -> ApiResult<Response> {
     let actor = principal(&state, &headers)?;
     let resource = blocking(move || {
         state
             .service
-            .asset_resource(&actor, collection, asset, true)
+            .asset_resource(&actor, collection, asset, true, query.revision)
     })
     .await?;
-    file_response(resource, headers, false).await
+    file_response(resource, headers).await
 }
 
 #[derive(Clone, Copy, Deserialize, utoipa::ToSchema)]
@@ -2675,7 +2713,6 @@ async fn tombstone_asset(
 #[utoipa::path(get, path = "/api/v1/items/{id}/representations/{representation}/{index}", params(("id" = ItemId, Path), ("representation" = RepresentationId, Path), ("index" = usize, Path)), responses((status = 200, content_type = "application/octet-stream"), (status = 206, content_type = "application/octet-stream"), (status = 403), (status = 404), (status = 416)))]
 async fn media(
     State(state): State<AppState>,
-    method: Method,
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
@@ -2692,7 +2729,7 @@ async fn media(
             .representation(&actor, id, representation, index)
     })
     .await?;
-    file_response(resource, headers, method != Method::HEAD).await
+    file_response(resource, headers).await
 }
 
 struct LeasedExportReader {
@@ -2764,7 +2801,7 @@ async fn music_flac_export(
             }
         })
         .collect::<String>();
-    let mut response = file_response(resource, headers, true).await?;
+    let mut response = file_response(resource, headers).await?;
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!("attachment; filename*=UTF-8''{filename}"))
@@ -3115,82 +3152,23 @@ mod security_tests {
         assert_eq!(normalized_origin_header("null"), None);
     }
 }
-fn verify_transfer_bytes(
-    reader: &mut dyn collector_app::MediaReader,
-    length: u64,
-    digest: &Digest,
-) -> Result<()> {
-    use sha2::Digest as _;
-    let mut hash = sha2::Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
-    let mut read_bytes = 0u64;
-    loop {
-        let count = reader.read(&mut buffer).map_err(|error| {
-            tracing::error!(%error, "prepared media read failed");
-            Error::PreparedMediaInvalid
-        })?;
-        if count == 0 {
-            break;
-        }
-        read_bytes = read_bytes
-            .checked_add(count as u64)
-            .ok_or(Error::Conflict)?;
-        if read_bytes > length {
-            return Err(Error::PreparedMediaInvalid);
-        }
-        hash.update(&buffer[..count]);
-    }
-    if read_bytes != length
-        || digest.algorithm != HashAlgorithm::Sha256
-        || hex::encode(hash.finalize()) != digest.hex
-    {
-        return Err(Error::PreparedMediaInvalid);
-    }
-    reader.seek(SeekFrom::Start(0)).map_err(|error| {
-        tracing::error!(%error, "prepared media rewind failed");
-        Error::PreparedMediaInvalid
-    })?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod derivative_transfer_tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn transfer_checks_derivative_bytes_before_serving_them() {
-        let expected = b"published FLAC bytes";
-        let digest = Digest::sha256(expected);
-        let mut intact = Cursor::new(expected.to_vec());
-        verify_transfer_bytes(&mut intact, expected.len() as u64, &digest).unwrap();
-        assert_eq!(intact.position(), 0);
-
-        let mut changed = Cursor::new(b"published fLAC bytes".to_vec());
-        assert!(verify_transfer_bytes(&mut changed, expected.len() as u64, &digest).is_err());
-
-        let mut truncated = Cursor::new(expected[..expected.len() - 1].to_vec());
-        assert!(verify_transfer_bytes(&mut truncated, expected.len() as u64, &digest).is_err());
-    }
-}
-
-async fn file_response(
-    resource: MediaResource,
-    headers: HeaderMap,
-    verify_bytes: bool,
-) -> ApiResult<Response> {
+async fn file_response(resource: MediaResource, headers: HeaderMap) -> ApiResult<Response> {
     let length = resource.length;
     let etag = format!("\"{}\"", resource.digest.hex);
     let media_type = resource.media_type;
-    let mut reader = resource.reader;
-    if verify_bytes && resource.verify_on_transfer {
-        let digest = resource.digest;
-        reader = blocking(move || {
-            verify_transfer_bytes(reader.as_mut(), length, &digest)?;
-            Ok(reader)
-        })
-        .await?;
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag)
+    {
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "private, no-cache")
+            .body(Body::empty())
+            .map_err(|e| Error::Storage(e.to_string()).into());
     }
+    let mut reader = resource.reader;
     let range = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
@@ -3202,6 +3180,7 @@ async fn file_response(
     let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, &media_type)
         .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CACHE_CONTROL, "private, no-cache")
         .header(header::ETAG, &etag);
     let count = if let Some(range) = range {
         let Some((start, end)) = parse_range(range, length) else {
@@ -5526,4 +5505,75 @@ async fn accuraterip_checks(
     Ok(Json(
         blocking(move || state.service.accuraterip_checks(&actor, id)).await?,
     ))
+}
+
+#[cfg(test)]
+mod playback_read_tests {
+    use super::*;
+    use std::io::{self, Cursor, Read, Seek};
+    struct NoTail {
+        inner: Cursor<Vec<u8>>,
+    }
+    impl Read for NoTail {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.inner.position() >= 8 {
+                return Err(io::Error::other("tail must not be read"));
+            }
+            let n = buf.len().min((8 - self.inner.position()) as usize);
+            self.inner.read(&mut buf[..n])
+        }
+    }
+    impl Seek for NoTail {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+    #[tokio::test]
+    async fn playback_range_never_verifies_or_reads_the_unrequested_tail() {
+        let resource = MediaResource {
+            visibility: Visibility::Shared,
+            reader: Box::new(NoTail {
+                inner: Cursor::new(vec![7; 1024 * 1024]),
+            }),
+            length: 1024 * 1024,
+            media_type: "audio/flac".into(),
+            digest: Digest::sha256(b"different recorded bytes"),
+            download_name: "track.flac".into(),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RANGE, "bytes=0-7".parse().unwrap());
+        let response = file_response(resource, headers)
+            .await
+            .map_err(|e| e.0)
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 8)
+                .await
+                .unwrap()
+                .as_ref(),
+            &[7; 8]
+        );
+    }
+    #[tokio::test]
+    async fn truncated_playback_body_is_an_error_not_a_successful_short_file() {
+        let resource = MediaResource {
+            visibility: Visibility::Shared,
+            reader: Box::new(Cursor::new(vec![7; 8])),
+            length: 16,
+            media_type: "audio/flac".into(),
+            digest: Digest::sha256(b"recorded"),
+            download_name: "track.flac".into(),
+        };
+        let response = file_response(resource, HeaderMap::new())
+            .await
+            .map_err(|e| e.0)
+            .unwrap();
+        assert_eq!(response.headers()[header::CONTENT_LENGTH], "16");
+        assert!(
+            axum::body::to_bytes(response.into_body(), 32)
+                .await
+                .is_err()
+        );
+    }
 }

@@ -82,7 +82,7 @@ impl ConversionScratch for std::io::Cursor<Vec<u8>> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum EncoderAvailability {
     Available { encoder: String, version: String },
     Unavailable { reason: String },
@@ -1369,6 +1369,12 @@ impl CollectionService {
                         ..
                     }) = self.recorded_music_layout(item.collection_id, source.id)?
                 {
+                    // A current recorded layout permits admission from committed
+                    // inventory; the worker validates actual bytes before encoding.
+                    source_readable = readable_music_schema
+                        && self
+                            .detect_music_selection(item.collection_id, source.id)
+                            .is_ok();
                     for track in layout
                         .into_iter()
                         .filter(|t| t.kind == collector_core::CdTrackKind::Audio)

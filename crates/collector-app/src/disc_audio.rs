@@ -165,26 +165,32 @@ impl CollectionService {
         &self,
         actor: &Principal,
         mut query: BrowseQuery,
-    ) -> Result<Page<collector_api_types::ClientAlbum>> {
+    ) -> Result<collector_api_types::ClientAlbumPage> {
         query.listening_only = true;
-        let values = self.browse_presented(actor, query)?;
-        Ok(Page {
-            items: values
+        let page = self.library_entries(actor, query)?;
+        Ok(collector_api_types::ClientAlbumPage {
+            catalog_revision: page.catalog_revision,
+            next_cursor: page.next_cursor,
+            items: page
                 .items
                 .into_iter()
-                .map(|v| collector_api_types::ClientAlbum {
-                    id: v.id,
-                    collection_id: v.collection_id,
-                    title: v.effective_metadata.title.value,
-                    artist: v
-                        .effective_metadata
-                        .subtitle
-                        .map(|s| s.value)
-                        .unwrap_or(v.subtitle),
-                    artwork: v.primary_artwork,
+                .map(|row| {
+                    let row_revision = Digest::sha256(
+                        &serde_json::to_vec(&row).expect("serializable library row"),
+                    )
+                    .hex;
+                    collector_api_types::ClientAlbum {
+                        id: row.id,
+                        collection_id: row.collection_id,
+                        title: row.title,
+                        artist: row.subtitle,
+                        artwork: row.artwork.as_ref().map(|a| a.id),
+                        artwork_revision: row.artwork.map(|a| a.revision),
+                        row_revision,
+                        summary_pending: row.summary_state != crate::LibrarySummaryState::Ready,
+                    }
                 })
                 .collect(),
-            next_cursor: values.next_cursor,
         })
     }
 }

@@ -1521,10 +1521,14 @@ impl Store {
         &self,
         asset_id: AssetId,
         thumbnail: bool,
+        revision: Revision,
     ) -> Result<(PathBuf, String, Digest, String)> {
         let record = self.asset_record_v3(asset_id)?;
         if record.deleted {
             return Err(Error::NotFound);
+        }
+        if record.revision != revision {
+            return Err(Error::Conflict);
         }
         let asset = &record.asset;
         let file = if thumbnail {

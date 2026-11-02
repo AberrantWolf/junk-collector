@@ -1686,6 +1686,24 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_bytes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -1694,7 +1712,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_ClientAlbum"
+                  "$ref": "#/components/schemas/ClientAlbumPage"
                 }
               }
             }
@@ -1718,6 +1736,47 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/client/library": {
+      "get": {
+        "operationId": "client_library_summary",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
           }
         }
       }
@@ -2228,6 +2287,14 @@
             "schema": {
               "$ref": "#/components/schemas/AssetId"
             }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Revision"
+            }
           }
         ],
         "responses": {
@@ -2243,11 +2310,17 @@
               "image/png": {}
             }
           },
+          "304": {
+            "description": "Not Modified"
+          },
           "403": {
             "description": "Forbidden"
           },
           "404": {
             "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
           },
           "416": {
             "description": "Range Not Satisfiable"
@@ -6903,6 +6976,34 @@
             "schema": {
               "$ref": "#/components/schemas/ItemId"
             }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "max_bytes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -6911,10 +7012,40 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MusicTrackAvailability"
-                  }
+                  "$ref": "#/components/schemas/TrackPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item}/client-tracks/summary": {
+      "get": {
+        "operationId": "client_track_summary",
+        "parameters": [
+          {
+            "name": "item",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackSummary"
                 }
               }
             }
@@ -7292,6 +7423,24 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_bytes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -7446,6 +7595,64 @@
           },
           "403": {
             "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/library/summary": {
+      "get": {
+        "operationId": "library_summary",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "wishlist",
+                "files_attached",
+                "playable",
+                "needs_attention",
+                "album_playback_needs_attention",
+                "removed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
           }
         }
       }
@@ -9132,6 +9339,15 @@
               "source"
             ],
             "properties": {
+              "assignments": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/DigitalTrackAssignment"
+                }
+              },
               "job_id": {
                 "$ref": "#/components/schemas/JobId"
               },
@@ -10694,6 +10910,28 @@
           }
         }
       },
+      "CatalogSummary": {
+        "type": "object",
+        "description": "Query facts only: no client refresh session or progress state.",
+        "required": [
+          "total_items",
+          "total_is_exact",
+          "catalog_revision"
+        ],
+        "properties": {
+          "catalog_revision": {
+            "type": "string"
+          },
+          "total_is_exact": {
+            "type": "boolean"
+          },
+          "total_items": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "CatalogUploadEntry": {
         "type": "object",
         "required": [
@@ -10885,7 +11123,9 @@
           "id",
           "collection_id",
           "title",
-          "artist"
+          "artist",
+          "row_revision",
+          "summary_pending"
         ],
         "properties": {
           "artist": {
@@ -10901,14 +11141,54 @@
               }
             ]
           },
+          "artwork_revision": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection_id": {
             "$ref": "#/components/schemas/CollectionId"
           },
           "id": {
             "$ref": "#/components/schemas/ItemId"
           },
+          "row_revision": {
+            "type": "string"
+          },
+          "summary_pending": {
+            "type": "boolean"
+          },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "ClientAlbumPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "catalog_revision"
+        ],
+        "properties": {
+          "catalog_revision": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientAlbum"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -11797,6 +12077,31 @@
             ]
           }
         }
+      },
+      "DigitalTrackAssignment": {
+        "type": "object",
+        "description": "Explicit user-reviewed assignment; it makes no fingerprint recognition claim.",
+        "required": [
+          "key",
+          "medium",
+          "position"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "medium": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "DiscAudioManifest": {
         "type": "object",
@@ -14769,9 +15074,13 @@
         "type": "object",
         "required": [
           "items",
-          "summary_state"
+          "summary_state",
+          "catalog_revision"
         ],
         "properties": {
+          "catalog_revision": {
+            "type": "string"
+          },
           "items": {
             "type": "array",
             "items": {
@@ -17960,56 +18269,6 @@
                 }
               },
               "additionalProperties": false
-            }
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "Page_ClientAlbum": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "collection_id",
-                "title",
-                "artist"
-              ],
-              "properties": {
-                "artist": {
-                  "type": "string"
-                },
-                "artwork": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/AssetId"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "collection_id": {
-                  "$ref": "#/components/schemas/CollectionId"
-                },
-                "id": {
-                  "$ref": "#/components/schemas/ItemId"
-                },
-                "title": {
-                  "type": "string"
-                }
-              }
             }
           },
           "next_cursor": {
@@ -21900,6 +22159,55 @@
           },
           "visibility": {
             "$ref": "#/components/schemas/Visibility"
+          }
+        }
+      },
+      "TrackPage": {
+        "type": "object",
+        "required": [
+          "summary",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicTrackAvailability"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TrackSummary"
+          }
+        }
+      },
+      "TrackSummary": {
+        "type": "object",
+        "required": [
+          "tracks_revision",
+          "pending"
+        ],
+        "properties": {
+          "pending": {
+            "type": "boolean"
+          },
+          "total_items": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "tracks_revision": {
+            "type": "string"
           }
         }
       },

@@ -3,6 +3,7 @@ use super::*;
 use collector_app::{LibraryEntry, LibraryEntryBuild, LibraryEntrySource};
 
 pub(crate) fn install(connection: &Connection) -> Result<()> {
+    connection.execute_batch("CREATE TABLE IF NOT EXISTS library_track_entries(item_id TEXT NOT NULL,namespace TEXT NOT NULL,language TEXT NOT NULL,role INTEGER NOT NULL,token TEXT NOT NULL,record TEXT NOT NULL,PRIMARY KEY(item_id,namespace,language,role));").map_err(storage)?;
     // A stopped upgrade must not retain a basic row with half-built filter flags.
     let tx = connection.unchecked_transaction().map_err(storage)?;
     let db = &*tx;
@@ -77,6 +78,30 @@ pub(crate) fn install(connection: &Connection) -> Result<()> {
             db.execute_batch(&format!("CREATE TRIGGER IF NOT EXISTS library_{table}_{operation} AFTER {operation} ON {table} BEGIN {body} END;")).map_err(storage)?;
         }
     }
+    db.execute_batch("CREATE TABLE IF NOT EXISTS library_clock(token TEXT NOT NULL); INSERT INTO library_clock SELECT hex(randomblob(16)) WHERE NOT EXISTS(SELECT 1 FROM library_clock);
+        CREATE TABLE IF NOT EXISTS private.library_clock(token TEXT NOT NULL); INSERT INTO private.library_clock SELECT hex(randomblob(16)) WHERE NOT EXISTS(SELECT 1 FROM private.library_clock);") .map_err(storage)?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.library_dirty(item_id TEXT PRIMARY KEY);
+        CREATE TRIGGER IF NOT EXISTS private.library_job_admitted AFTER INSERT ON jobs WHEN NEW.kind='music_derivative' AND NEW.item_id IS NOT NULL BEGIN INSERT OR IGNORE INTO library_dirty VALUES(NEW.item_id); END;
+        CREATE TRIGGER IF NOT EXISTS private.library_job_state AFTER UPDATE OF state ON jobs WHEN NEW.kind='music_derivative' AND NEW.item_id IS NOT NULL AND NEW.state<>OLD.state BEGIN INSERT OR IGNORE INTO library_dirty VALUES(NEW.item_id); END;").map_err(storage)?;
+    for (schema, tables) in [
+        (
+            "main",
+            &[
+                "library_entry_versions",
+                "library_entries",
+                "browse_items",
+                "metadata_language_display",
+            ][..],
+        ),
+        ("private", &["grants", "metadata_preferences", "users"][..]),
+    ] {
+        for table in tables {
+            for operation in ["INSERT", "UPDATE", "DELETE"] {
+                db.execute_batch(&format!("CREATE TRIGGER IF NOT EXISTS {schema}.catalog_{table}_{operation} AFTER {operation} ON {table} BEGIN UPDATE library_clock SET token=hex(randomblob(16)); END;")).map_err(storage)?;
+            }
+        }
+    }
+    db.execute("DELETE FROM library_entries WHERE NOT EXISTS(SELECT 1 FROM library_track_entries t WHERE t.item_id=library_entries.item_id AND t.namespace=library_entries.namespace AND t.language=library_entries.language AND t.role=library_entries.role AND t.token=library_entries.token)", []).map_err(storage)?;
     tx.commit().map_err(storage)
 }
 
@@ -99,6 +124,7 @@ pub(crate) fn sources(
                 generation: row.generation,
                 pending: serde_json::from_str(&row.basic).map_err(storage)?,
                 retrying: row.retrying,
+                cursor: row.cursor,
                 cached: row
                     .record
                     .map(|raw| serde_json::from_str(&raw).map_err(storage))
@@ -181,6 +207,11 @@ pub(crate) fn next_build(
     namespace: &str,
     now: i64,
 ) -> Result<Option<LibraryEntryBuild>> {
+    let tx = db.unchecked_transaction().map_err(storage)?;
+    tx.execute("UPDATE library_entry_versions SET token=hex(randomblob(16)) WHERE item_id IN (SELECT item_id FROM private.library_dirty)",[]).map_err(storage)?;
+    tx.execute("DELETE FROM private.library_dirty", [])
+        .map_err(storage)?;
+    tx.commit().map_err(storage)?;
     let sql = format!(
         "WITH demand AS ({DEMAND}) SELECT i.id,i.collection_id,d.role,d.language,d.user_id,v.token,u.administrator FROM items i JOIN library_entry_versions v ON v.item_id=i.id JOIN demand d ON d.collection_id=i.collection_id JOIN private.users u ON u.id=d.user_id LEFT JOIN library_entries c ON c.item_id=i.id AND c.namespace=?1 AND c.language=d.language AND c.role=d.role AND c.token=v.token LEFT JOIN library_entry_attempts a ON a.item_id=i.id AND a.namespace=?1 AND a.language=d.language AND a.role=d.role WHERE c.item_id IS NULL AND (i.deleted=0 OR d.role>=1) AND (a.token IS NULL OR a.token<>v.token OR a.retry_at<=?2) ORDER BY CASE WHEN a.token=v.token THEN a.retry_at ELSE 0 END,i.id,d.role,d.language LIMIT 1"
     );
@@ -229,7 +260,11 @@ pub(crate) fn defer(
 }
 
 fn prune(db: &Connection, id: ItemId, namespace: &str) -> Result<()> {
-    for table in ["library_entries", "library_entry_attempts"] {
+    for table in [
+        "library_entries",
+        "library_entry_attempts",
+        "library_track_entries",
+    ] {
         let sql = format!(
             "DELETE FROM {table} WHERE item_id=?1 AND (namespace<>?2 OR NOT EXISTS(SELECT 1 FROM items i JOIN private.grants g ON g.collection_id=i.collection_id JOIN private.users u ON u.id=g.user_id AND u.enabled=1 LEFT JOIN private.metadata_preferences p ON p.user_id=u.id WHERE i.id={table}.item_id AND g.role={table}.role AND COALESCE(p.language,'en')={table}.language AND (i.deleted=0 OR g.role>=1)))"
         );
@@ -237,6 +272,15 @@ fn prune(db: &Connection, id: ItemId, namespace: &str) -> Result<()> {
             .map_err(storage)?;
     }
     Ok(())
+}
+
+pub(crate) fn revision(db: &Connection) -> Result<String> {
+    db.query_row(
+        "SELECT a.token || b.token FROM library_clock a, private.library_clock b",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(storage)
 }
 
 #[cfg(test)]
@@ -640,11 +684,110 @@ mod tests {
         );
         assert!(!service.rebuild_next_library_entry().unwrap());
         deny_details(&store);
+        let rebuilt = service.library_entries(&actor, query).unwrap();
+        assert_ne!(
+            rebuilt.catalog_revision, warm.catalog_revision,
+            "rebuilt projections must reject earlier cursors"
+        );
         assert_eq!(
-            serde_json::to_value(service.library_entries(&actor, query).unwrap()).unwrap(),
-            serde_json::to_value(warm).unwrap()
+            serde_json::to_value(rebuilt.items).unwrap(),
+            serde_json::to_value(warm.items).unwrap()
         );
     }
+    #[test]
+    fn stateless_counts_byte_pages_and_track_headers_use_only_projected_metadata() {
+        let (_root, store, actor, service, saved) = fixture();
+        for index in 0..8 {
+            let mut item = saved.clone();
+            item.id = ItemId::new();
+            item.revision = Revision(0);
+            item.title = format!("Album {index} {}", "音".repeat(300));
+            Catalog::save(&*store, item, Revision(0)).unwrap();
+        }
+        let query = BrowseQuery {
+            collection_id: Some(saved.collection_id),
+            max_bytes: Some(8192),
+            ..Default::default()
+        };
+        let summary = service.library_summary(&actor, query.clone()).unwrap();
+        assert_eq!(summary.total_items, 9);
+        assert!(summary.total_is_exact);
+        let pending = service.library_track_summary(&actor, saved.id).unwrap();
+        assert!(pending.pending);
+        assert_eq!(pending.total_items, None);
+        while service.rebuild_next_library_entry().unwrap() {}
+        let summary = service.library_summary(&actor, query.clone()).unwrap();
+        deny_details(&store);
+        let before_reads = lock(&store.db).unwrap().total_changes();
+        let header = service.library_track_summary(&actor, saved.id).unwrap();
+        assert!(!header.pending);
+        assert_eq!(header.total_items, Some(0));
+        let mut cursor = None;
+        let mut ids = std::collections::BTreeSet::new();
+        let mut pages = 0;
+        loop {
+            let page = service
+                .library_entries(
+                    &actor,
+                    BrowseQuery {
+                        cursor,
+                        revision: Some(summary.catalog_revision.clone()),
+                        ..query.clone()
+                    },
+                )
+                .unwrap();
+            assert!(serde_json::to_vec(&page).unwrap().len() <= 8192);
+            for row in page.items {
+                assert!(ids.insert(row.id));
+            }
+            pages += 1;
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert!(pages > 1);
+        assert_eq!(ids.len(), 9);
+        assert_eq!(
+            lock(&store.db).unwrap().total_changes(),
+            before_reads,
+            "count/page/header reads must not maintain client refresh state"
+        );
+        let denied = Principal {
+            device_id: None,
+            user_id: UserId::new(),
+            administrator: false,
+        };
+        assert!(matches!(
+            service.library_summary(&denied, query.clone()),
+            Err(Error::Forbidden)
+        ));
+        assert!(matches!(
+            service.library_track_summary(&denied, saved.id),
+            Err(Error::Forbidden)
+        ));
+        allow_details(&store);
+        let mut changed = saved;
+        changed.title = "Changed title".into();
+        Catalog::save(&*store, changed.clone(), changed.revision).unwrap();
+        assert!(matches!(
+            service.library_entries(
+                &actor,
+                BrowseQuery {
+                    revision: Some(summary.catalog_revision),
+                    ..query
+                }
+            ),
+            Err(Error::Conflict)
+        ));
+        assert!(
+            service
+                .library_track_summary(&actor, changed.id)
+                .unwrap()
+                .pending
+        );
+    }
+
     struct AdvancingClock(std::sync::atomic::AtomicI64);
     impl Clock for AdvancingClock {
         fn now(&self) -> chrono::DateTime<Utc> {

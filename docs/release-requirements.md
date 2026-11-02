@@ -171,6 +171,24 @@ Preserve raw ISOs, cartridge images, redumper outputs and BIN/CUE packages. Inte
 
 Select useful tentative metadata when ambiguous, retain alternatives and original provider responses, visibly mark uncertainty, and preserve manual overrides across refreshes/outages. Strong identity evidence outranks language; the persisted default metadata language chooses album variants, with English as the initial account preference, while original text remains retained.
 
+## Layered library reads — requested 2026-11-02
+
+Web and remote players must refresh in independent layers: trusted connection and
+login, authorized album count, byte-bounded title pages, missing/changed artwork,
+and tracks on album demand when their cache is absent or invalid. Target each
+bounded healthy-installation request within one second; expose directly required
+background work as pending without blocking unrelated published data. Responses
+must provide independently queryable revision-bound counts and stateless pagination.
+Clients wanting progress query those counts and track their own state; Collector
+must not manage client refresh sessions, progress counters or cache inventories.
+Library queries and cache validation never read/hash full tracks. Playback streams requested
+bytes without whole-file verification first. Integrity checks remain separate.
+File-read failures belong to the media request/stream; clients decide recovery
+(Trash Amp records the failed file/attempt and advances to the next track).
+See [the implemented source contract and acceptance](layered-library-refresh.md)
+and [delivery evidence](validation/layered-library-refresh-2026-11-02.md). Coordinated
+native pin/merge and actual-host/release qualification remain in [the queue](remaining-work.md).
+
 ## Playback and offline use
 
 Expose media through authorized capability readers, not paths. Integer sample positions, seeking, queues and DSP belong below UI layers. Server-side playback derivative generation/storage is optional and initially explicit, not an automatic consequence of import. FLAC is the default format when a derivative is requested; offer configurable Opus offline profiles; record source/conversion settings and validate lossless output against source PCM. Originals remain intact.

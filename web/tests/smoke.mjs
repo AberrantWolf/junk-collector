@@ -774,8 +774,9 @@ try{
   coverage:{...originalCoverage,release_id:releaseIds.english,release_title:'Ordering fixture',media:[{position:2,track_count:2,registered_disc_ids:[]},{position:1,track_count:2,registered_disc_ids:[]}],sources:[{...originalSource,medium_position:2,match_state:'disc_id_matched'},{...originalSource,capture_id:firstCapture,source_representation_id:firstSource,medium_position:1,match_state:'disc_id_matched'}]},
   plan:{...originalPlan,discs:[originalDisc,{...originalDisc,capture_id:firstCapture,sources:originalDisc.sources.map(source=>({...source,capture_id:firstCapture,source_representation_id:firstSource,default_selected:true}))}]},
  };
- const orderingRoutes=orderingPaths.map(path=>`**${path}`);
- for(const [index,route] of orderingRoutes.entries())await page.route(route,handler=>handler.fulfill({json:[orderedFixture.rows,orderedFixture.coverage,orderedFixture.plan][index]}));
+ const orderingRoutes=[`**/api/v1/items/${musicItemId}/client-tracks/summary`,`**/api/v1/items/${musicItemId}/client-tracks?*`,...orderingPaths.slice(1).map(path=>`**${path}`)];
+ const orderingSummary={tracks_revision:'ordering-fixture',total_items:orderedFixture.rows.length,pending:false};
+ for(const [index,route] of orderingRoutes.entries())await page.route(route,handler=>handler.fulfill({json:[orderingSummary,{summary:orderingSummary,items:orderedFixture.rows,next_cursor:null},orderedFixture.coverage,orderedFixture.plan][index]}));
  await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor();
  assert.deepEqual(await restoredCurator.locator('.album-coverage .album-medium > strong').allTextContents(),['Disc 1','Disc 2']);
@@ -840,11 +841,11 @@ try{
   assert.match(await preparation.getByRole('alert').innerText(),/Test encoder unavailable/,'preparation failure was erased by refresh');
   await clickAction(preparation,'Refresh tracks');
   const availabilityFailure=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'temporarily_unavailable',message:'Temporary availability failure'}})});
-  await page.route('**/music-tracks',availabilityFailure);
+  await page.route('**/client-tracks/summary',availabilityFailure);
   await clickAction(preparation,'Refresh tracks');
   await preparation.getByRole('alert').getByText('Temporary availability failure',{exact:true}).waitFor();
-  await page.unroute('**/music-tracks',availabilityFailure);
-  await page.waitForResponse(response=>response.url().endsWith('/music-tracks')&&response.status()===200,{timeout:15000});
+  await page.unroute('**/client-tracks/summary',availabilityFailure);
+  await page.waitForResponse(response=>response.url().endsWith('/client-tracks/summary')&&response.status()===200,{timeout:15000});
   const includeDisc=preparation.getByLabel('Include this disc');
   await includeDisc.uncheck();
   const refreshedPlan=page.waitForResponse(response=>response.url().endsWith('/music-preparation-plan')&&response.status()===200);

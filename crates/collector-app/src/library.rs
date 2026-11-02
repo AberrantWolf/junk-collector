@@ -21,6 +21,7 @@ pub struct LibraryPage {
     pub items: Vec<LibraryEntry>,
     pub next_cursor: Option<String>,
     pub summary_state: LibrarySummaryState,
+    pub catalog_revision: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -53,6 +54,7 @@ pub struct LibraryEntrySource {
     pub cached: Option<LibraryEntry>,
     pub pending: LibraryEntry,
     pub retrying: bool,
+    pub cursor: String,
 }
 
 /// One derived view required by an enabled user's current grant/preference.
@@ -137,9 +139,13 @@ impl CollectionService {
     fn library_namespace(&self) -> Result<String> {
         Ok(Digest::sha256(
             &serde_json::to_vec(&(
-                "library-row-v2",
+                "library-row-v3",
                 env!("CARGO_PKG_VERSION"),
                 self.modules.descriptors(),
+                self.encoder_availability(&ConversionProfile::Flac),
+                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 96 }),
+                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 128 }),
+                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 192 }),
             ))
             .map_err(|error| Error::Storage(error.to_string()))?,
         )
@@ -163,7 +169,20 @@ impl CollectionService {
                 return Err(Error::Conflict);
             }
             let effective = self.effective_metadata_for_language(&item, &build.language)?;
+            let tracks = if item.deleted {
+                Vec::new()
+            } else {
+                self.recorded_music_track_availability(&build.actor, item.id)?
+            };
             let entry = LibraryEntry::from(self.presented(item, role, &build.actor, effective)?);
+            self.care.cache_library_tracks(
+                &namespace,
+                &build.language,
+                role,
+                &build.generation,
+                &entry,
+                &tracks,
+            )?;
             // A superseded token remains eligible for the next worker iteration.
             self.care.cache_library_entry(
                 &namespace,
@@ -180,7 +199,52 @@ impl CollectionService {
         result.map(|()| true)
     }
 
+    pub fn library_summary(
+        &self,
+        actor: &Principal,
+        mut query: BrowseQuery,
+    ) -> Result<collector_api_types::CatalogSummary> {
+        if let Some(collection) = query.collection_id {
+            self.authorize(
+                actor,
+                collection,
+                if query.filter == BrowseFilter::Removed {
+                    Action::Curate
+                } else {
+                    Action::Browse
+                },
+            )?;
+        }
+        query.cursor = None;
+        let revision = self.care.library_revision()?;
+        let total = self.care.library_count(
+            actor.user_id,
+            query.clone(),
+            &self.library_namespace()?,
+            &self.metadata_language(actor.user_id)?,
+        )?;
+        if revision != self.care.library_revision()? {
+            return Err(Error::Conflict);
+        }
+        Ok(collector_api_types::CatalogSummary {
+            total_items: total,
+            total_is_exact: query.filter != BrowseFilter::AlbumPlaybackNeedsAttention,
+            catalog_revision: revision,
+        })
+    }
+
     pub fn library_entries(&self, actor: &Principal, query: BrowseQuery) -> Result<LibraryPage> {
+        let revision = self.care.library_revision()?;
+        if query
+            .revision
+            .as_ref()
+            .is_some_and(|value| value != &revision)
+        {
+            return Err(Error::Conflict);
+        }
+        let budget = query.max_bytes.unwrap_or(64 * 1024).clamp(4096, 128 * 1024) as usize;
+        let mut encoded_bytes = 0usize;
+        let mut last_cursor = query.cursor.clone();
         if let Some(collection) = query.collection_id {
             self.authorize(
                 actor,
@@ -199,8 +263,9 @@ impl CollectionService {
         let mut query = query;
         let mut items = Vec::new();
         let mut examined = 0;
+        let mut roles = std::collections::BTreeMap::new();
         let mut summary_state = LibrarySummaryState::Ready;
-        let next_cursor = loop {
+        let next_cursor = 'pages: loop {
             query.limit = Some((limit - items.len()).min(200 - examined) as u16);
             let page = self.care.library_entry_sources(
                 actor.user_id,
@@ -209,16 +274,29 @@ impl CollectionService {
                 &language,
             )?;
             examined += page.items.len();
+            let active = self.provisional_imports.items_with_active_ingest(
+                &page
+                    .items
+                    .iter()
+                    .map(|source| source.id)
+                    .collect::<Vec<_>>(),
+            )?;
             for source in page.items {
-                let role = self.authorize(
-                    actor,
-                    source.collection_id,
-                    if query.filter == BrowseFilter::Removed {
-                        Action::Curate
-                    } else {
-                        Action::Browse
-                    },
-                )?;
+                let role = if let Some(role) = roles.get(&source.collection_id) {
+                    *role
+                } else {
+                    let role = self.authorize(
+                        actor,
+                        source.collection_id,
+                        if query.filter == BrowseFilter::Removed {
+                            Action::Curate
+                        } else {
+                            Action::Browse
+                        },
+                    )?;
+                    roles.insert(source.collection_id, role);
+                    role
+                };
                 // A concurrent grant change cannot return a previously selected
                 // curator cache entry to a newly downgraded viewer.
                 if role != source.role {
@@ -240,7 +318,7 @@ impl CollectionService {
                 }
                 entry.import_in_progress = !entry.deleted
                     && entry.module.0 == "org.junk.music"
-                    && self.provisional_imports.item_has_active_ingest(entry.id)?;
+                    && active.contains(&entry.id);
                 if !attention
                     || (!entry.import_in_progress
                         && matches!(
@@ -250,18 +328,183 @@ impl CollectionService {
                             )
                         ))
                 {
+                    let bytes = serde_json::to_vec(&entry)
+                        .map_err(|e| Error::Storage(e.to_string()))?
+                        .len()
+                        + 1;
+                    let envelope = LibraryPage {
+                        items: Vec::new(),
+                        next_cursor: Some(source.cursor.clone()),
+                        summary_state,
+                        catalog_revision: revision.clone(),
+                    };
+                    let overhead = serde_json::to_vec(&envelope)
+                        .map_err(|e| Error::Storage(e.to_string()))?
+                        .len();
+                    if encoded_bytes + bytes + overhead > budget {
+                        if items.is_empty() {
+                            return Err(Error::Invalid(
+                                "library row exceeds requested page byte budget".into(),
+                            ));
+                        }
+                        break 'pages last_cursor;
+                    }
+                    encoded_bytes += bytes;
                     items.push(entry);
                 }
+                last_cursor = Some(source.cursor);
             }
             if !attention || items.len() == limit || examined >= 200 || page.next_cursor.is_none() {
                 break page.next_cursor;
             }
             query.cursor = page.next_cursor;
         };
-        Ok(LibraryPage {
+        if revision != self.care.library_revision()? {
+            return Err(Error::Conflict);
+        }
+        let page = LibraryPage {
             items,
             next_cursor,
             summary_state,
+            catalog_revision: revision,
+        };
+        if serde_json::to_vec(&page)
+            .map_err(|e| Error::Storage(e.to_string()))?
+            .len()
+            > budget
+        {
+            return Err(Error::Invalid(
+                "library continuation exceeds requested byte budget".into(),
+            ));
+        }
+        Ok(page)
+    }
+}
+
+impl CollectionService {
+    pub fn library_track_summary(
+        &self,
+        actor: &Principal,
+        item: ItemId,
+    ) -> Result<collector_api_types::TrackSummary> {
+        let collection = self.care.library_item_scope(item)?;
+        let role = self.authorize(actor, collection, Action::Browse)?;
+        let namespace = self.library_namespace()?;
+        let language = self.metadata_language(actor.user_id)?;
+        let cached = self
+            .care
+            .library_track_count(item, &namespace, &language, role)?;
+        if cached
+            != self
+                .care
+                .library_track_count(item, &namespace, &language, role)?
+            || self.authorize(actor, collection, Action::Browse)? != role
+            || self.metadata_language(actor.user_id)? != language
+            || self.care.library_item_scope(item)? != collection
+        {
+            return Err(Error::Conflict);
+        }
+        match cached {
+            Some((token, total)) => Ok(collector_api_types::TrackSummary {
+                tracks_revision: track_revision(item, &token, &namespace, &language, role)?,
+                total_items: Some(total),
+                pending: false,
+            }),
+            None => Ok(collector_api_types::TrackSummary {
+                tracks_revision: String::new(),
+                total_items: None,
+                pending: true,
+            }),
+        }
+    }
+    pub fn library_tracks(
+        &self,
+        actor: &Principal,
+        item: ItemId,
+        query: collector_api_types::TrackPageQuery,
+    ) -> Result<collector_api_types::TrackPage> {
+        let collection = self.care.library_item_scope(item)?;
+        let role = self.authorize(actor, collection, Action::Browse)?;
+        let namespace = self.library_namespace()?;
+        let language = self.metadata_language(actor.user_id)?;
+        let cached = self
+            .care
+            .library_track_cache(item, &namespace, &language, role)?;
+        let Some((token, tracks)) = cached else {
+            return Ok(collector_api_types::TrackPage {
+                summary: collector_api_types::TrackSummary {
+                    tracks_revision: String::new(),
+                    total_items: None,
+                    pending: true,
+                },
+                items: Vec::new(),
+                next_cursor: None,
+            });
+        };
+        let revision = track_revision(item, &token, &namespace, &language, role)?;
+        if query.revision.as_ref().is_some_and(|r| r != &revision) {
+            return Err(Error::Conflict);
+        }
+        if query.cursor.is_some() && query.revision.is_none() {
+            return Err(Error::Invalid(
+                "track continuation requires revision".into(),
+            ));
+        }
+        let offset = query.cursor.unwrap_or(0) as usize;
+        if offset > tracks.len() {
+            return Err(Error::Invalid("invalid track cursor".into()));
+        }
+        let total = tracks.len();
+        let budget = query.max_bytes.unwrap_or(64 * 1024).clamp(4096, 128 * 1024) as usize;
+        let mut bytes = 1024;
+        let mut items = Vec::new();
+        for track in tracks.into_iter().skip(offset).take(200) {
+            let size = serde_json::to_vec(&track)
+                .map_err(|e| Error::Storage(e.to_string()))?
+                .len()
+                + 1;
+            if bytes + size > budget {
+                if items.is_empty() {
+                    return Err(Error::Invalid("track exceeds page byte budget".into()));
+                }
+                break;
+            }
+            bytes += size;
+            items.push(track);
+        }
+        if self
+            .care
+            .library_track_count(item, &namespace, &language, role)?
+            != Some((token, total as u64))
+            || self.authorize(actor, collection, Action::Browse)? != role
+            || self.metadata_language(actor.user_id)? != language
+            || self.care.library_item_scope(item)? != collection
+        {
+            return Err(Error::Conflict);
+        }
+        let next = offset + items.len();
+        Ok(collector_api_types::TrackPage {
+            summary: collector_api_types::TrackSummary {
+                tracks_revision: revision,
+                total_items: Some(total as u64),
+                pending: false,
+            },
+            items,
+            next_cursor: (next < total).then_some(next as u32),
         })
     }
+}
+
+fn track_revision(
+    item: ItemId,
+    token: &str,
+    namespace: &str,
+    language: &str,
+    role: Role,
+) -> Result<String> {
+    Ok(Digest::sha256(
+        &serde_json::to_vec(&(item, token, namespace, language, role))
+            .map_err(|e| Error::Storage(e.to_string()))?,
+    )
+    .hex)
 }
