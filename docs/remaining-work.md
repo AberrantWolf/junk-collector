@@ -1,3 +1,16 @@
+## Beta.18 published and installed on Fi — 2026-11-02
+
+Signed source `4fecd6f` packages the layered Library refresh, requested-byte media
+reads, manual digital album adoption/automatic covers and grouped-copy setup repair.
+Exact-source full checks (609 Rust tests, five existing ignores, strict Clippy and
+all 30 browser journeys), both native image jobs and release-image browser acceptance
+pass. Publication reuses validated bytes and advances `preview`; stable `latest`
+is unchanged. Fi runs the immutable image after a complete stopped-writer Fi/NAS
+recovery pair. Identity/configuration, 123 Items, 3,507 Jobs, paused Bridge state
+and seven unrelated services are preserved. Obsolete Fi fixtures/source bundles,
+one unneeded image and about 17.7 GB of build cache are cleaned; recovery points
+and required images remain. See [release/deployment evidence](validation/container-beta18-publication-2026-11-02.md).
+
 ## Layered library refresh — source implementation, 2026-11-02
 
 [Main-publication review and complete-source validation](validation/layered-library-refresh-review-2026-11-02.md)
@@ -17,7 +30,7 @@ Trash Amp work is isolated on `codex/layered-library-refresh` at
 Keep that worktree until the user is confident. After the Collector source receives
 its intended commit, replace the native development override with that reviewed Git
 pin before merging; merge and cleanup remain requested for a later confidence gate.
-No deployment is performed. Actual NAS/phone/cellular latency, missing hardware
+Collector is included in beta.18 on Fi. Actual NAS/phone/cellular latency, missing hardware
 oracles and release-image qualification are not inferred from local source tests.
 This is the single queue entry for the delivery; the dated record owns validation
 outcomes, not a second implementation queue.
@@ -35,7 +48,7 @@ See [behavior, diagnostic and validation](validation/digital-album-adoption-2026
 Workspace/Clippy, web/contract and targeted browser checks pass. The combined
 browser run exposed a separate intake copy-setup revision race; its isolated
 rerun and remaining journeys pass, with the failure retained in the record.
-This is not deployed or sealed release qualification.
+Collector is now included in beta.18 with full qualification and Fi acceptance above.
 
 ## Grouped intake copy setup — repaired for beta.18, 2026-11-02
 

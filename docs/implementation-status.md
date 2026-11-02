@@ -1,11 +1,15 @@
-## Beta.18 preparation — 2026-11-02
+## Beta.18 published and installed on Fi — 2026-11-02
 
 Grouped intake copy setup now precedes the first child publication revision freeze,
 including distinct physical copies and later manifest pages. Manual inventory edits
 retain conflict protection. The broad playback journey waits for lazy track rows
 before asserting queue contents. Beta.18 packages the layered Library refresh and
-manual digital album adoption/cover work already on main. Publication/deployment
-are pending [exact-source qualification](validation/container-beta18-publication-2026-11-02.md).
+manual digital album adoption/cover work already on main. Exact-source full checks,
+all 30 browser journeys and both native image gates pass. Fi runs the immutable
+published image after a stopped-writer recovery pair; 123 Items, 3,507 Jobs,
+configuration/identity and paused Bridge state are retained. Obsolete fixtures,
+source bundles and about 17.7 GB of build cache are removed; recovery points/images
+remain. See [publication/deployment evidence](validation/container-beta18-publication-2026-11-02.md).
 
 ## Layered library refresh — source implementation, 2026-11-02
 
