@@ -1051,4 +1051,15 @@ mod tests {
             changed.title
         );
     }
+    #[test]
+    fn interactive_catalog_contention_is_typed_and_recovers_after_writer_release() {
+        let (_root, store, actor, service, saved) = fixture();
+        let writer = store.db.lock().unwrap();
+        assert!(matches!(
+            service.metadata_read_revision(&actor, saved.id),
+            Err(Error::CatalogBusy)
+        ));
+        drop(writer);
+        assert!(service.metadata_read_revision(&actor, saved.id).is_ok());
+    }
 }

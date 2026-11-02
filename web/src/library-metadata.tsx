@@ -36,7 +36,7 @@ export default function LibraryMetadata({pages,onMore,userId,collection,search,i
     const query=new URLSearchParams({limit:'50',search,needs_attention:String(attention)});if(collection)query.set('collection_id',collection);if(reason)query.set('reason',reason);if(next)query.set('cursor',next);
     let page:RowPage;
     try{page=await api<RowPage>(`/library-care/metadata?${query}`,{signal:attempt.signal});}
-    catch(e){if(isApiRequestError(e)&&e.code==='conflict'&&!retried){parts=[];retried=true;continue;}throw e;}
+    catch(e){if(isApiRequestError(e)&&e.code==='revision_conflict'&&!retried){parts=[];retried=true;continue;}throw e;}
     parts.push(page);attempt.commit(()=>{cached.current={key:cacheKey,parts:[...parts]};pageCache.set(cacheKey,[...parts]);while(pageCache.size>8)pageCache.delete(pageCache.keys().next().value!);setItems(parts.flatMap(p=>p.items));setCursor(page.next_cursor);});
    }
    return parts;

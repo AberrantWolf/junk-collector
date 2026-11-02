@@ -25,4 +25,17 @@ const init={method:'PUT',body:JSON.stringify({target:'A',revision:3}),headers:{'
 runtime.setRecentAuthenticationHandler(async()=>({...alice,device_id:'new'}));await assert.rejects(runtime.api('/devices/old',{method:'DELETE',authenticationPolicy:'review'}),error=>error.code==='authentication_review_required');assert.equal(calls.filter(call=>call.url==='/api/v1/devices/old').length,1);
 runtime.setRecentAuthenticationHandler(async()=>({user_id:'bob'}));await assert.rejects(runtime.api('/other-command',{method:'POST'}));assert.equal(calls.filter(call=>call.url==='/api/v1/other-command').length,1);
 runtime.setRecentAuthenticationHandler();
+
+// Only typed transient read contention retries; cancellation/account changes fence continuations.
+const busy=()=>Response.json({error:{code:'catalog_busy',message:'Busy'}},{status:503});
+let readCalls=0;globalThis.fetch=async()=>++readCalls<3?busy():Response.json({ready:true});
+assert.deepEqual(await runtime.api('/items/recover'),{ready:true});assert.equal(readCalls,3);
+readCalls=0;globalThis.fetch=async()=>{readCalls++;return busy();};
+await assert.rejects(runtime.api('/items/blocked'),error=>error.code==='catalog_busy');assert.equal(readCalls,4);
+readCalls=0;await assert.rejects(runtime.api('/items/write',{method:'PUT',body:'{}'}),error=>error.code==='catalog_busy');assert.equal(readCalls,1);
+readCalls=0;globalThis.fetch=async()=>{readCalls++;return Response.json({error:{code:'unavailable'}},{status:503});};
+await assert.rejects(runtime.api('/items/unavailable'));assert.equal(readCalls,1);
+readCalls=0;globalThis.fetch=async()=>{readCalls++;return busy();};
+const readAbort=new AbortController();const interrupted=runtime.api('/items/cancel',{signal:readAbort.signal});const cancelledRead=assert.rejects(interrupted,{name:'AbortError'});setTimeout(()=>readAbort.abort(),10);await cancelledRead;assert.equal(readCalls,1);
+readCalls=0;const changedAccount=runtime.api('/items/old-account');const changedRead=assert.rejects(changedAccount,/Account changed/);setTimeout(()=>runtime.setApiIdentity({user_id:'bob'}),10);await changedRead;assert.equal(readCalls,1);runtime.setApiIdentity(alice);
 console.log('Work context passed: stale success/error/cleanup, A-B-A, detach, independent lanes, independent auth waiters, last-waiter cancellation, obsolete prompts, account identity, immutable command retry and session review.');

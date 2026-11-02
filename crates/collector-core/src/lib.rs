@@ -1537,6 +1537,8 @@ pub enum Error {
     CancellationTooLate,
     #[error("rate limited; retry after {0} seconds")]
     RateLimited(u64),
+    #[error("catalog is busy; retry shortly")]
+    CatalogBusy,
     #[error("{0}")]
     Unavailable(String),
     #[error("storage failure: {0}")]

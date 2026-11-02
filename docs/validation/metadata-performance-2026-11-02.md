@@ -106,3 +106,31 @@ qualification is still required before release.
 Fi preflight is healthy on beta.18 with zero unfinished Jobs and saved worker
 settings of eight processing/two copy workers. The new per-track pipeline uses
 that existing budget; no production setting or Job was changed for benchmarking.
+
+
+## Exact-source CI repair
+
+The first main [Checks run 41471071689](https://github.com/AberrantWolf/junk-collector/actions/runs/41471071689)
+passes its Rust checks but fails the broad integration journey when a transient
+catalog lock response leaves a reopened album on a manual Retry screen. This is
+a real read recovery gap. The Store now returns typed `CatalogBusy`; HTTP exposes
+`503` / `catalog_busy`. The shared browser adapter retries only GET/HEAD, at most
+three times with 100/200/300 ms delays, preserving cancellation and submitted
+account identity. Exhaustion and permanent unavailability remain visible; writes
+are not resubmitted by this policy. Model cases exercise recovery, exhaustion,
+non-read/permanent failures, cancellation and account changes. A Store case holds
+and releases the real catalog mutex, and the actual browse journey injects a
+transient detail failure before reopening normally.
+
+Review also corrected Metadata's one-time cursor restart to recognize the actual
+`revision_conflict` code; its browser journey injects that response and requires
+visible recovered rows. The previous candidate's image builds/runtime gates and
+AMD64 release-image browser acceptance passed, but validation run 41471106794 was
+cancelled after source acceptance failed. Those bytes were never published or
+installed. The repaired source requires new exact-source qualification.
+
+The repair passes the real contention/release Store test, web types/build/models,
+strict workspace/all-target Clippy, architecture/format and focused actual Chrome
+`integration`, `browse`, `digital-matching` and `storage` journeys. The latest
+compact Metadata page timings are 4 ms and 2 ms locally. Self-review of retry
+bounds, account/cancellation fences and cursor recovery found no further issue.

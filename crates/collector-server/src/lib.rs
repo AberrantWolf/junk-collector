@@ -475,6 +475,7 @@ impl IntoResponse for ApiError {
                 "Publication is already committed and will finish recovery".into(),
             ),
             Error::RateLimited(_) => unreachable!("handled above"),
+            Error::CatalogBusy => (StatusCode::SERVICE_UNAVAILABLE, "catalog_busy", self.0.to_string()),
             Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m.clone()),
             Error::Storage(_) => {
                 tracing::error!(error=%self.0,"storage operation failed");

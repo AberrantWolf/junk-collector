@@ -48,3 +48,8 @@ adapter therefore cannot publish compatibility Capture or Asset snapshots or
 overwrite an authoritative standalone Capture revision. Clients should migrate
 to the command envelope; the compatibility shape is not the long-term
 architecture.
+
+Interactive reads can return `503` with the typed `catalog_busy` code during brief
+publication contention. Read clients can retry with bounded delays and cancellation;
+permanent `unavailable` or storage failures keep their own meaning. The web client
+retries GET/HEAD at most three times and preserves the submitted account identity.

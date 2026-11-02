@@ -41,8 +41,9 @@ export async function api<T=unknown>(path:string,init:ApiRequestInit={}):Promise
  return performRequest<T>(path,request,false,identity?{...identity}:undefined);
 }
 
-async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean,submittedIdentity?:AuthenticationIdentity):Promise<T>{
+async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean,submittedIdentity?:AuthenticationIdentity,busyRetries=0):Promise<T>{
  init.signal?.throwIfAborted();
+ if(submittedIdentity&&identity?.user_id!==submittedIdentity.user_id)throw new Error('Account changed. Reopen this task before continuing.');
  const method=(init.method||'GET').toUpperCase();
  const needsCommandKey=!['GET','HEAD','OPTIONS'].includes(method)&&!path.startsWith('/auth/')&&!/^\/uploads\/[^/]+\/files\//.test(path);
  const headers=new Headers(init.headers);
@@ -56,6 +57,10 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
  if(!response.ok){
   let code=`http_${response.status}`;let message=`Request failed (${response.status})`;
   try{const body=await response.json() as {error?:{code?:string;message?:string}};code=body.error?.code||code;message=body.error?.message||message;}catch{}
+  if(response.status===503&&code==='catalog_busy'&&['GET','HEAD'].includes(method)&&busyRetries<3){
+   await waitForReadRetry(100*(busyRetries+1),init.signal);
+   return performRequest<T>(path,init,retried,submittedIdentity,busyRetries+1);
+  }
   if(code==='recent_authentication_required'&&!retried&&authentication&&!path.startsWith('/auth/')){
    if(!submittedIdentity)throw new Error('Sign in again before resubmitting this action.');
    await authentication.wait(submittedIdentity,init.signal??undefined);
@@ -80,3 +85,14 @@ export {OperationScope} from './operation-scope';
 export {useOperationScope} from './use-operation-scope';
 
 export {registerPasskey} from './passkeys';
+
+
+async function waitForReadRetry(milliseconds:number,signal?:AbortSignal|null){
+ signal?.throwIfAborted();
+ await new Promise<void>((resolve,reject)=>{
+  const cancel=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);reject(signal?.reason??new DOMException('Request cancelled','AbortError'));};
+  const timer=setTimeout(()=>{signal?.removeEventListener('abort',cancel);resolve();},milliseconds);
+  signal?.addEventListener('abort',cancel,{once:true});
+  if(signal?.aborted)cancel();
+ });
+}

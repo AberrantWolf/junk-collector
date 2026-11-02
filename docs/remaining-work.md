@@ -2,7 +2,8 @@
 
 The user-requested delivery replaces full-item Metadata rows with compact cached
 projections and incremental pages, lazily loads related albums, caches resolved
-metadata and polls a cheap revision header. Reads retain current authorization,
+metadata and polls a cheap revision header. Typed brief catalog contention retries
+reads with bounded cancellation/account fences. Reads retain current authorization,
 language and source/authority invalidation. Album matching uses durable per-track
 Jobs on the shared processing budget, overlaps completed fingerprints with AcoustID
 and MusicBrainz requests, and isolates each provider's dispatch limit. Per-file

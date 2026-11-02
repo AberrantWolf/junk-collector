@@ -10,6 +10,12 @@ are cached by byte identity and computation coordinates. Admission and polling
 never read originals. Stage checkpoints, child ownership and publication remain
 claim/revision fenced. Candidate readiness is independent of optional artwork.
 
+Interactive catalog lock contention is a typed `CatalogBusy` outcome (`503` /
+`catalog_busy` at HTTP). The shared web request adapter retries GET/HEAD up to
+three times with short bounded delays, retaining the submitted account and abort
+signal. Exhausted contention and other failures remain visible. This retry policy
+does not resubmit mutation commands.
+
 ## Declared WAV segment and trailing originals — 2026-11-02
 
 The shared `junk-libs-pcm` reader owns a bounded interpretation of one complete

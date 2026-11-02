@@ -97,7 +97,7 @@ impl<T> Mutex<T> {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => {
                     if started.elapsed() >= std::time::Duration::from_millis(200) {
-                        return Err(Error::Unavailable("catalog is busy; retry shortly".into()));
+                        return Err(Error::CatalogBusy);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
