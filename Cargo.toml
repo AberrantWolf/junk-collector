@@ -4,13 +4,13 @@ members = ["crates/*"]
 default-members = ["crates/collector-server"]
 
 [workspace.package]
-version = "0.1.0-beta.18"
+version = "0.1.0-beta.19"
 edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
 junk-libs-pcm = { path = "crates/junk-libs-pcm" }
-junk-libs-music = { git = "https://github.com/AberrantWolf/junk-libs", rev = "438f195449622da2a2b9082c36cb06f66098813c" }
+junk-libs-music = { git = "https://github.com/AberrantWolf/junk-libs", rev = "280ddc7132eed41966720cdc93d608ecf54c2e94" }
 collector-api-types = { path = "crates/collector-api-types" }
 collector-core = { path = "crates/collector-core" }
 collector-modules = { path = "crates/collector-modules" }
@@ -34,7 +34,7 @@ utoipa-axum = "0.3"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 httpdate = "1"
-junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", rev = "438f195449622da2a2b9082c36cb06f66098813c" }
+junk-libs-audio = { git = "https://github.com/AberrantWolf/junk-libs", rev = "280ddc7132eed41966720cdc93d608ecf54c2e94" }
 junk-libs-accuraterip = { git = "https://github.com/AberrantWolf/junk-libs", rev = "317517c430744e4f1196e30850b37b3f13c10560" }
 junk-libs-core = { git = "https://github.com/AberrantWolf/junk-libs", rev = "317517c430744e4f1196e30850b37b3f13c10560" }
 junk-libs-disc = { git = "https://github.com/AberrantWolf/junk-libs", rev = "317517c430744e4f1196e30850b37b3f13c10560" }

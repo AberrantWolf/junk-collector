@@ -22,9 +22,9 @@ pub fn compute<R: Read + Seek + Send>(
         .map_err(|e| Error::Invalid(e.to_string()))?;
     let mut bytes = vec![0; 4096 * format.frame_bytes()];
     let mut position = 0u64;
-    while position < frames {
+    while position < cap {
         checkpoint()?;
-        let wanted = (frames - position).min(4096) as usize;
+        let wanted = (cap - position).min(4096) as usize;
         let count = reader
             .read_pcm(&mut bytes[..wanted * format.frame_bytes()])
             .map_err(|e| Error::Invalid(e.to_string()))?;
@@ -57,7 +57,8 @@ pub fn compute<R: Read + Seek + Send>(
         implementation: IMPLEMENTATION.into(),
         sample_rate: format.sample_rate,
         channels: format.channels,
-        decoded_frames: frames,
+        decoded_frames: cap,
+        total_frames: Some(frames),
         analyzed_frames: cap,
         duration_ms: frames * 1000 / u64::from(format.sample_rate),
         fingerprint: printer.encode(),
@@ -106,13 +107,14 @@ mod independent_vectors {
             .unwrap();
         assert!(output.status.success());
         let wav = compute(std::io::Cursor::new(output.stdout), &mut || Ok(())).unwrap();
-        let flac = junk_libs_music::fingerprint::compute(
+        let flac = junk_libs_music::fingerprint::compute_window(
             junk_libs_music::fingerprint::ByteSource::new(
                 std::io::Cursor::new(include_bytes!(
                     "../../collector-store/tests/fixtures/digital-matching/01.flac"
                 )),
                 junk_libs_music::fingerprint::MediaHint::new(None, Some("flac"), None),
             ),
+            wav.total_frames(),
             &mut || Ok(()),
         )
         .unwrap();

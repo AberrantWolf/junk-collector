@@ -3,7 +3,7 @@ use crate::*;
 use std::collections::VecDeque;
 
 pub const IMPORT_COPY_JOB_KIND: &str = "import_staging";
-pub const PROVIDER_JOB_SLOTS: u32 = 1;
+pub const PROVIDER_JOB_SLOTS: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, utoipa::ToSchema, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]

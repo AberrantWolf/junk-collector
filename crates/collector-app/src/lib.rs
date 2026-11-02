@@ -5,7 +5,9 @@ mod disc_audio;
 mod local_playback;
 pub use disc_audio::game_audio_search_projection;
 mod digital_matching;
+mod digital_pipeline;
 pub use digital_matching::*;
+pub use digital_pipeline::DigitalMatchingProgress;
 mod file_music;
 mod music_export;
 pub use file_music::{
@@ -1229,6 +1231,13 @@ pub trait JobPort: Send + Sync {
         claim_token: &str,
         spec: JobSpec,
     ) -> Result<JobId>;
+    fn digital_checkpoint(&self, id: JobId, user: UserId) -> Result<Option<serde_json::Value>>;
+    fn wait_digital(
+        &self,
+        claim: &JobClaim,
+        checkpoint: serde_json::Value,
+        waiting: &[JobId],
+    ) -> Result<()>;
     fn acquisition_for_job(
         &self,
         claim: &JobClaim,
@@ -1667,6 +1676,8 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
 
 #[derive(Clone)]
 pub struct CollectionService {
+    metadata_reads:
+        Arc<std::sync::Mutex<std::collections::BTreeMap<String, (MetadataView, usize)>>>,
     remote_media_grants: Arc<remote_media::RemoteMediaGrants>,
     browser_media_grants: Arc<local_playback::BrowserMediaGrants>,
     reader: Arc<dyn CollectionReadPort>,
@@ -1714,6 +1725,7 @@ struct ProcessingHost<'a> {
     frozen_snapshot_id: Option<SnapshotId>,
     catalog_parsers: &'a std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>,
     cancellation: Arc<ProcessingCancellation>,
+    validated_input: bool,
 }
 
 struct DurableProcessingContext {
@@ -1845,15 +1857,36 @@ impl ModuleHost for ProcessingHost<'_> {
         if access != self.access {
             return Err(ModuleError::AccessDenied);
         }
-        self.port
-            .package_file(access.collection_id, access.scope, id)
-            .map(|reader| {
-                Box::new(ProcessingReader {
-                    reader: Box::new(reader),
-                    cancellation: self.cancellation.clone(),
-                }) as Box<dyn RepresentationReader>
-            })
-            .map_err(processing_module_error)
+        (if self.validated_input {
+            let file = self
+                .source_fingerprint
+                .files
+                .iter()
+                .find(|f| f.id == id)
+                .ok_or(ModuleError::AccessDenied)?;
+            self.port.validated_fingerprint_file(
+                access.collection_id,
+                access.scope,
+                file,
+                &mut || {
+                    if self.cancellation.requested()? {
+                        Err(Error::JobCancelled)
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+        } else {
+            self.port
+                .package_file(access.collection_id, access.scope, id)
+        })
+        .map(|reader| {
+            Box::new(ProcessingReader {
+                reader: Box::new(reader),
+                cancellation: self.cancellation.clone(),
+            }) as Box<dyn RepresentationReader>
+        })
+        .map_err(processing_module_error)
     }
 
     fn representation_access(&self, id: RepresentationId) -> ModuleResult<PackageAccess> {
@@ -2431,6 +2464,7 @@ impl CollectionService {
         Self {
             reader,
             browser_media_grants: Arc::new(Default::default()),
+            metadata_reads: Arc::new(Default::default()),
             remote_media_grants: Arc::new(Default::default()),
             writer,
             guided_transitions: Arc::new(std::sync::Mutex::new(())),
@@ -4480,6 +4514,7 @@ impl CollectionService {
                 scope: frozen.source,
             },
             source_fingerprint: &frozen.source_fingerprint,
+            validated_input: false,
             frozen_snapshot_id: frozen.snapshot_id,
             catalog_parsers: self.catalog_parsers.as_ref(),
             cancellation: Arc::new(ProcessingCancellation::new(
@@ -5759,6 +5794,10 @@ impl CollectionService {
                     .complete_job(claim.id, &claim.claim_token, result)?;
             }
             Err(Error::CommandInProgress) if claim.kind == "game_catalog_scan" => {}
+            Err(Error::CommandInProgress)
+                if claim.kind == "digital_album_matching"
+                    && self.jobs.job_record(claim.id, claim.user_id)?.state == JobState::Queued => {
+            }
             Err(Error::CommandInProgress)
                 if self
                     .jobs

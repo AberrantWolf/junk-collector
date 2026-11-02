@@ -5,6 +5,7 @@ use collector_app::{
 };
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
+    crate::digital_pipeline::install(db)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,missing_name INTEGER NOT NULL,missing_artwork INTEGER NOT NULL,album_ambiguity INTEGER NOT NULL,incomplete_provider_information INTEGER NOT NULL,no_match INTEGER NOT NULL,manual_conflict INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS album_group_members(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,album_id TEXT NOT NULL,PRIMARY KEY(item_id,album_id));
     CREATE INDEX IF NOT EXISTS album_group_matches ON album_group_members(collection_id,album_id,item_id);
@@ -14,9 +15,26 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS metadata_language_order ON metadata_language_display(language,title_key,item_id);
     CREATE INDEX IF NOT EXISTS metadata_health_attention ON metadata_health(needs_attention,collection_id,title_key,item_id);
     CREATE INDEX IF NOT EXISTS metadata_health_collection ON metadata_health(collection_id,title_key,item_id);").map_err(storage)?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)
+    db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)?;
+    Ok(())
 }
 impl LibraryCarePort for Store {
+    fn metadata_item_scope(&self, item: ItemId) -> Result<CollectionId> {
+        let raw: Option<String> = self
+            .db
+            .read_lock()?
+            .query_row(
+                "SELECT collection_id FROM items WHERE id=?",
+                [item.to_string()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        raw.ok_or(Error::NotFound)?.parse().map_err(storage)
+    }
+    fn metadata_read_clock(&self) -> Result<String> {
+        self.db.read_lock()?.query_row("SELECT a.token||b.token FROM main.metadata_read_clock a,private.metadata_read_clock b",[],|r|r.get(0)).map_err(storage)
+    }
     fn library_item_scope(&self, item: ItemId) -> Result<CollectionId> {
         let db = self.db.read_lock()?;
         let raw: String = db
@@ -134,7 +152,7 @@ impl LibraryCarePort for Store {
     ) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
             let db = lock(&self.db)?;
-            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='digital_album_matching' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 100").map_err(storage)?;
+            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='digital_album_matching' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 5").map_err(storage)?;
             stmt.query_map(params![user.to_string(), item.to_string()], |r| {
                 r.get::<_, String>(0)
             })
@@ -149,7 +167,7 @@ impl LibraryCarePort for Store {
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
             let db = lock(&self.db)?;
-            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='accuraterip_check' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 100").map_err(storage)?;
+            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='accuraterip_check' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 5").map_err(storage)?;
             stmt.query_map(params![user.to_string(), item.to_string()], |r| {
                 r.get::<_, String>(0)
             })
@@ -227,9 +245,7 @@ impl LibraryCarePort for Store {
             )
             .map_err(|_| Error::Invalid("invalid metadata cursor".into()))?;
             if saved != scope || id.parse::<ItemId>().is_err() {
-                return Err(Error::Invalid(
-                    "metadata cursor belongs to different results".into(),
-                ));
+                return Err(Error::Conflict);
             }
             Some((title, id))
         } else {
@@ -284,6 +300,147 @@ impl LibraryCarePort for Store {
                 item.id.to_string(),
             ));
             items.push(item);
+        }
+        let next_cursor = if more {
+            last.map(|value| serde_json::to_vec(&value).map(hex::encode).map_err(storage))
+                .transpose()?
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
+    }
+
+    fn metadata_care_entries(
+        &self,
+        user: UserId,
+        query: &MetadataCareQuery,
+        namespace: &str,
+        full_language: &str,
+    ) -> Result<Page<collector_app::MetadataCareRow>> {
+        let limit = query.limit.unwrap_or(50);
+        if !(1..=200).contains(&limit) || query.search.len() > 256 {
+            return Err(Error::Invalid(
+                "metadata query must use a 1–200 entry page and at most 256 search characters"
+                    .into(),
+            ));
+        }
+        let language = self
+            .metadata_preferences(user)?
+            .language
+            .as_str()
+            .split('-')
+            .next()
+            .unwrap_or("en")
+            .to_ascii_lowercase();
+        let scope = Digest::sha256(
+            &serde_json::to_vec(&(
+                user,
+                &language,
+                namespace,
+                self.library_revision()?,
+                query.collection_id,
+                &query.search,
+                query.reason,
+                query.needs_attention,
+            ))
+            .map_err(storage)?,
+        )
+        .hex;
+        let cursor = if let Some(raw) = &query.cursor {
+            if raw.len() > 32768 {
+                return Err(Error::Invalid("metadata cursor is too large".into()));
+            }
+            let (saved, title, id): (String, String, String) = serde_json::from_slice(
+                &hex::decode(raw).map_err(|_| Error::Invalid("invalid metadata cursor".into()))?,
+            )
+            .map_err(|_| Error::Invalid("invalid metadata cursor".into()))?;
+            if saved != scope || id.parse::<ItemId>().is_err() {
+                return Err(Error::Conflict);
+            }
+            Some((title, id))
+        } else {
+            None
+        };
+        let failure = "EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.kind='metadata_resolution' AND j.state='failed' AND NOT EXISTS(SELECT 1 FROM private.jobs later WHERE later.item_id=j.item_id AND later.user_id=j.user_id AND later.kind=j.kind AND (later.created_at,later.id)>(j.created_at,j.id)))";
+        let grouping = "EXISTS(SELECT 1 FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items sibling ON sibling.id=peer.item_id AND sibling.deleted=0 WHERE own.item_id=i.id)";
+        let reason = match query.reason {
+            Some(collector_app::MetadataReviewReason::GroupingProposal) => grouping,
+            Some(collector_app::MetadataReviewReason::MissingName) => "h.missing_name=1",
+            Some(collector_app::MetadataReviewReason::MissingArtwork) => "h.missing_artwork=1",
+            Some(collector_app::MetadataReviewReason::AlbumAmbiguity) => "h.album_ambiguity=1",
+            Some(collector_app::MetadataReviewReason::IncompleteProviderInformation) => {
+                "h.incomplete_provider_information=1"
+            }
+            Some(collector_app::MetadataReviewReason::NoMatch) => "h.no_match=1",
+            Some(collector_app::MetadataReviewReason::ManualConflict) => "h.manual_conflict=1",
+            Some(collector_app::MetadataReviewReason::LookupFailed) => failure,
+            None => "1",
+        };
+        let db = self.db.read_lock()?;
+        let sql = format!(
+            "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),COALESCE(d.title_key,h.title_key),g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
+        );
+        let mut stmt = db.prepare(&sql).map_err(storage)?;
+        let mut rows = stmt
+            .query(params![
+                user.to_string(),
+                query.collection_id.map(|id| id.to_string()),
+                query.needs_attention,
+                query.search,
+                cursor.is_some(),
+                cursor.as_ref().map(|value| value.0.as_str()).unwrap_or(""),
+                cursor.as_ref().map(|value| value.1.as_str()).unwrap_or(""),
+                u32::from(limit) + 1,
+                language,
+                namespace,
+                full_language
+            ])
+            .map_err(storage)?;
+        let mut items = Vec::new();
+        let mut encoded = 0;
+        let mut last = None;
+        let mut more = false;
+        while let Some(row) = rows.next().map_err(storage)? {
+            if items.len() == usize::from(limit) {
+                more = true;
+                break;
+            }
+            let item: collector_app::LibraryEntry =
+                serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?)
+                    .map_err(storage)?;
+            let matching: Option<String> = row.get(3).map_err(storage)?;
+            let entry = collector_app::MetadataCareEntry {
+                id: item.id,
+                collection_id: item.collection_id,
+                title: item.title,
+                subtitle: item.subtitle,
+                module: item.module,
+                artwork: item.artwork,
+                summary_state: item.summary_state,
+                metadata_provisional: item.metadata_provisional,
+                metadata_tentative: item.metadata_tentative,
+                matching: matching
+                    .map(|v| serde_json::from_str(&v).map_err(storage))
+                    .transpose()?,
+            };
+            let size = serde_json::to_vec(&entry).map_err(storage)?.len();
+            if encoded + size > 96 * 1024 {
+                if items.is_empty() {
+                    return Err(Error::Invalid("metadata row exceeds page budget".into()));
+                }
+                more = true;
+                break;
+            }
+            encoded += size;
+            last = Some((
+                scope.clone(),
+                row.get::<_, String>(1).map_err(storage)?,
+                item.id.to_string(),
+            ));
+            items.push(collector_app::MetadataCareRow {
+                entry,
+                role: role_from_database(row.get(2).map_err(storage)?)?,
+            });
         }
         let next_cursor = if more {
             last.map(|value| serde_json::to_vec(&value).map(hex::encode).map_err(storage))
@@ -731,5 +888,37 @@ pub(crate) fn project_preparation(db: &Connection, item_id: ItemId) -> Result<()
         return Ok(());
     }
     db.execute("INSERT INTO preparation_readiness VALUES(?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,total_tracks=excluded.total_tracks,ready_tracks=excluded.ready_tracks,source_count=excluded.source_count,needs_attention=excluded.needs_attention",params![item_id.to_string(),item.collection_id.to_string(),total,ready,sources,total==0||ready<total]).map_err(storage)?;
+    Ok(())
+}
+
+pub(crate) fn install_read_clock(db: &Connection) -> Result<()> {
+    db.execute_batch("CREATE INDEX IF NOT EXISTS snapshot_response_lookup ON snapshots(collection_id,json_extract(record,'$.digest.hex'),json_extract(record,'$.acquisition_key'),id);").map_err(storage)?;
+    for (schema, tables) in [
+        (
+            "main",
+            &[
+                "items",
+                "captures",
+                "metadata_authorities",
+                "metadata_candidates",
+                "metadata_refreshes",
+                "processing_observations",
+                "assets",
+                "works",
+                "editions",
+                "collections",
+                "evidence",
+                "album_group_members",
+            ][..],
+        ),
+        ("private", &["grants", "metadata_preferences", "users"][..]),
+    ] {
+        db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {schema}.metadata_read_clock(token TEXT NOT NULL);INSERT INTO {schema}.metadata_read_clock SELECT hex(randomblob(16)) WHERE NOT EXISTS(SELECT 1 FROM {schema}.metadata_read_clock);")).map_err(storage)?;
+        for table in tables {
+            for operation in ["INSERT", "UPDATE", "DELETE"] {
+                db.execute_batch(&format!("CREATE TRIGGER IF NOT EXISTS {schema}.metadata_read_{table}_{operation} AFTER {operation} ON {table} BEGIN UPDATE metadata_read_clock SET token=hex(randomblob(16)); END;")).map_err(storage)?;
+            }
+        }
+    }
     Ok(())
 }

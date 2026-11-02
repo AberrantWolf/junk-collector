@@ -276,8 +276,10 @@ fn metadata_readiness(config: &ProviderConfig) {
 
 fn instructions(config: &Config, path: &std::path::Path) {
     println!(
-        "Background job defaults: {} processing workers; inbox copy limit {}; provider limit 1. Saved Administration worker settings override these defaults.",
-        config.jobs.processing_workers, config.jobs.copy_workers
+        "Background job defaults: {} processing workers; inbox copy limit {}; provider slots {} (one per service). Saved Administration worker settings override these defaults.",
+        config.jobs.processing_workers,
+        config.jobs.copy_workers,
+        collector_app::PROVIDER_JOB_SLOTS
     );
     println!(
         "\nLocal management: {} (open this exact address on the server computer)",

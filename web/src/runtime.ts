@@ -1,3 +1,4 @@
+export {queueDigitalAlbum} from './digital-submissions';
 import {AuthenticationCoordinator,type AuthenticationHandler,type AuthenticationIdentity} from './authentication-coordinator';
 import React,{useEffect,useRef,useState,useId} from 'react';
 

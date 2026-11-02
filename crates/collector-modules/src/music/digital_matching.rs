@@ -7,6 +7,8 @@ pub const ACOUSTID_ACQUIRE_OPERATION: &str = "org.junk.providers.acoustid.acquir
 #[serde(deny_unknown_fields)]
 pub struct DigitalFingerprintSelection {
     pub files: Vec<PackageFileId>,
+    #[serde(default)]
+    pub frames: std::collections::BTreeMap<PackageFileId, u64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DigitalFileFingerprint {
@@ -21,6 +23,8 @@ pub struct DigitalFingerprintOutput {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcoustIdQuery {
+    #[serde(default)]
+    pub refresh: bool,
     pub duration: u64,
     pub fingerprint: String,
 }
@@ -87,10 +91,12 @@ pub fn operate(
         {
             junk_libs_pcm::fingerprint::compute(reader, &mut checkpoint)
         } else {
-            junk_libs_music::fingerprint::compute(
-                junk_libs_music_audio_source(reader, file)?,
-                &mut checkpoint,
-            )
+            let source = junk_libs_music_audio_source(reader, file)?;
+            if let Some(&frames) = selection.frames.get(&file.id) {
+                junk_libs_music::fingerprint::compute_window(source, frames, &mut checkpoint)
+            } else {
+                junk_libs_music::fingerprint::compute(source, &mut checkpoint)
+            }
         }
         .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
         tracks.push(DigitalFileFingerprint {

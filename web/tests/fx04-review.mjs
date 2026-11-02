@@ -51,9 +51,12 @@ try{
  assert.equal(saved.inventory_title,'Draft after import');assert.equal(saved.inventory_subtitle,'First edition');assert.equal(saved.wishlist,true);assert.equal(saved.domain.payload.artist,'Existing artist');assert.equal(saved.captures.length,1);
  // Synthetic provider responses exercise presentation without external provider requests.
  let automaticTitle='Accepted release';let using='selected';
+ const fixtureRevision=()=>JSON.stringify([using,automaticTitle]);
+ await page.route(`**/api/v1/items/${seeded.id}/metadata/summary`,route=>route.fulfill({json:{revision:fixtureRevision()}}));
  await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{
   if(route.request().method()!=='GET'){await route.continue();return;}
   const response=await route.fetch();const review=await response.json();
+  review.read_revision=fixtureRevision();
   const candidate=(title,strength,current,extra={})=>({identity:{provider:'org.junk.providers.musicbrainz',provider_record_id:title,provider_record_version:null},title:{value:title,language:'en'},subtitle:null,artwork:null,complete_identity:true,strength,provider_priority:0,current,selected:false,accepted_automatically:false,unmatched:false,details:null,music_layout:null,...extra});
   review.candidates=[candidate('Saved name choice','name',false,{selected:using==='selected',unmatched:using==='selected'}),candidate(automaticTitle,'name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false)];
   review.authority.selected_candidate=using==='selected'?review.candidates[0].identity:null;
@@ -100,6 +103,7 @@ try{
 
  // Manual cover upload uses real storage and authority commands, with lost-response recovery.
  await page.unroute(`**/api/v1/items/${seeded.id}/metadata`);
+ await page.unroute(`**/api/v1/items/${seeded.id}/metadata/summary`);
  await page.getByRole('button',{name:'Refresh panel',exact:true}).click();
  const coverForm=page.getByRole('form',{name:'Upload manual cover art'});
  await expect(coverForm).toBeVisible();
@@ -140,7 +144,8 @@ try{
  await page.waitForFunction(async ({id,asset})=>{const response=await fetch('/api/v1/items/'+id+'/metadata');return response.ok&&(await response.json()).authority.artwork_choice===asset;},{id:seeded.id,asset:asset.id});
  await page.reload();await expect(page.getByRole('form',{name:'Upload manual cover art'})).toBeVisible();await expect(page.locator('.manual-artwork').getByRole('radio',{name:'My manual cover',exact:true})).toBeChecked();
  const retained=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);assert.equal(retained.primary_artwork,asset.id);
- await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{const response=await route.fetch();const review=await response.json();review.permissions.can_update=false;await route.fulfill({response,json:review});});
+ await page.route(`**/api/v1/items/${seeded.id}/metadata`,async route=>{const response=await route.fetch();const review=await response.json();
+  review.read_revision=fixtureRevision();review.permissions.can_update=false;await route.fulfill({response,json:review});});
  await page.getByRole('button',{name:'Refresh panel',exact:true}).click();
  await expect(page.getByRole('form',{name:'Upload manual cover art'})).toHaveCount(0);
  await expect(page.locator('.manual-artwork').getByRole('radio',{name:'My manual cover',exact:true})).toBeDisabled();

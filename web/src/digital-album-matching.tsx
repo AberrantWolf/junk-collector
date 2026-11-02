@@ -1,11 +1,12 @@
-import React,{useEffect,useRef,useState,api,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,queueDigitalAlbum,requestErrorMessage,isApiRequestError} from '@collector/runtime';
 import type {components} from './generated/api';
 type Item=components['schemas']['PresentedItem'];
 type Assignment=components['schemas']['DigitalTrackAssignment'];
 type Mapping={key:string;medium:number;position:number;recording_id:string;score:number;duration_delta_ms:number|null};
 type Candidate={release:{id:string;title:string;artist:string;disambiguation:string|null;date:string|null;country:string|null;media:{position:number|null;format:string|null;tracks:{position:number;title:string;duration_ms?:number|null}[]}[]};mappings:Mapping[];local_tracks:number;release_tracks:number;complete_tracklist:boolean;ambiguous_mapping:boolean;duration_conflicts:number;unmatched:string[]};
-type Result={inventory_revision:number;tracks:{source:string;file:string;name:string;frames:number;sample_rate:number}[];matches:Candidate[];truncated:boolean;artwork:{release_id:string;snapshot_id:string;image_id:string}[];artwork_error:string|null};
-type Work={stale:boolean;job:{id:string;state:string;phase:string;error:string|null;retryable:boolean};result:Result|null};
+type Result={can_expand?:boolean;inventory_revision:number;tracks:{source:string;file:string;name:string;frames:number;sample_rate:number}[];matches:Candidate[];truncated:boolean;artwork:{release_id:string;snapshot_id:string;image_id:string}[];artwork_error:string|null};
+type Progress=components['schemas']['DigitalMatchingProgress'];
+type Work={stale:boolean;result_revision:string|null;progress:Progress|null;job:{id:string;state:string;phase:string;error:string|null;retryable:boolean};result:Result|null};
 type Status={available:boolean;jobs:Work[]};
 const active=new Set(['queued','running','cancel_requested']);
 export default function DigitalAlbumMatching({userId,item,metadataRevision,disabled,onChoose,onError}:{userId:string;item:Item;metadataRevision:number;disabled:boolean;onChoose:(job:string,release:string,assignments?:Assignment[])=>Promise<void>;onError:(error:unknown)=>void}){
@@ -13,41 +14,39 @@ export default function DigitalAlbumMatching({userId,item,metadataRevision,disab
  const lifetime=useRef(new AbortController());const callbacks=useRef({onChoose,onError});callbacks.current={onChoose,onError};
  const owns=(controller:AbortController)=>lifetime.current===controller&&!controller.signal.aborted;
  useEffect(()=>{const controller=new AbortController();lifetime.current=controller;setStatus(undefined);setBusy(false);setError('');setLoadError('');let timer:ReturnType<typeof setTimeout>|undefined;
-  async function load(){try{const next=await api<Status>(`/items/${item.id}/digital-album-matches`,{signal:controller.signal});if(controller.signal.aborted)return;setStatus(next);setLoadError('');if(next.jobs.some(w=>active.has(w.job.state)))timer=setTimeout(load,1000);}catch(e){if(!controller.signal.aborted){setLoadError(requestErrorMessage(e));callbacks.current.onError(e);timer=setTimeout(load,3000);}}}
+  let previous:Status|undefined;
+  async function load(){try{const known=previous?.jobs.find(work=>work.result)?.result_revision;const next=await api<Status>(`/items/${item.id}/digital-album-matches${known?`?known_result=${encodeURIComponent(known)}`:''}`,{signal:controller.signal});if(controller.signal.aborted)return;next.jobs=next.jobs.map(work=>({...work,result:work.result||(work.result_revision?previous?.jobs.find(old=>old.job.id===work.job.id&&old.result_revision===work.result_revision)?.result:null)||null}));previous=next;setStatus(next);setLoadError('');if(next.jobs.some(w=>active.has(w.job.state)))timer=setTimeout(load,1000);}catch(e){if(!controller.signal.aborted){if(isApiRequestError(e)&&e.code==='unauthenticated')callbacks.current.onError(e);else setLoadError(requestErrorMessage(e));timer=setTimeout(load,3000);}}}
   void load();return()=>{controller.abort();if(timer)clearTimeout(timer);};
  },[userId,item.id,item.revision,metadataRevision,reload]);
- const pending=status?.jobs.find(w=>active.has(w.job.state));const latest=status?.jobs[0];const completed=status?.jobs.find(w=>w.job.state==='completed'&&w.result);const inventoryChanged=!!completed?.result&&(completed.stale!==false||completed.result.inventory_revision!==item.revision);
- async function start(){
-  const controller=lifetime.current;setBusy(true);setError('');const storage=`collector.digital-match.${userId}.${item.id}`;
-  try{
-   let saved:{key:string;expected_revision:number}|undefined;
-   try{saved=JSON.parse(localStorage.getItem(storage)||'null')||undefined;}catch{}
-   const recovering=!!saved;
-   const fresh=()=>{const receipt={key:crypto.randomUUID(),expected_revision:item.revision};localStorage.setItem(storage,JSON.stringify(receipt));return receipt;};
-   const submit=(receipt:{key:string;expected_revision:number})=>api<{job_id:string}>(`/items/${item.id}/digital-album-matches`,{method:'POST',headers:{'Idempotency-Key':receipt.key},body:JSON.stringify({expected_revision:receipt.expected_revision}),signal:controller.signal});
-   const accepted=await submit(saved||fresh());
-   if(!owns(controller))return;
-   // Acknowledge a lost response before issuing the user's new search intent.
-   if(recovering&&status?.jobs.some(work=>work.job.id===accepted.job_id&&!active.has(work.job.state))){
-    await submit(fresh());if(!owns(controller))return;
-   }
-   localStorage.removeItem(storage);setReload(v=>v+1);
-  }catch(e){if(owns(controller)){if(isApiRequestError(e)&&e.status>=400&&e.status<500&&e.code!=='command_in_progress')localStorage.removeItem(storage);setError(requestErrorMessage(e));callbacks.current.onError(e);}}
+ const pending=status?.jobs.find(w=>active.has(w.job.state));const latest=status?.jobs[0];const completed=status?.jobs.find(w=>w.result);const inventoryChanged=!!completed?.result&&(completed.stale!==false||completed.result.inventory_revision!==item.revision);
+ async function start(extended=false,refresh=false){
+  const controller=lifetime.current;setBusy(true);setError('');
+  try{await queueDigitalAlbum(userId,item.id,item.title,item.revision,extended,refresh);if(owns(controller))setReload(v=>v+1);}
+  catch(e){if(owns(controller)){if(isApiRequestError(e)&&e.code==='unauthenticated')callbacks.current.onError(e);else if(e instanceof DOMException&&['QuotaExceededError','SecurityError'].includes(e.name))setError(requestErrorMessage(e));}}
   finally{if(owns(controller))setBusy(false);}
  }
+
  async function jobAction(job:string,method:'POST'|'DELETE'){const controller=lifetime.current;setError('');setBusy(true);try{await api(`/jobs/${job}${method==='POST'?'/retry':''}`,{method,signal:controller.signal});if(owns(controller))setReload(v=>v+1);}catch(e){if(owns(controller))setError(requestErrorMessage(e));}finally{if(owns(controller))setBusy(false);}}
  if(!item.captures.some(c=>c.representations.some(r=>r.format==='original-file-audio-package')))return null;
  return <section aria-label="Digital album matching" className="digital-album-matching"><h4>Find matching digital albums</h4><p>Identify recordings from the audio when tags are missing. This sends fingerprints and track durations to AcoustID, then finds MusicBrainz releases. Audio files and purchase details stay on this server.</p>
  {status&&!status.available&&<p className="notice">Configure the server’s AcoustID application key and MusicBrainz contact to enable matching.</p>}
  <button disabled={disabled||busy||!!pending||!status?.available} onClick={()=>void start()}>Find matching albums</button>
- {pending&&<div role="status"><p>{pending.job.phase.replaceAll('_',' ')}…</p><button disabled={busy} onClick={()=>void jobAction(pending.job.id,'DELETE')}>Cancel album matching</button></div>}
- {latest?.job.error&&<p role="alert">{latest.job.error}</p>}{latest?.job.retryable&&!latest.stale&&!pending&&<button disabled={busy||disabled} onClick={()=>void jobAction(latest.job.id,'POST')}>Retry album matching</button>}{loadError&&<p role="alert">{loadError}</p>}{error&&<p role="alert">{error}</p>}
- {completed?.result&&<><div className="digital-match-guidance"><p>Review track mappings before choosing a release.</p><details className="digital-match-info"><summary aria-label="About audio recognition">ⓘ</summary><p>Recognition can be incomplete. These are identity suggestions, not catalog verification. Choosing a release applies the album and every mapped track title; it does not verify the audio.</p></details></div>{inventoryChanged&&<p className="notice">Album inventory or metadata changed. Find matching albums again before applying a release.</p>}{completed.result.truncated&&<p className="notice">The search reached its candidate budget. These results are incomplete.</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No album candidates are available to review. Try a manual MusicBrainz search below.</p>}
- {completed.result.matches.map(candidate=><AlbumCandidate key={`${completed.job.id}:${candidate.release.id}`} candidate={candidate} result={completed.result!} item={item} stale={inventoryChanged} disabled={disabled||busy||!!pending} onChoose={assignments=>callbacks.current.onChoose(completed.job.id,candidate.release.id,assignments)}/> )}</>}
+ {pending&&<div role="status"><p>{matchingProgress(pending)}</p><button disabled={busy||pending.job.state==='cancel_requested'} onClick={()=>void jobAction(pending.job.id,'DELETE')}>Cancel album matching</button></div>}
+ {latest?.job.error&&!latest.stale&&<p role="alert">{latest.job.error}</p>}{latest?.job.retryable&&!latest.stale&&!pending&&<button disabled={busy||disabled} onClick={()=>void jobAction(latest.job.id,'POST')}>Retry album matching</button>}{loadError&&<p role="alert">{loadError}</p>}{error&&<p role="alert">{error}</p>}
+ {completed?.result&&<>{!pending&&<button disabled={disabled||busy} onClick={()=>void start(false,true)}>Refresh lookups</button>}<div className="digital-match-guidance"><p>Review track mappings before choosing a release.</p><details className="digital-match-info"><summary aria-label="About audio recognition">ⓘ</summary><p>Recognition can be incomplete. These are identity suggestions, not catalog verification. Choosing a release applies the album and every mapped track title; it does not verify the audio.</p></details></div>{inventoryChanged&&<p className="notice">Album inventory or metadata changed. Find matching albums again before applying a release.</p>}{completed.result.truncated&&<p className="notice">Search limited.{!pending&&completed.result.can_expand&&<button disabled={disabled||busy} onClick={()=>void start(true)}>Search more releases</button>}</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No album candidates are available to review. Try a manual MusicBrainz search below.</p>}
+ {completed.result.matches.map(candidate=><AlbumCandidate key={`${completed.job.id}:${candidate.release.id}`} candidate={candidate} result={completed.result!} item={item} stale={inventoryChanged} disabled={disabled||busy||!['completed','queued','running'].includes(completed.job.state)} onChoose={assignments=>callbacks.current.onChoose(completed.job.id,candidate.release.id,assignments)}/> )}</>}
 
  </section>;
 }
 
+function matchingProgress(work:Work){
+ if(work.job.state==='cancel_requested')return 'Cancelling…';
+ const p=work.progress;if(!p)return work.job.state==='queued'?'Queued':'Starting…';
+ if(p.fingerprints<p.tracks||p.lookups<p.tracks)return `Fingerprints ${p.fingerprints}/${p.tracks} · Lookups ${p.lookups}/${p.tracks}`;
+ if(p.recordings<p.recordings_total)return `Finding releases · ${p.recordings}/${p.recordings_total}`;
+ if(p.releases<p.releases_total)return `Comparing releases · ${p.releases}/${p.releases_total}`;
+ return p.artwork_pending?'Matches ready · loading covers':'Comparing releases…';
+}
 function duration(ms:number|null|undefined){return ms==null?'duration unknown':`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;}
 function ReleaseRegion({code}:{code:string}){
  const region=code.toUpperCase();

@@ -1,3 +1,33 @@
+## Responsive Metadata and digital matching — locally qualified, 2026-11-03
+
+The user-requested delivery replaces full-item Metadata rows with compact cached
+projections and incremental pages, lazily loads related albums, caches resolved
+metadata and polls a cheap revision header. Reads retain current authorization,
+language and source/authority invalidation. Album matching uses durable per-track
+Jobs on the shared processing budget, overlaps completed fingerprints with AcoustID
+and MusicBrainz requests, and isolates each provider's dispatch limit. Per-file
+fingerprints and fresh provider responses are reused; explicit lookup refresh
+bypasses provider caches. Indexed snapshot-response selection avoids walking all
+retained provider records on each download.
+
+Fresh fingerprinting validates/stages one selected original once, then decodes at
+most 120 seconds through shared libraries. The result records actual decoded
+coverage separately from source-bound total duration. Publication remains fenced;
+raw masters, manual authority and accepted source attribution remain intact.
+Checkpointed candidates can be reviewed while optional covers load. Initial release
+detail demand is eight, with explicit expansion to 32; searches remain bounded
+identity suggestions, never catalog verification.
+
+Session-owned admission survives panel navigation, retains exact receipt inputs
+and shows unconfirmed/rejected requests. Internal children are grouped under their
+album in Activity. Multi-album admission, concurrent track claims, independent
+provider overlap, cancellation/restart, refresh, cache corruption and the real UI
+are covered by focused tests. Combined local qualification passes 615 Rust tests,
+strict Clippy and all 30 browser journeys; GitHub image qualification, publication
+and Fi installation are in progress;
+[the dated delivery record](validation/metadata-performance-2026-11-02.md) owns
+results and limits. This entry is the single queue record for the delivery.
+
 ## WAV declared-segment playback — source implementation, 2026-11-02
 
 User-approved policy accepts a complete internally valid RIFF/WAVE segment with

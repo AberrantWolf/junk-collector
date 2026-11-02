@@ -27,6 +27,7 @@ WITH roots AS (
  0,0,0,NULL,''
  FROM private.jobs j
  WHERE (NOT EXISTS(SELECT 1 FROM private.imports i WHERE i.id=json_extract(j.request,'$.import_id')) OR EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=j.id AND sr.kind='direct'))
+ AND (NOT EXISTS(SELECT 1 FROM private.digital_children d WHERE d.child=j.id) OR EXISTS(SELECT 1 FROM private.scan_requests sr WHERE sr.job_id=j.id AND sr.kind='direct'))
  AND (NOT EXISTS(SELECT 1 FROM private.preparation_members m WHERE m.job_id=j.id) OR EXISTS(SELECT 1 FROM private.derivative_direct_requests d WHERE d.job_id=j.id))
 ), work AS (
  SELECT r.*,coalesce(json_extract(c.record,'$.name'),'Server work') AS collection_name,it.title AS item_title,

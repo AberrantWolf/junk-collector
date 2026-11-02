@@ -449,17 +449,30 @@ impl CollectionService {
             .processing
             .package_inventory(frozen.collection_id, frozen.source)?;
         frozen.source_fingerprint.validate_inventory(&inventory)?;
+        let digital =
+            frozen.operation.as_str() == collector_modules::music::DIGITAL_FINGERPRINT_OPERATION;
+        let cache_key = if digital {
+            self.digital_fingerprint_cache_key(&frozen, &inventory)?
+        } else {
+            None
+        };
+        let cached = cache_key
+            .as_ref()
+            .map(|key| self.processing.fingerprint_cache(key))
+            .transpose()?
+            .flatten();
         self.report_processing_phase(claim, "validating_source")?;
-        if self.fingerprint_inventory_checked(&inventory, &mut || {
-            if self
-                .jobs
-                .cancellation_requested(claim.id, &claim.claim_token)?
-            {
-                Err(Error::JobCancelled)
-            } else {
-                Ok(())
-            }
-        })? != frozen.source_fingerprint
+        if !digital
+            && self.fingerprint_inventory_checked(&inventory, &mut || {
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    Err(Error::JobCancelled)
+                } else {
+                    Ok(())
+                }
+            })? != frozen.source_fingerprint
         {
             return Err(Error::Conflict);
         }
@@ -476,6 +489,7 @@ impl CollectionService {
                 scope: frozen.source,
             },
             source_fingerprint: &frozen.source_fingerprint,
+            validated_input: digital,
             frozen_snapshot_id: frozen.snapshot_id,
             catalog_parsers: self.catalog_parsers.as_ref(),
             cancellation: Arc::new(ProcessingCancellation::new(
@@ -493,23 +507,31 @@ impl CollectionService {
         };
         self.report_processing_phase(claim, phase)?;
         let (module, version) = self.modules.capability_owner(&frozen.operation)?;
-        let operated = self.modules.operate(
-            OperationRequest {
-                capability: frozen.operation.clone(),
-                input: frozen.selection.clone(),
-                collection_id: frozen.collection_id,
-                entity: OperationEntity::Representation(match frozen.source {
-                    PackageScope::Representation(id) => id,
-                    _ => {
-                        return Err(Error::Invalid(
-                            "durable processing operation requires a Representation".into(),
-                        ));
-                    }
-                }),
-                idempotency_key: claim.id.to_string(),
-            },
-            &host,
-        );
+        let cached_output = cached.and_then(|cached| {
+            self.rebind_cached_fingerprint(&frozen, &inventory, cached)
+                .ok()
+        });
+        let operated = if let Some(output) = cached_output {
+            Ok(output)
+        } else {
+            self.modules.operate(
+                OperationRequest {
+                    capability: frozen.operation.clone(),
+                    input: frozen.selection.clone(),
+                    collection_id: frozen.collection_id,
+                    entity: OperationEntity::Representation(match frozen.source {
+                        PackageScope::Representation(id) => id,
+                        _ => {
+                            return Err(Error::Invalid(
+                                "durable processing operation requires a Representation".into(),
+                            ));
+                        }
+                    }),
+                    idempotency_key: claim.id.to_string(),
+                },
+                &host,
+            )
+        };
         if self
             .jobs
             .cancellation_requested(claim.id, &claim.claim_token)?
@@ -552,19 +574,29 @@ impl CollectionService {
         self.validate_frozen_binding(&current, &frozen.collection_binding)?;
         self.validate_operation_eligibility(&current, &frozen.operation)?;
         self.report_processing_phase(claim, "rechecking_source")?;
-        if self.fingerprint_inventory_checked(&inventory, &mut || {
-            if self
-                .jobs
-                .cancellation_requested(claim.id, &claim.claim_token)?
-            {
-                Err(Error::JobCancelled)
-            } else {
-                Ok(())
-            }
-        })? != frozen.source_fingerprint
+        if !digital
+            && self.fingerprint_inventory_checked(&inventory, &mut || {
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)?
+                {
+                    Err(Error::JobCancelled)
+                } else {
+                    Ok(())
+                }
+            })? != frozen.source_fingerprint
         {
             return Err(Error::Conflict);
         }
+        if digital
+            && self
+                .processing
+                .recorded_source(frozen.collection_id, frozen.source)?
+                != frozen.source_fingerprint
+        {
+            return Err(Error::Conflict);
+        }
+        let cache_value = if digital { Some(payload.clone()) } else { None };
         let inputs = Some(self.scan_identity(&frozen)?);
         let observation = ProcessingObservation {
             id: frozen.observation_id,
@@ -595,6 +627,22 @@ impl CollectionService {
         )?;
         if frozen.operation.as_str() == "org.junk.music.import-analysis" {
             self.report_processing_phase(claim, "refreshing_metadata")?;
+        }
+        if let (Some(key), Some(value)) = (cache_key, cache_value) {
+            let output: collector_modules::music::DigitalFingerprintOutput = value.parse()?;
+            if let [track] = output.tracks.as_slice() {
+                track
+                    .audio
+                    .validate()
+                    .map_err(|e| Error::Invalid(e.to_string()))?;
+                self.processing.cache_fingerprint(
+                    &key,
+                    &RawJson::from_value(
+                        serde_json::to_value(&track.audio)
+                            .map_err(|e| Error::Storage(e.to_string()))?,
+                    ),
+                )?;
+            }
         }
         self.enrich_retained_file_analysis(claim, &frozen)?;
         Ok(serde_json::json!({"observation_id":frozen.observation_id}))

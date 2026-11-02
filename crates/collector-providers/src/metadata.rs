@@ -1798,7 +1798,7 @@ impl ProviderPort for AcoustIdProvider {
             execution,
             "AcoustID",
         )?;
-        junk_libs_music::provider::parse_acoustid(&bytes)
+        let found = junk_libs_music::provider::parse_acoustid(&bytes)
             .map_err(|e| Error::Unavailable(e.to_string()))?;
         checkpoint(execution)?;
         Ok(ProviderResponse {
@@ -1806,7 +1806,7 @@ impl ProviderPort for AcoustIdProvider {
             digest: Digest::sha256(&bytes),
             bytes,
             parsed_observation: RawJson::from_value(
-                serde_json::json!({"schema_version":1,"query":query}),
+                serde_json::json!({"schema_version":1,"query":query,"outcome":if found.is_empty(){"no_match"}else{"candidates"}}),
             ),
             limitations: vec![],
         })

@@ -195,7 +195,7 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
             }
         }
     }));
-    for worker_index in 0..9 {
+    for worker_index in 0..(8 + collector_app::PROVIDER_JOB_SLOTS) {
         let service = state.service.clone();
         let worker_instance = worker_instance.clone();
         workers.push(tokio::spawn(async move {
@@ -777,6 +777,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_music_preparation_batch))
         .routes(routes!(retry_music_preparation_batch))
         .routes(routes!(metadata_review, update_metadata_authority))
+        .routes(routes!(metadata_summary))
         .routes(routes!(identify_game_entry))
         .routes(routes!(resolve_metadata, metadata_resolutions))
         .routes(routes!(find_digital_albums, digital_album_matches))
@@ -1832,27 +1833,35 @@ async fn undo_album_group(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<PresentedItem>), (status = 401), (status = 403)))]
+#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::MetadataCareEntry>), (status = 401), (status = 403)))]
 async fn metadata_care(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<MetadataCareQuery>,
-) -> ApiResult<Json<Page<PresentedItem>>> {
+) -> ApiResult<Json<Page<collector_app::MetadataCareEntry>>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
         blocking(move || state.service.metadata_care(&actor, query)).await?,
     ))
 }
 
-#[utoipa::path(get,path="/api/v1/items/{id}/digital-album-matches",params(("id"=ItemId,Path)),responses((status=200,body=collector_app::DigitalMatchingStatus),(status=403)))]
+#[utoipa::path(get,path="/api/v1/items/{id}/digital-album-matches",params(("id"=ItemId,Path),("known_result"=Option<String>,Query)),responses((status=200,body=collector_app::DigitalMatchingStatus),(status=403)))]
 async fn digital_album_matches(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<ItemId>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<collector_app::DigitalMatchingStatus>> {
     let actor = principal(&state, &headers)?;
     Ok(Json(
-        blocking(move || state.service.digital_album_matches(&actor, id)).await?,
+        blocking(move || {
+            state.service.digital_album_matches(
+                &actor,
+                id,
+                query.get("known_result").map(String::as_str),
+            )
+        })
+        .await?,
     ))
 }
 #[utoipa::path(post,path="/api/v1/items/{id}/digital-album-matches",params(("id"=ItemId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::FindDigitalAlbums,responses((status=202,body=JobAccepted),(status=403),(status=409)))]
@@ -1901,6 +1910,18 @@ async fn resolve_metadata(
     })
     .await?;
     Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
+}
+
+#[utoipa::path(get,path="/api/v1/items/{id}/metadata/summary",params(("id"=ItemId,Path)),responses((status=200,body=collector_app::MetadataReadRevision),(status=403),(status=404)))]
+async fn metadata_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+) -> ApiResult<Json<collector_app::MetadataReadRevision>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.metadata_read_revision(&actor, id)).await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/metadata", params(("id" = ItemId, Path)), responses((status = 200, body = MetadataReviewView), (status = 403), (status = 404)))]

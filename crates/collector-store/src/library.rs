@@ -990,4 +990,65 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn metadata_headers_and_rows_avoid_graph_reads_and_follow_inventory_changes() {
+        let (_root, store, actor, service, saved) = fixture();
+        let old = service
+            .metadata_read_revision(&actor, saved.id)
+            .unwrap()
+            .revision;
+        let mut changed = saved.clone();
+        changed.title = "Changed inventory title".into();
+        let changed = Catalog::save(&*store, changed, saved.revision).unwrap();
+        assert_ne!(
+            old,
+            service
+                .metadata_read_revision(&actor, saved.id)
+                .unwrap()
+                .revision
+        );
+        store
+            .db
+            .lock()
+            .unwrap()
+            .authorizer(Some(|context: AuthContext<'_>| match context.action {
+                AuthAction::Read {
+                    table_name: "items",
+                    column_name: "record",
+                }
+                | AuthAction::Read {
+                    table_name: "captures" | "processing_observations",
+                    ..
+                } => Authorization::Deny,
+                _ => Authorization::Allow,
+            }));
+        let header = service.metadata_read_revision(&actor, saved.id);
+        let rows = service.metadata_care(
+            &actor,
+            collector_app::MetadataCareQuery {
+                collection_id: Some(saved.collection_id),
+                search: String::new(),
+                reason: None,
+                needs_attention: false,
+                cursor: None,
+                limit: Some(50),
+            },
+        );
+        store
+            .db
+            .lock()
+            .unwrap()
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        assert!(header.is_ok());
+        assert_eq!(rows.unwrap().items[0].title, changed.title);
+        assert_eq!(
+            service
+                .metadata_view(&actor, saved.id)
+                .unwrap()
+                .display
+                .title
+                .value,
+            changed.title
+        );
+    }
 }

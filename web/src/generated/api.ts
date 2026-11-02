@@ -1780,6 +1780,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/metadata/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metadata_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/music-disc-coverage": {
         parameters: {
             query?: never;
@@ -3478,13 +3494,25 @@ export interface components {
             algorithm: components["schemas"]["HashAlgorithm"];
             hex: string;
         };
+        DigitalMatchingProgress: {
+            artwork_pending: boolean;
+            fingerprints: number;
+            lookups: number;
+            recordings: number;
+            recordings_total: number;
+            releases: number;
+            releases_total: number;
+            tracks: number;
+        };
         DigitalMatchingStatus: {
             available: boolean;
             jobs: components["schemas"]["DigitalMatchingView"][];
         };
         DigitalMatchingView: {
             job: components["schemas"]["JobView"];
+            progress?: components["schemas"]["DigitalMatchingProgress"] | null;
             result: Record<string, never>;
+            result_revision?: string | null;
             stale: boolean;
         };
         /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
@@ -3648,6 +3676,8 @@ export interface components {
         };
         FindDigitalAlbums: {
             expected_revision: components["schemas"]["Revision"];
+            extended?: boolean;
+            refresh?: boolean;
         };
         GameCatalogIdentification: {
             byte_domain: string;
@@ -4213,6 +4243,7 @@ export interface components {
             id: components["schemas"]["ItemId"];
             identity: components["schemas"]["IdentityState"];
             import_in_progress: boolean;
+            metadata_provisional?: boolean;
             metadata_tentative: boolean;
             module: components["schemas"]["ModuleId"];
             subtitle: string;
@@ -4480,6 +4511,19 @@ export interface components {
             title: components["schemas"]["MetadataText"];
             unmatched: boolean;
         };
+        /** @description Only fields consumed by Metadata rows; full graphs stay behind detail reads. */
+        MetadataCareEntry: {
+            artwork?: components["schemas"]["LibraryArtwork"] | null;
+            collection_id: components["schemas"]["CollectionId"];
+            id: components["schemas"]["ItemId"];
+            matching?: components["schemas"]["MetadataMatchingStatus"] | null;
+            metadata_provisional: boolean;
+            metadata_tentative: boolean;
+            module: components["schemas"]["ModuleId"];
+            subtitle: string;
+            summary_state: components["schemas"]["LibrarySummaryState"];
+            title: string;
+        };
         MetadataCareQuery: {
             collection_id?: components["schemas"]["CollectionId"] | null;
             cursor?: string | null;
@@ -4515,6 +4559,11 @@ export interface components {
         };
         /** @enum {string} */
         MetadataLookupKind: "release_id" | "disc_id" | "search";
+        MetadataMatchingStatus: {
+            id: components["schemas"]["JobId"];
+            phase: string;
+            state: components["schemas"]["JobState"];
+        };
         MetadataMediumLayout: {
             disc_ids: string[];
             /** Format: int32 */
@@ -4543,6 +4592,9 @@ export interface components {
             guidance: string;
             id: components["schemas"]["ModuleId"];
             label: string;
+        };
+        MetadataReadRevision: {
+            revision: string;
         };
         /** @enum {string} */
         MetadataRefreshOutcome: "candidates" | "no_match" | "unavailable";
@@ -4574,6 +4626,7 @@ export interface components {
             preferred_language: components["schemas"]["LanguageTag"];
             proposed_candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
             providers: components["schemas"]["MetadataProviderView"][];
+            read_revision: string;
             recognized_systems: components["schemas"]["StandardGameSystem"][];
             review_reasons: components["schemas"]["MetadataReviewReason"][];
             revision: components["schemas"]["Revision"];
@@ -5121,6 +5174,21 @@ export interface components {
                 total_units: number;
                 /** Format: date-time */
                 updated_at: string;
+            }[];
+            next_cursor?: string | null;
+        };
+        Page_MetadataCareEntry: {
+            items: {
+                artwork?: components["schemas"]["LibraryArtwork"] | null;
+                collection_id: components["schemas"]["CollectionId"];
+                id: components["schemas"]["ItemId"];
+                matching?: components["schemas"]["MetadataMatchingStatus"] | null;
+                metadata_provisional: boolean;
+                metadata_tentative: boolean;
+                module: components["schemas"]["ModuleId"];
+                subtitle: string;
+                summary_state: components["schemas"]["LibrarySummaryState"];
+                title: string;
             }[];
             next_cursor?: string | null;
         };
@@ -10617,7 +10685,9 @@ export interface operations {
     };
     digital_album_matches: {
         parameters: {
-            query?: never;
+            query?: {
+                known_result?: string;
+            };
             header?: never;
             path: {
                 id: components["schemas"]["ItemId"];
@@ -11251,6 +11321,42 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metadata_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataReadRevision"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12584,7 +12690,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_PresentedItem"];
+                    "application/json": components["schemas"]["Page_MetadataCareEntry"];
                 };
             };
             /** @description Unauthorized */

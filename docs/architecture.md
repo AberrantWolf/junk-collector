@@ -1,3 +1,15 @@
+## Responsive metadata and digital matching — implementation, 2026-11-02
+
+Metadata lists consume compact, revision-fenced Library projections. Application
+services own a durable per-file matching pipeline, independent of panel lifetime.
+Per-track Jobs share the existing processing budget; provider Jobs may overlap
+across services while each adapter retains its own rate and refusal controls.
+Fresh fingerprints consume digest-validated bounded adapter scratch, with one
+original-file pass and shared-library prefix decoding. Completed per-file results
+are cached by byte identity and computation coordinates. Admission and polling
+never read originals. Stage checkpoints, child ownership and publication remain
+claim/revision fenced. Candidate readiness is independent of optional artwork.
+
 ## Declared WAV segment and trailing originals — 2026-11-02
 
 The shared `junk-libs-pcm` reader owns a bounded interpretation of one complete

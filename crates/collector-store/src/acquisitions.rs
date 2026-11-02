@@ -74,7 +74,18 @@ impl Store {
         if existing {
             return Ok(());
         }
-        let active: Option<(String,String)> = tx.query_row("SELECT j.id,j.state FROM private.jobs j WHERE j.kind='provider_acquisition' AND json_extract(j.request,'$.input_key')=? AND j.state IN ('queued','running','cancel_requested') ORDER BY j.created_at,j.id LIMIT 1",[&key],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
+        let refresh = collector_app::provider_requests_refresh(&frozen.request)?;
+        let policy = collector_app::provider_cache_policy(&frozen.request);
+        let cached: Option<String> = if let Some(policy) = policy.filter(|_| !refresh) {
+            tx.query_row("SELECT j.id FROM private.jobs j JOIN snapshots s ON s.id=json_extract(j.result,'$.snapshot_id') WHERE j.kind='provider_acquisition' AND json_extract(j.request,'$.input_key')=? AND j.state='completed' AND j.updated_at>? AND ((COALESCE(json_extract(s.record,'$.parsed_observation.http_status'),200)<>404 AND COALESCE(json_extract(s.record,'$.parsed_observation.outcome'),'')<>'no_match') OR j.updated_at>?) ORDER BY j.updated_at DESC,j.id LIMIT 1",params![key,now-policy.success_seconds,now-policy.negative_seconds],|r|r.get(0)).optional().map_err(storage)?
+        } else {
+            None
+        };
+        if let Some(id) = cached {
+            tx.execute("INSERT INTO private.acquisition_links(owner_job,input_key,acquisition_job) VALUES(?,?,?)",params![owner.to_string(),key,id]).map_err(storage)?;
+            return Ok(());
+        }
+        let active: Option<(String,String)> = tx.query_row("SELECT j.id,j.state FROM private.jobs j WHERE j.kind='provider_acquisition' AND json_extract(j.request,'$.input_key')=? AND (?=0 OR EXISTS(SELECT 1 FROM private.processing_jobs p WHERE p.job_id=j.id AND json_extract(p.frozen_input,'$.input.request.query.refresh')=1)) AND j.state IN ('queued','running','cancel_requested') ORDER BY j.created_at,j.id LIMIT 1",params![key,refresh],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
         let id = match active {
             Some((_, state)) if state == "cancel_requested" => {
                 return Err(Error::CommandInProgress);
@@ -199,6 +210,7 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
+        crate::digital_pipeline::reconcile(&tx)?;
         // Remove only unsettled ownership; completed bindings remain for uncertain retries.
         tx.execute("DELETE FROM private.acquisition_links WHERE snapshot_id IS NULL AND owner_job IN (SELECT j.id FROM private.jobs j LEFT JOIN items i ON i.id=j.item_id LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state IN ('cancelled','cancel_requested','failed') OR j.cancellation_requested=1 OR (i.id IS NOT NULL AND (i.deleted=1 OR COALESCE(g.generation,0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))))",[]).map_err(storage)?;
         tx.execute("UPDATE private.jobs SET state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END,cancellation_requested=1 WHERE kind='provider_acquisition' AND state IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM private.acquisition_links l JOIN private.jobs owner ON owner.id=l.owner_job WHERE l.acquisition_job=jobs.id AND owner.state IN ('queued','running') AND owner.cancellation_requested=0)",[]).map_err(storage)?;

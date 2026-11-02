@@ -83,7 +83,7 @@ impl Store {
             collector_app::WorkTarget::Job(id) => ("job", id.to_string()),
         };
         let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND (json_extract(request,'$.import_id')=?3 OR id IN (SELECT job_id FROM private.scan_requests WHERE kind='import' AND owner=?3))) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3) OR id IN (SELECT job_id FROM private.game_scan_members WHERE parent=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
+        let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND (json_extract(request,'$.import_id')=?3 OR id IN (SELECT job_id FROM private.scan_requests WHERE kind='import' AND owner=?3))) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3) OR id IN (SELECT job_id FROM private.game_scan_members WHERE parent=?3) OR id IN (SELECT child FROM private.digital_children WHERE parent=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
         let mut items = stmt
             .query_map(
                 params![
@@ -623,6 +623,11 @@ impl Store {
             .as_object_mut()
             .and_then(|o| o.remove("game_parent_claim"))
             .and_then(|v| v.as_str().map(str::to_owned));
+        let digital_claim = spec
+            .request
+            .as_object_mut()
+            .and_then(|o| o.remove("digital_parent_claim"))
+            .and_then(|v| v.as_str().map(str::to_owned));
         let request = serde_json::to_string(&spec.request).map_err(storage)?;
         if let Some(input) = &spec.frozen_input {
             input.validate()?;
@@ -642,6 +647,16 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
         self.admit_inbox_cleanup(&tx, &spec)?;
+        if let Some(parent) = spec
+            .request
+            .get("digital_parent")
+            .and_then(serde_json::Value::as_str)
+        {
+            let allowed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs WHERE id=? AND user_id=? AND collection_id=? AND kind='digital_album_matching' AND state='running' AND cancellation_requested=0 AND claim_token=? AND lease_expires>?)", params![parent,spec.user_id.to_string(),spec.collection_id.map(|v|v.to_string()),digital_claim,now], |r|r.get(0)).map_err(storage)?;
+            if !allowed {
+                return Err(Error::JobCancelled);
+            }
+        }
         if let Some(parent) = spec
             .request
             .get("game_parent")
@@ -979,6 +994,17 @@ impl Store {
             )
             .map_err(storage)?;
         }
+        if let Some(parent) = spec
+            .request
+            .get("digital_parent")
+            .and_then(serde_json::Value::as_str)
+        {
+            tx.execute(
+                "INSERT OR IGNORE INTO private.digital_children(parent,child) VALUES(?,?)",
+                params![parent, spec.id.to_string()],
+            )
+            .map_err(storage)?;
+        }
         self.record_command(&tx, &spec.id)?;
         tx.commit().map_err(storage)?;
         Ok(spec.id)
@@ -1003,6 +1029,8 @@ impl Store {
             .map_err(storage)?;
         let mut dispatch = lock(&self.job_dispatch)?;
         let settings = crate::library_settings::read_workers(&tx, dispatch.settings)?.jobs;
+        // A replacement worker instance must settle cancelled matching children whose old owner cannot acknowledge them.
+        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',worker_instance=NULL,claim_token=NULL,lease_expires=NULL,updated_at=?1 WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?2 OR lease_expires<=?1) AND id IN (SELECT child FROM private.digital_children)",params![now,worker_instance]).map_err(storage)?;
         let candidate: Option<String> = tx
             .query_row(
                 "WITH active AS (
@@ -1010,7 +1038,7 @@ impl Store {
                      AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
                    FROM private.jobs WHERE state IN ('running','cancel_requested') AND lease_expires>?2
                  ), runnable AS (
-                   SELECT id,kind,created_at,user_id,json_extract(request,'$.import_id') AS import_id,
+                   SELECT id,kind,created_at,user_id,json_extract(request,'$.digital_parent') AS digital_parent,json_extract(request,'$.import_id') AS import_id,
                      (kind=?3 OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
                    FROM private.jobs
                    WHERE (state='queued' AND phase='queued') OR
@@ -1024,6 +1052,12 @@ impl Store {
                       AND (active.kind='provider_acquisition')=(candidate.kind='provider_acquisition'))
                       < CASE WHEN candidate.kind='provider_acquisition' THEN ?5 ELSE ?6 END
                  )
+                 AND (candidate.kind!='provider_acquisition' OR NOT EXISTS (
+                    SELECT 1 FROM active a JOIN private.processing_jobs ap ON ap.job_id=a.id
+                    JOIN private.processing_jobs cp ON cp.job_id=candidate.id
+                    WHERE a.id<>candidate.id AND a.kind='provider_acquisition'
+                      AND json_extract(ap.frozen_input,'$.input.request.provider')=json_extract(cp.frozen_input,'$.input.request.provider')
+                 ))
                  AND (NOT candidate.is_copy OR (
                    (SELECT COUNT(*) FROM active
                     WHERE active.id<>candidate.id AND active.is_copy)< ?7
@@ -1051,6 +1085,7 @@ impl Store {
                      WHEN candidate.kind IN ('import_analysis','import_publication') THEN
                      COALESCE((SELECT CAST(key AS INTEGER) FROM json_each(?8)
                        WHERE value=candidate.user_id||':'||candidate.import_id),9) ELSE 9 END,
+                   CASE WHEN candidate.kind='processing_operation' AND candidate.digital_parent IS NOT NULL THEN (SELECT COUNT(*) FROM private.digital_children d JOIN private.jobs child ON child.id=d.child WHERE d.parent=candidate.digital_parent AND child.kind='processing_operation' AND child.state<>'queued') ELSE 0 END,
                    candidate.created_at,candidate.id LIMIT 1",
                 params![worker_instance, now, collector_app::IMPORT_COPY_JOB_KIND,
                     dispatch.prefers_copy(), collector_app::PROVIDER_JOB_SLOTS,
@@ -1622,6 +1657,35 @@ impl Store {
                 return Err(Error::JobCancelled);
             }
         }
+        if request.get("digital_parent").is_some() {
+            let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.digital_children d JOIN private.jobs p ON p.id=d.parent WHERE d.child=?1 AND p.user_id=?2 AND p.state IN ('queued','running') AND p.cancellation_requested=0) OR EXISTS(SELECT 1 FROM private.scan_requests WHERE job_id=?1 AND kind='direct' AND owner=?2)",params![id.to_string(),user.to_string()],|r|r.get(0)).map_err(storage)?;
+            if !active {
+                return Err(Error::Conflict);
+            }
+        }
+        if kind == "digital_album_matching" {
+            let children = {
+                let mut stmt=tx.prepare("SELECT j.id,j.state FROM private.digital_children d JOIN private.jobs j ON j.id=d.child WHERE d.parent=? AND j.state IN ('failed','cancelled','cancel_requested')").map_err(storage)?;
+                stmt.query_map([id.to_string()], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+            };
+            if children
+                .iter()
+                .any(|(_, state)| state == "cancel_requested")
+            {
+                return Err(Error::CommandInProgress);
+            }
+            for (child, _) in children {
+                let child_id = child.parse().map_err(storage)?;
+                requeue_failed_preparation(tx, child_id, user, self.clock.now().timestamp())?;
+                tx.execute("DELETE FROM private.acquisition_links WHERE owner_job=? AND snapshot_id IS NULL AND acquisition_job IN (SELECT id FROM private.jobs WHERE state IN ('failed','cancelled'))",[child]).map_err(storage)?;
+            }
+            tx.execute("UPDATE private.digital_checkpoints SET record=json_set(record,'$.artwork_error',NULL) WHERE job_id=?",[id.to_string()]).map_err(storage)?;
+        }
         let direct:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.scan_requests WHERE job_id=? AND kind='direct' AND owner=?)",params![id.to_string(),user.to_string()],|row|row.get(0)).map_err(storage)?;
         ensure_import_work(tx, &request, direct && kind == "import_analysis")?;
         let scan_key: Option<String> = tx
@@ -1929,7 +1993,19 @@ fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()>
         )
         .map_err(storage)?;
     }
-    let owner = game_parent
+    let digital_parent = spec
+        .request
+        .get("digital_parent")
+        .and_then(serde_json::Value::as_str);
+    if let Some(parent) = digital_parent {
+        tx.execute(
+            "INSERT OR IGNORE INTO private.digital_children VALUES(?,?)",
+            params![parent, id.to_string()],
+        )
+        .map_err(storage)?;
+    }
+    let owner = digital_parent
+        .or(game_parent)
         .or(parent)
         .map(str::to_owned)
         .unwrap_or_else(|| spec.user_id.to_string());
@@ -1937,7 +2013,9 @@ fn retain_scan_request(tx: &Connection, id: JobId, spec: &JobSpec) -> Result<()>
         "INSERT OR IGNORE INTO private.scan_requests(job_id,kind,owner) VALUES(?,?,?)",
         params![
             id.to_string(),
-            if game_parent.is_some() {
+            if digital_parent.is_some() {
+                "digital_batch"
+            } else if game_parent.is_some() {
                 "game_batch"
             } else if parent.is_some() {
                 "import"

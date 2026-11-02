@@ -1037,6 +1037,33 @@ impl SnapshotPort for Store {
     }
 }
 
+impl Store {
+    fn snapshot_response_page(
+        &self,
+        record: &SnapshotRecord,
+        after: Option<SnapshotId>,
+    ) -> Result<Vec<(SnapshotId, Option<String>)>> {
+        let db = lock(&self.db)?;
+        let mut statement=db.prepare("SELECT id,CASE WHEN length(record)<=2097152 THEN record ELSE NULL END FROM snapshots WHERE collection_id=?1 AND json_extract(record,'$.digest.hex')=?2 AND (json_extract(record,'$.acquisition_key')=?3 OR json_extract(record,'$.acquisition_key') IS NULL) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT 32").map_err(storage)?;
+        statement
+            .query_map(
+                params![
+                    record.collection_id.to_string(),
+                    record.digest.hex,
+                    record.acquisition_key,
+                    after.map(|id| id.to_string())
+                ],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .map_err(storage)?
+            .map(|row| {
+                let (id, raw) = row.map_err(storage)?;
+                Ok((id.parse().map_err(storage)?, raw))
+            })
+            .collect()
+    }
+}
+
 impl ProcessingPort for Store {
     fn ensure_snapshot_current(&self, item: ItemId, snapshot: SnapshotId) -> Result<()> {
         let db = lock(&self.db)?;
@@ -1124,6 +1151,21 @@ impl ProcessingPort for Store {
             None,
             std::collections::BTreeMap::new(),
         )
+    }
+    fn validated_fingerprint_file(
+        &self,
+        collection: CollectionId,
+        source: PackageScope,
+        file: &PackageFileFingerprint,
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Box<dyn collector_app::MediaReader>> {
+        self.stage_fingerprint_file(collection, source, file, checkpoint)
+    }
+    fn fingerprint_cache(&self, key: &str) -> Result<Option<RawJson>> {
+        self.read_fingerprint_cache(key)
+    }
+    fn cache_fingerprint(&self, key: &str, value: &RawJson) -> Result<()> {
+        self.write_fingerprint_cache(key, value)
     }
     fn package_file(
         &self,
@@ -1251,7 +1293,7 @@ impl ProcessingPort for Store {
                 if cancelled()? {
                     return Err(Error::JobCancelled);
                 }
-                let candidates = self.snapshot_record_page(Some(record.collection_id), after)?;
+                let candidates = self.snapshot_response_page(&record, after)?;
                 if candidates.is_empty() {
                     break;
                 }

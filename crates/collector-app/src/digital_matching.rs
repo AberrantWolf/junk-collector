@@ -2,12 +2,16 @@
 //! crates own decoding, protocol interpretation and one-to-one comparison.
 use crate::*;
 use collector_modules::music::*;
-use junk_libs_music::{LocalTrack, matching::AlbumMatch, provider};
+use junk_libs_music::{matching::AlbumMatch, provider};
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindDigitalAlbums {
     pub expected_revision: Revision,
+    #[serde(default)]
+    pub extended: bool,
+    #[serde(default)]
+    pub refresh: bool,
 }
 /// Explicit user-reviewed assignment; it makes no fingerprint recognition claim.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -34,13 +38,21 @@ pub struct FrozenDigitalMatching {
     pub inventory_revision: Revision,
     pub generation: u64,
     pub metadata_revision: Revision,
+    #[serde(default = "default_release_limit")]
+    pub release_limit: usize,
+    #[serde(default)]
+    pub refresh: bool,
     pub sources: Vec<FrozenProcessingJob>,
     pub tracks: Vec<FrozenMatchTrack>,
 }
+fn default_release_limit() -> usize {
+    32
+}
 impl FrozenDigitalMatching {
     pub fn validate(&self) -> Result<()> {
-        if self.sources.is_empty()
-            || self.sources.len() > 99
+        if !matches!(self.release_limit, 8 | 32)
+            || self.sources.is_empty()
+            || self.sources.len() > junk_libs_music::MAX_TRACKS
             || self.tracks.is_empty()
             || self.tracks.len() > junk_libs_music::MAX_TRACKS
         {
@@ -72,6 +84,8 @@ impl FrozenDigitalMatching {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DigitalMatchingResult {
     #[serde(default)]
+    pub can_expand: bool,
+    #[serde(default)]
     pub artwork: Vec<MetadataArtworkOption>,
     #[serde(default)]
     pub artwork_error: Option<String>,
@@ -85,6 +99,8 @@ pub struct DigitalMatchingResult {
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct DigitalMatchingView {
     pub stale: bool,
+    pub progress: Option<DigitalMatchingProgress>,
+    pub result_revision: Option<String>,
     pub job: JobView,
     #[schema(value_type=Object)]
     pub result: Option<serde_json::Value>,
@@ -99,29 +115,66 @@ impl CollectionService {
         &self,
         actor: &Principal,
         id: ItemId,
+        known_result: Option<&str>,
     ) -> Result<DigitalMatchingStatus> {
         let item = self.reader.item(id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
-        let jobs =
-            self.care
-                .digital_matching_jobs(actor.user_id, id)?
-                .into_iter()
-                .map(|j| {
-                    let stale = match self.jobs.frozen_job_input(j.id, actor.user_id)? {
-                        Some(FrozenJobInput::DigitalMatching(f)) => {
-                            !self.digital_matching_inputs_current(&item, &f)?
-                        }
-                        _ => true,
-                    };
-                    Ok(DigitalMatchingView {
-                        stale,
-                        result: j.result.as_ref().map(|v| {
-                            present_digital_matching_result(v.get("completion").unwrap_or(v))
-                        }),
-                        job: j.into(),
+        let mut sent_result = false;
+        let jobs = self
+            .care
+            .digital_matching_jobs(actor.user_id, id)?
+            .into_iter()
+            .map(|j| {
+                let stale = match self.jobs.frozen_job_input(j.id, actor.user_id)? {
+                    Some(FrozenJobInput::DigitalMatching(f)) => {
+                        !self.digital_matching_inputs_current(&item, &f)?
+                    }
+                    _ => true,
+                };
+                let checkpoint = self.jobs.digital_checkpoint(j.id, actor.user_id)?;
+                let progress = checkpoint
+                    .as_ref()
+                    .and_then(|v| v.get("progress"))
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|e| Error::Storage(e.to_string()))?;
+                let result = j
+                    .result
+                    .as_ref()
+                    .map(|v| v.get("completion").unwrap_or(v))
+                    .filter(|v| v.get("matches").is_some())
+                    .or_else(|| {
+                        checkpoint
+                            .as_ref()
+                            .and_then(|v| v.get("result"))
+                            .filter(|v| !v.is_null())
                     })
+                    .map(present_digital_matching_result);
+                let result = if sent_result { None } else { result };
+                sent_result |= result.is_some();
+                let result_revision = result
+                    .as_ref()
+                    .map(|v| serde_json::to_vec(v).map(|bytes| Digest::sha256(&bytes).hex))
+                    .transpose()
+                    .map_err(|e| Error::Storage(e.to_string()))?;
+                let result = if result_revision
+                    .as_deref()
+                    .is_some_and(|r| Some(r) == known_result)
+                {
+                    None
+                } else {
+                    result
+                };
+                Ok(DigitalMatchingView {
+                    stale,
+                    progress,
+                    result_revision,
+                    result,
+                    job: j.into(),
                 })
-                .collect::<Result<Vec<_>>>()?;
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(DigitalMatchingStatus {
             available: self.streaming_providers.contains_key(ACOUSTID_PROVIDER_ID)
                 && self
@@ -151,7 +204,13 @@ impl CollectionService {
         {
             return Ok(false);
         }
+        let mut seen = std::collections::BTreeSet::new();
         for source in &frozen.sources {
+            if !seen.insert(
+                serde_json::to_string(&source.source).map_err(|e| Error::Storage(e.to_string()))?,
+            ) {
+                continue;
+            }
             if self
                 .processing
                 .recorded_source(item.collection_id, source.source)?
@@ -187,7 +246,8 @@ impl CollectionService {
                 }
                 let job_id =
                     deterministic_job_id(actor.user_id, "music.match-digital", context.key());
-                let frozen = self.freeze_digital_matching(actor, &item, job_id)?;
+                let frozen =
+                    self.freeze_digital_matching(actor, &item, command.extended, command.refresh)?;
                 effects.enqueue_job(JobSpec {
                     id: job_id,
                     user_id: actor.user_id,
@@ -206,7 +266,8 @@ impl CollectionService {
         &self,
         actor: &Principal,
         item: &Item,
-        id: JobId,
+        extended: bool,
+        refresh: bool,
     ) -> Result<FrozenDigitalMatching> {
         let eligibility = self.content_write_eligibility(actor, item.collection_id)?;
         if !self.streaming_providers.contains_key(ACOUSTID_PROVIDER_ID)
@@ -269,54 +330,48 @@ impl CollectionService {
                 let fingerprint = self
                     .processing
                     .recorded_source(item.collection_id, PackageScope::Representation(source.id))?;
-                let selection = RawJson::from_value(serde_json::json!({"files":files}));
-                // Reuse only the same computation inputs; otherwise allocate immutable output identity.
-                let mut observation_id = ObservationId(deterministic_inventory_uuid(
-                    actor.user_id,
-                    "digital.fingerprint",
-                    &format!("{id}:{}", source.id),
-                ));
-                let mut after = None;
-                loop {
-                    let page = self.processing.observations(&ProcessingQuery {
+                for file in files {
+                    let track = tracks
+                        .iter()
+                        .find(|t| t.file == file && t.source == source.id)
+                        .ok_or(Error::Conflict)?;
+                    let selection = RawJson::from_value(
+                        serde_json::json!({"files":[file],"frames":{file.to_string():track.frames}}),
+                    );
+                    let computation = Digest::sha256(
+                        &serde_json::to_vec(&(
+                            &fingerprint,
+                            &selection,
+                            self.modules
+                                .capability_owner(&OperationId::new(
+                                    DIGITAL_FINGERPRINT_OPERATION,
+                                )?)?
+                                .1,
+                            junk_libs_music::fingerprint::IMPLEMENTATION,
+                        ))
+                        .map_err(|e| Error::Storage(e.to_string()))?,
+                    );
+                    let observation_id = ObservationId(deterministic_inventory_uuid(
+                        actor.user_id,
+                        "digital.fingerprint",
+                        &computation.hex,
+                    ));
+                    sources.push(FrozenProcessingJob {
                         collection_id: item.collection_id,
+                        collection_binding: eligibility.binding.clone(),
+                        operation: OperationId::new(DIGITAL_FINGERPRINT_OPERATION)?,
+                        operation_version: self
+                            .modules
+                            .capability_owner(&OperationId::new(DIGITAL_FINGERPRINT_OPERATION)?)?
+                            .1,
                         source: PackageScope::Representation(source.id),
                         source_fingerprint: fingerprint.clone(),
-                        operation: Some(OperationId::new(DIGITAL_FINGERPRINT_OPERATION)?),
-                        after,
-                        limit: 200,
-                    })?;
-                    for o in &page.items {
-                        let record = self.processing.processing_record(o.id)?;
-                        if record
-                            .inputs
-                            .as_ref()
-                            .is_some_and(|i| i.selection == selection.value().unwrap_or_default())
-                            && o.support == OperationSupport::Supported
-                        {
-                            observation_id = o.id;
-                        }
-                    }
-                    if page.next_cursor.is_none() {
-                        break;
-                    }
-                    after = page.items.last().map(|o| o.id);
+                        snapshot_id: None,
+                        observation_id,
+                        selection,
+                        created_at: self.authentication.now(),
+                    });
                 }
-                sources.push(FrozenProcessingJob {
-                    collection_id: item.collection_id,
-                    collection_binding: eligibility.binding.clone(),
-                    operation: OperationId::new(DIGITAL_FINGERPRINT_OPERATION)?,
-                    operation_version: self
-                        .modules
-                        .capability_owner(&OperationId::new(DIGITAL_FINGERPRINT_OPERATION)?)?
-                        .1,
-                    source: PackageScope::Representation(source.id),
-                    source_fingerprint: fingerprint,
-                    snapshot_id: None,
-                    observation_id,
-                    selection,
-                    created_at: self.authentication.now(),
-                });
             }
         }
         let metadata_revision = self
@@ -328,6 +383,8 @@ impl CollectionService {
             inventory_revision: item.revision,
             generation: item.lifecycle.generation,
             metadata_revision,
+            release_limit: if extended { 32 } else { 8 },
+            refresh,
             sources,
             tracks,
         };
@@ -425,42 +482,7 @@ impl CollectionService {
         }
         Ok(item)
     }
-    fn digital_acquisition(
-        &self,
-        claim: &JobClaim,
-        f: &FrozenDigitalMatching,
-        adapter: (&str, &str),
-        query: serde_json::Value,
-        stage: &str,
-        maximum: u64,
-    ) -> Result<SnapshotRecord> {
-        let item = self.current_digital_matching(claim, f)?;
-        let acquisition = FrozenAcquisitionJob {
-            request: ProviderRequest {
-                collection_id: item.collection_id,
-                provider: ModuleId(adapter.0.into()),
-                operation: OperationId::new(adapter.1)?,
-                source_fingerprint: None,
-                query: RawJson::from_value(query),
-                maximum_response_bytes: maximum,
-            },
-            collection_binding: f.sources[0].collection_binding.clone(),
-            item_id: Some(item.id),
-            snapshot_id: SnapshotId(deterministic_inventory_uuid(
-                claim.user_id,
-                "digital.response",
-                &format!("{}:{stage}", claim.id),
-            )),
-            created_at: f.sources[0].created_at,
-        };
-        let id = self.acquire_snapshot_for_job(claim, &acquisition)?;
-        self.current_digital_matching(claim, f)?;
-        self.processing.snapshot(SnapshotQuery {
-            collection_id: item.collection_id,
-            snapshot_id: id,
-        })
-    }
-    fn matching_bytes(
+    pub(crate) fn matching_bytes(
         &self,
         claim: &JobClaim,
         record: &SnapshotRecord,
@@ -474,218 +496,6 @@ impl CollectionService {
                 self.jobs
                     .cancellation_requested(claim.id, &claim.claim_token)
             },
-        )
-    }
-    pub(crate) fn run_digital_matching(&self, claim: &JobClaim) -> Result<serde_json::Value> {
-        let Some(FrozenJobInput::DigitalMatching(f)) = &claim.frozen_input else {
-            return Err(Error::Conflict);
-        };
-        f.validate()?;
-        self.current_digital_matching(claim, f)?;
-        let mut fingerprints = BTreeMap::new();
-        for source in &f.sources {
-            self.current_digital_matching(claim, f)?;
-            self.run_frozen_processing(claim, source.clone())?;
-            let o = self
-                .processing
-                .processing_record(source.observation_id)?
-                .observation;
-            if o.source_fingerprint != source.source_fingerprint
-                || o.support != OperationSupport::Supported
-                || o.operation.as_str() != DIGITAL_FINGERPRINT_OPERATION
-            {
-                return Err(Error::Conflict);
-            }
-            let out: DigitalFingerprintOutput = o.typed_result.payload.parse()?;
-            let PackageScope::Representation(source_id) = source.source else {
-                return Err(Error::Conflict);
-            };
-            for t in out.tracks {
-                let expected = f
-                    .tracks
-                    .iter()
-                    .find(|v| v.file == t.file_id && v.source == source_id)
-                    .ok_or(Error::Conflict)?;
-                if expected.frames != t.audio.decoded_frames
-                    || expected.sample_rate != t.audio.sample_rate
-                    || source
-                        .source_fingerprint
-                        .files
-                        .get(t.file_index)
-                        .is_none_or(|v| v.id != t.file_id)
-                {
-                    return Err(Error::Conflict);
-                }
-                t.audio
-                    .validate()
-                    .map_err(|e| Error::Invalid(e.to_string()))?;
-                fingerprints.insert(t.file_id, t.audio);
-            }
-        }
-        let mut local = Vec::new();
-        let mut recordings = BTreeSet::new();
-        for t in &f.tracks {
-            let audio = fingerprints.get(&t.file).ok_or(Error::Conflict)?;
-            if !audio.usable() {
-                local.push(LocalTrack {
-                    key: format!("{}:{}", t.source, t.file),
-                    duration_ms: audio.duration_ms,
-                    disc: t.disc,
-                    position: t.position,
-                    recordings: vec![],
-                });
-                continue;
-            }
-            let snapshot=self.digital_acquisition(claim,f,(ACOUSTID_PROVIDER_ID,ACOUSTID_ACQUIRE_OPERATION),serde_json::json!({"duration":audio.duration_ms.div_ceil(1000),"fingerprint":audio.fingerprint}),&format!("track:{}",t.file),1024*1024)?;
-            let found =
-                provider::parse_acoustid(&self.matching_bytes(claim, &snapshot, 1024 * 1024)?)
-                    .map_err(|e| Error::Unavailable(e.to_string()))?;
-            for r in &found {
-                if r.score >= 0.5 {
-                    recordings.insert(r.recording_id.clone());
-                }
-            }
-            local.push(LocalTrack {
-                key: format!("{}:{}", t.source, t.file),
-                duration_ms: audio.duration_ms,
-                disc: t.disc,
-                position: t.position,
-                recordings: found,
-            });
-        }
-        let mut release_ids = BTreeMap::<String, usize>::new();
-        let mut truncated = recordings.len() > 32;
-        for recording in recordings.into_iter().take(32) {
-            let snapshot=self.digital_acquisition(claim,f,(MUSICBRAINZ_PROVIDER_ID,MUSICBRAINZ_ACQUIRE_OPERATION),serde_json::json!({"kind":"recording_releases","recording_id":recording,"offset":0,"refresh":false}),&format!("recording:{recording}"),8*1024*1024)?;
-            let page = provider::parse_releases(
-                &self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?,
-                false,
-            )
-            .map_err(|e| Error::Unavailable(e.to_string()))?;
-            truncated |= page.total.is_some_and(|n| n as usize > page.releases.len());
-            for r in page.releases {
-                *release_ids.entry(r.id).or_default() += 1;
-            }
-        }
-        truncated |= release_ids.len() > 32;
-        let mut snapshots = BTreeMap::new();
-        let mut releases = Vec::new();
-        let mut release_ids: Vec<_> = release_ids.into_iter().collect();
-        release_ids.sort_by_key(|(id, hits)| (std::cmp::Reverse(*hits), id.clone()));
-        for (id, _) in release_ids.into_iter().take(32) {
-            let snapshot = self.digital_acquisition(
-                claim,
-                f,
-                (MUSICBRAINZ_PROVIDER_ID, MUSICBRAINZ_ACQUIRE_OPERATION),
-                serde_json::json!({"kind":"release_id","release_id":id,"refresh":false}),
-                &format!("release:{id}"),
-                8 * 1024 * 1024,
-            )?;
-            let page = provider::parse_releases(
-                &self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?,
-                true,
-            )
-            .map_err(|e| Error::Unavailable(e.to_string()))?;
-            if page.releases.len() != 1 || page.releases[0].id != id {
-                return Err(Error::Conflict);
-            }
-            if page.releases[0]
-                .media
-                .iter()
-                .map(|m| m.tracks.len())
-                .sum::<usize>()
-                > junk_libs_music::MAX_TRACKS
-            {
-                truncated = true;
-                continue;
-            }
-            snapshots.insert(id, snapshot.id);
-            releases.extend(page.releases);
-        }
-        let matches = junk_libs_music::matching::rank(&local, &releases, &mut || {
-            self.current_digital_matching(claim, f)
-                .map(|_| ())
-                .map_err(|_| junk_libs_music::Error::Cancelled)
-        })
-        .map_err(|e| Error::Unavailable(e.to_string()))?;
-        let mut artwork = Vec::new();
-        let mut artwork_error = None;
-        if self
-            .streaming_providers
-            .contains_key(COVER_ART_ARCHIVE_PROVIDER_ID)
-        {
-            for candidate in matches.iter().take(8) {
-                let id = &candidate.release.id;
-                let listing = self.digital_acquisition(
-                    claim,
-                    f,
-                    (
-                        COVER_ART_ARCHIVE_PROVIDER_ID,
-                        COVER_ART_ARCHIVE_ACQUIRE_OPERATION,
-                    ),
-                    serde_json::to_value(CoverArtArchiveQuery::Listing {
-                        release_id: id.clone(),
-                    })
-                    .map_err(|e| Error::Invalid(e.to_string()))?,
-                    &format!("cover:{id}"),
-                    8 * 1024 * 1024,
-                );
-                let snapshot = match listing {
-                    Ok(s) => s,
-                    Err(e @ (Error::CommandInProgress | Error::JobCancelled)) => return Err(e),
-                    Err(e) => {
-                        artwork_error = Some(e.to_string());
-                        break;
-                    }
-                };
-                let observation: CoverArtArchiveSnapshotObservation =
-                    snapshot.parsed_observation.parse()?;
-                if observation.http_status == 404 {
-                    continue;
-                }
-                let parser = self
-                    .catalog_parsers
-                    .get(COVER_ART_ARCHIVE_PROVIDER_ID)
-                    .ok_or(Error::Conflict)?;
-                let bytes = self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?;
-                let parsed = parser.parse_snapshot(
-                    &snapshot,
-                    &mut std::io::Cursor::new(bytes),
-                    &mut || {
-                        self.jobs
-                            .cancellation_requested(claim.id, &claim.claim_token)
-                    },
-                )?;
-                for entry in parsed.entries {
-                    let cover: CoverArtObservation = entry.parse()?;
-                    if cover.front {
-                        artwork.push(MetadataArtworkOption {
-                            snapshot_id: snapshot.id,
-                            release_id: cover.release_id,
-                            image_id: cover.image_id,
-                            front: true,
-                            back: cover.back,
-                            approved: cover.approved,
-                            types: cover.types,
-                        });
-                        break;
-                    }
-                }
-            }
-        }
-        self.current_digital_matching(claim, f)?;
-        bounded_digital_result(
-            DigitalMatchingResult {
-                artwork,
-                artwork_error,
-                matches,
-                truncated,
-                snapshots,
-                tracks: f.tracks.clone(),
-                fingerprints: f.sources.iter().map(|s| s.observation_id).collect(),
-                inventory_revision: f.inventory_revision,
-            },
-            &mut || self.current_digital_matching(claim, f).map(|_| ()),
         )
     }
 }
@@ -714,7 +524,7 @@ fn present_digital_matching_result(value: &serde_json::Value) -> serde_json::Val
 
 // Include source labels, mappings and optional artwork in the completion budget.
 // Leave room for the Job's completion wrapper within its existing 1-MiB bound.
-fn bounded_digital_result(
+pub(crate) fn bounded_digital_result(
     mut result: DigitalMatchingResult,
     checkpoint: &mut dyn FnMut() -> Result<()>,
 ) -> Result<serde_json::Value> {
@@ -772,7 +582,10 @@ impl CollectionService {
         let job = self.jobs.job_record(job_id, user)?;
         if job.kind != "digital_album_matching"
             || job.item_id != Some(item.id)
-            || job.state != JobState::Completed
+            || !matches!(
+                job.state,
+                JobState::Completed | JobState::Running | JobState::Queued
+            )
         {
             return Err(Error::Conflict);
         }
@@ -797,12 +610,19 @@ impl CollectionService {
                 return Err(Error::Conflict);
             }
         }
+        let checkpoint = self.jobs.digital_checkpoint(job_id, user)?;
         let result: DigitalMatchingResult = serde_json::from_value(
             job.result
                 .as_ref()
+                .map(|v| v.get("completion").unwrap_or(v))
+                .filter(|v| v.get("matches").is_some())
+                .or_else(|| {
+                    checkpoint
+                        .as_ref()
+                        .and_then(|v| v.get("result"))
+                        .filter(|v| !v.is_null())
+                })
                 .ok_or(Error::Conflict)?
-                .get("completion")
-                .unwrap_or(job.result.as_ref().ok_or(Error::Conflict)?)
                 .clone(),
         )
         .map_err(|e| Error::Storage(e.to_string()))?;
@@ -964,6 +784,7 @@ mod tests {
             unmatched: vec![],
         };
         let result = DigitalMatchingResult {
+            can_expand: false,
             artwork: vec![],
             artwork_error: None,
             matches: vec![candidate],

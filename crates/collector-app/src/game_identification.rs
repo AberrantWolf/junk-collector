@@ -78,6 +78,7 @@ impl ModuleHost for GameHost<'_> {
             return Err(ModuleError::AccessDenied);
         }
         ProcessingHost {
+            validated_input: false,
             frozen_snapshot_id: Some(id),
             port: self.base.port,
             access: self.base.access,
@@ -367,6 +368,7 @@ impl CollectionService {
         self.report_processing_phase(claim, "identifying_game")?;
         let host = GameHost {
             base: ProcessingHost {
+                validated_input: false,
                 port: self.processing.as_ref(),
                 access: PackageAccess {
                     collection_id: item.collection_id,

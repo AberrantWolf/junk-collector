@@ -5,6 +5,7 @@ mod archive_export;
 mod archive_v3;
 mod auth;
 mod backup;
+mod digital_pipeline;
 mod email_purchases;
 pub use archive_export::{import_archive, validate_archive_export};
 pub use backup::read_backup_history;
@@ -1777,6 +1778,17 @@ impl JobPort for Store {
         self.enqueue_job_record_with_batch(spec, Some((batch, claim_token)))
     }
 
+    fn digital_checkpoint(&self, id: JobId, user: UserId) -> Result<Option<serde_json::Value>> {
+        self.digital_checkpoint_record(id, user)
+    }
+    fn wait_digital(
+        &self,
+        claim: &JobClaim,
+        checkpoint: serde_json::Value,
+        waiting: &[JobId],
+    ) -> Result<()> {
+        self.wait_digital_record(claim, checkpoint, waiting)
+    }
     fn acquisition_for_job(
         &self,
         claim: &JobClaim,
@@ -3006,6 +3018,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     music_search::install(db)?;
     reference_index::install(db)?;
     library::install(db)?;
+    library_care::install_read_clock(db)?;
     index_checkpoint::install(db)?;
     if catalog_version < 9 {
         db.execute("DELETE FROM catalog_checkpoint", [])

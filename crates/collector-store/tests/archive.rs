@@ -5129,7 +5129,7 @@ fn durable_claims_enforce_the_global_limit_in_storage() {
             store.claim_job("server-a", 30).unwrap().is_none(),
             "limit {count}"
         );
-        for _ in 0..2 {
+        for _ in 0..collector_app::PROVIDER_JOB_SLOTS + 1 {
             store
                 .enqueue_job(JobSpec {
                     id: JobId::new(),
@@ -5144,13 +5144,15 @@ fn durable_claims_enforce_the_global_limit_in_storage() {
                 })
                 .unwrap();
         }
-        assert_eq!(
-            store.claim_job("server-a", 30).unwrap().unwrap().kind,
-            "provider_acquisition"
-        );
+        for _ in 0..collector_app::PROVIDER_JOB_SLOTS {
+            assert_eq!(
+                store.claim_job("server-a", 30).unwrap().unwrap().kind,
+                "provider_acquisition"
+            );
+        }
         assert!(
             store.claim_job("server-a", 30).unwrap().is_none(),
-            "provider capacity remains one at limit {count}"
+            "provider capacity remains bounded at processing limit {count}"
         );
     }
 }
@@ -23235,10 +23237,7 @@ fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retri
         .unwrap();
     let changed = changed.into_inner();
     let listing = serde_json::to_vec(&serde_json::json!({"release":format!("https://musicbrainz.org/release/{release}"),"images":[{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}]})).unwrap();
-    let mut replies = vec![
-        ("200 OK\r\nContent-Type: application/json", listing.clone()),
-        ("200 OK\r\nContent-Type: application/json", listing),
-    ];
+    let mut replies = vec![("200 OK\r\nContent-Type: application/json", listing)];
     replies.extend((0..4).map(|_| ("200 OK\r\nContent-Type: image/png", image.clone())));
     replies.push(("200 OK\r\nContent-Type: image/png", changed));
     replies.extend((0..2).map(|_| {
@@ -23337,6 +23336,11 @@ fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retri
         resolve(&actor, items[0].id, listing_lookup.clone()),
         listing_id
     );
+    assert_eq!(
+        fixture.requests.lock().unwrap().len(),
+        1,
+        "a repeated fresh listing should use the persisted cache"
+    );
     let image_id = resolve(&actor, items[0].id, image_lookup.clone());
     let first = service.metadata_view(&actor, items[0].id).unwrap();
     let first_asset = first.authority.artwork_choice.unwrap();
@@ -23378,9 +23382,26 @@ fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retri
         2,
         "changed artwork retains its own source and Asset"
     );
+    clock.advance(86400); // Expire the positive listing cache before observing a provider change.
     let no_data = resolve(&actor, items[0].id, listing_lookup.clone());
     assert_ne!(no_data, listing_id);
+    let calls = fixture.requests.lock().unwrap().len();
+    assert_eq!(
+        resolve(&actor, items[0].id, listing_lookup.clone()),
+        no_data
+    );
+    assert_eq!(
+        fixture.requests.lock().unwrap().len(),
+        calls,
+        "negative listing responses are cached"
+    );
+    clock.advance(3600);
     assert_eq!(resolve(&actor, items[0].id, listing_lookup), no_data);
+    assert_eq!(
+        fixture.requests.lock().unwrap().len(),
+        calls + 1,
+        "negative cache expires without rewriting equivalent evidence"
+    );
     let pending_request = ResolveMetadataCommand {
         lookup: image_lookup,
         acquire_artwork: false,
@@ -23476,7 +23497,7 @@ fn cover_art_retention_reuses_responses_with_item_owned_assets_and_durable_retri
             .artwork_choice,
         Some(first_asset)
     );
-    assert_eq!(fixture.requests.lock().unwrap().len(), 11);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 10);
     assert_eq!(
         service
             .curation_catalog_snapshots(&actor, collection.id, None, 100)
@@ -28480,11 +28501,16 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
                     "transient fingerprint fixture refusal".into(),
                 ));
             }
-            let mut fingerprints = self.fingerprints.lock().unwrap();
-            let next = fingerprints.len() + 1;
-            let n = *fingerprints
-                .entry(query.fingerprint.clone())
-                .or_insert(next);
+            // Identity comes from independent known vectors, never request arrival order.
+            let n = match Digest::sha256(query.fingerprint.as_bytes()).hex.as_str() {
+                "67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df" => 1,
+                "ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8" => 2,
+                _ => return Err(Error::Invalid("unexpected fingerprint fixture".into())),
+            };
+            self.fingerprints
+                .lock()
+                .unwrap()
+                .insert(query.fingerprint.clone(), n);
             (
                 if self.partial && n == 2 {
                     serde_json::json!({"status":"ok","results":[]})
@@ -28670,6 +28696,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
         .unwrap();
     let context = command();
     let input = FindDigitalAlbums {
+        refresh: false,
+        extended: false,
         expected_revision: saved.revision,
     };
     let job = service
@@ -28686,6 +28714,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
             &actor,
             item,
             FindDigitalAlbums {
+                refresh: false,
+                extended: false,
                 expected_revision: saved.revision
             },
             &command()
@@ -28704,7 +28734,7 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     assert_eq!(service.job(&actor, job).unwrap().state, JobState::Failed);
     assert!(
         service
-            .digital_album_matches(&actor, item)
+            .digital_album_matches(&actor, item, None)
             .unwrap()
             .jobs
             .iter()
@@ -28716,7 +28746,7 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     assert_eq!(service.retry_job(&actor, job, &command()).unwrap(), job);
     provider_drain(&service);
     assert_eq!(service.job(&actor, job).unwrap().created_at, created);
-    let status = service.digital_album_matches(&actor, item).unwrap();
+    let status = service.digital_album_matches(&actor, item, None).unwrap();
     let view = status.jobs.iter().find(|v| v.job.id == job).unwrap();
     assert_eq!(view.job.state, JobState::Completed, "{:?}", view.job.error);
     assert!(!view.stale);
@@ -28822,7 +28852,7 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     );
     assert!(
         service
-            .digital_album_matches(&actor, item)
+            .digital_album_matches(&actor, item, None)
             .unwrap()
             .jobs
             .iter()
@@ -28861,6 +28891,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
             &actor,
             item,
             FindDigitalAlbums {
+                refresh: false,
+                extended: false,
                 expected_revision: saved.revision,
             },
             &command(),
@@ -28872,7 +28904,10 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
         JobState::Completed
     );
     assert_eq!(
-        service.digital_album_matches(&actor, item).unwrap().jobs[0]
+        service
+            .digital_album_matches(&actor, item, None)
+            .unwrap()
+            .jobs[0]
             .result
             .as_ref()
             .unwrap()["fingerprints"],
@@ -28950,6 +28985,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
             &actor,
             item,
             FindDigitalAlbums {
+                refresh: false,
+                extended: false,
                 expected_revision: saved.revision,
             },
             &command(),
@@ -28994,7 +29031,7 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     );
     assert!(
         service
-            .digital_album_matches(&actor, item)
+            .digital_album_matches(&actor, item, None)
             .unwrap()
             .jobs
             .iter()
@@ -29012,6 +29049,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
             &actor,
             item,
             FindDigitalAlbums {
+                refresh: false,
+                extended: false,
                 expected_revision: saved.revision,
             },
             &command(),
@@ -30184,4 +30223,287 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
             .iter()
             .any(|a| a.job_id == old.id && a.state == JobState::Failed)
     );
+}
+
+#[test]
+fn digital_album_queue_retains_multiple_albums_and_parallel_track_claims_across_restart() {
+    digital_multiple_album_fixture(false);
+}
+#[test]
+fn digital_album_cancellation_survives_restart_without_losing_other_albums() {
+    digital_multiple_album_fixture(true);
+}
+fn digital_multiple_album_fixture(cancel_first: bool) {
+    use collector_app::{FindDigitalAlbums, JobSettings, UpdateWorkerSettings};
+    use collector_modules::music::*;
+    let clock = Arc::new(TestClock::new(1_700_000_000));
+    let (root, store, actor, base, collection) = setup_with_clock(Some(clock.clone()));
+    let mut items = Vec::new();
+    for _ in 0..3 {
+        items.push(
+            admit_digital_test_package(
+                &base,
+                &actor,
+                collection.id,
+                &["01.flac", "02.mp3"],
+                &[
+                    include_bytes!("fixtures/digital-matching/01.flac"),
+                    include_bytes!("fixtures/digital-matching/02.mp3"),
+                ],
+            )
+            .summary
+            .target_item_id
+            .unwrap(),
+        );
+    }
+    assert_eq!(
+        items
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    let provider = Arc::new(DigitalMatchingFixtureProvider {
+        fail_lookup: false.into(),
+        partial: false,
+        covers: Default::default(),
+        fingerprints: Default::default(),
+        calls: 0.into(),
+    });
+    let configure = |store: Arc<Store>| {
+        CollectionService::new(store, Arc::new(Registry::builtins()))
+            .with_streaming_provider(ModuleId(ACOUSTID_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+            .with_streaming_provider(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), provider.clone())
+            .unwrap()
+    };
+    provider_drain(&base);
+    drop(base);
+    let service = configure(store.clone());
+    let settings = service.worker_settings(&actor).unwrap();
+    service
+        .update_worker_settings(
+            &actor,
+            UpdateWorkerSettings {
+                expected_revision: settings.revision,
+                jobs: JobSettings {
+                    processing_workers: 1,
+                    copy_workers: 1,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let jobs: Vec<_> = items
+        .iter()
+        .map(|item| {
+            let job = service
+                .find_digital_albums(
+                    &actor,
+                    *item,
+                    FindDigitalAlbums {
+                        refresh: false,
+                        expected_revision: store.item(*item).unwrap().revision,
+                        extended: false,
+                    },
+                    &command(),
+                )
+                .unwrap();
+            clock.advance(1);
+            job
+        })
+        .collect();
+    for _ in 0..3 {
+        assert!(service.run_next_job("multiple-albums").unwrap());
+    }
+    for job in &jobs {
+        assert_eq!(service.job(&actor, *job).unwrap().state, JobState::Queued);
+    }
+    let settings = service.worker_settings(&actor).unwrap();
+    service
+        .update_worker_settings(
+            &actor,
+            UpdateWorkerSettings {
+                expected_revision: settings.revision,
+                jobs: JobSettings {
+                    processing_workers: 4,
+                    copy_workers: 1,
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    // Two real track computations can occupy separate worker slots simultaneously.
+    let a = store.claim_job("multiple-albums", 30).unwrap().unwrap();
+    let b = store.claim_job("multiple-albums", 30).unwrap().unwrap();
+    assert_eq!(
+        (&*a.kind, &*b.kind),
+        ("processing_operation", "processing_operation")
+    );
+    assert_ne!(a.id, b.id);
+    if cancel_first {
+        service.cancel_job(&actor, jobs[0], &command()).unwrap();
+    }
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_clock(
+            root.path().join("archive"),
+            root.path().join("state"),
+            clock.clone(),
+        )
+        .unwrap(),
+    );
+    let service = configure(store.clone());
+    for _ in 0..256 {
+        if !service.run_next_job("multiple-albums-restarted").unwrap() {
+            break;
+        }
+    }
+    for (index, (item, job)) in items.iter().zip(&jobs).enumerate() {
+        let view = service.job(&actor, *job).unwrap();
+        if cancel_first && index == 0 {
+            assert_eq!(view.state, JobState::Cancelled);
+            continue;
+        }
+        assert_eq!(view.state, JobState::Completed, "{:?}", view.error);
+        let status = service.digital_album_matches(&actor, *item, None).unwrap();
+        let result = status.jobs[0].result.as_ref().unwrap();
+        assert_eq!(
+            result["matches"][0]["mappings"].as_array().unwrap().len(),
+            2
+        );
+        let revision = status.jobs[0].result_revision.as_deref().unwrap();
+        let unchanged = service
+            .digital_album_matches(&actor, *item, Some(revision))
+            .unwrap();
+        assert!(unchanged.jobs[0].result.is_none());
+        assert_eq!(unchanged.jobs[0].result_revision.as_deref(), Some(revision));
+    }
+    if !cancel_first {
+        let before = provider.calls.load(Ordering::SeqCst);
+        clock.advance(1);
+        let fresh = service
+            .find_digital_albums(
+                &actor,
+                items[0],
+                FindDigitalAlbums {
+                    expected_revision: store.item(items[0]).unwrap().revision,
+                    extended: false,
+                    refresh: true,
+                },
+                &command(),
+            )
+            .unwrap();
+        for _ in 0..128 {
+            if !service.run_next_job("explicit-refresh").unwrap() {
+                break;
+            }
+        }
+        assert_eq!(
+            service.job(&actor, fresh).unwrap().state,
+            JobState::Completed
+        );
+        assert!(
+            provider.calls.load(Ordering::SeqCst) > before,
+            "explicit refresh must bypass the persisted provider cache"
+        );
+    }
+    assert_eq!(
+        provider.fingerprints.lock().unwrap().len(),
+        2,
+        "byte-identical files retain recognition identity across albums"
+    );
+}
+
+struct GatedIndependentProvider {
+    entered: std::sync::mpsc::Sender<String>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl StreamingProviderPort for GatedIndependentProvider {
+    fn acquire_stream(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        self.entered.send(request.provider.0.clone()).unwrap();
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| Error::Unavailable("provider concurrency fixture timed out".into()))?;
+        FixtureStreamingProvider {
+            calls: Arc::new(0.into()),
+            bytes: b"independent fixture response".to_vec(),
+        }
+        .acquire_stream(request, execution)
+    }
+}
+#[test]
+fn provider_workers_overlap_independent_services_and_bound_same_service_dispatch() {
+    use collector_modules::music::*;
+    let (_root, store, actor, base, collection) = setup();
+    let (entered, received) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let provider = Arc::new(GatedIndependentProvider {
+        entered,
+        release: std::sync::Mutex::new(wait),
+    });
+    let service = base
+        .with_streaming_provider(ModuleId(ACOUSTID_PROVIDER_ID.into()), provider.clone())
+        .unwrap()
+        .with_streaming_provider(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), provider)
+        .unwrap();
+    let mut jobs = Vec::new();
+    for (name, operation, query) in [
+        (
+            MUSICBRAINZ_PROVIDER_ID,
+            MUSICBRAINZ_ACQUIRE_OPERATION,
+            serde_json::json!({"kind":"search","query":"one","offset":0,"refresh":false}),
+        ),
+        (
+            MUSICBRAINZ_PROVIDER_ID,
+            MUSICBRAINZ_ACQUIRE_OPERATION,
+            serde_json::json!({"kind":"search","query":"two","offset":0,"refresh":false}),
+        ),
+        (
+            ACOUSTID_PROVIDER_ID,
+            ACOUSTID_ACQUIRE_OPERATION,
+            serde_json::json!({"duration":12,"fingerprint":"AQAA"}),
+        ),
+    ] {
+        let mut input = shared_provider_input(&collection, "independent");
+        input.request.provider = ModuleId(name.into());
+        input.request.operation = OperationId::new(operation).unwrap();
+        input.request.query = RawJson::from_value(query);
+        jobs.push(
+            service
+                .enqueue_catalog_acquisition(&actor, input, &command())
+                .unwrap(),
+        );
+    }
+    thread::scope(|scope| {
+        let a = scope.spawn(|| service.run_next_job("independent-sites"));
+        let b = scope.spawn(|| service.run_next_job("independent-sites"));
+        let first = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_ne!(
+            first, second,
+            "same-site limiter waits must not occupy all provider slots"
+        );
+        assert!(
+            store.claim_job("independent-sites", 30).unwrap().is_none(),
+            "the second request to the same service must wait"
+        );
+        release.send(()).unwrap();
+        release.send(()).unwrap();
+        assert!(a.join().unwrap().unwrap());
+        assert!(b.join().unwrap().unwrap());
+    });
+    // Release the remaining same-site request and finish each owning workflow.
+    release.send(()).unwrap();
+    provider_drain(&service);
+    for job in jobs {
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    }
 }

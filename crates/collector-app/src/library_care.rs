@@ -15,6 +15,8 @@ pub struct UpdateMetadataPreferences {
 }
 
 pub trait LibraryCarePort: Send + Sync {
+    fn metadata_item_scope(&self, item: ItemId) -> Result<CollectionId>;
+    fn metadata_read_clock(&self) -> Result<String>;
     fn library_item_scope(&self, item: ItemId) -> Result<CollectionId>;
     fn library_track_count(
         &self,
@@ -74,6 +76,13 @@ pub trait LibraryCarePort: Send + Sync {
         command: &UpdateCdLibrarySettings,
     ) -> Result<CdLibrarySettings>;
     fn metadata_resolution_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
+    fn metadata_care_entries(
+        &self,
+        user: UserId,
+        query: &MetadataCareQuery,
+        namespace: &str,
+        language: &str,
+    ) -> Result<Page<MetadataCareRow>>;
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>>;
     fn album_group_proposals(
         &self,
@@ -141,14 +150,35 @@ impl CollectionService {
         &self,
         actor: &Principal,
         query: MetadataCareQuery,
-    ) -> Result<Page<PresentedItem>> {
+    ) -> Result<Page<MetadataCareEntry>> {
+        let revision = self.care.library_revision()?;
         if let Some(collection) = query.collection_id {
             self.authorize(actor, collection, Action::Curate)?;
         }
-        let page = self.care.metadata_care_items(actor.user_id, &query)?;
+        let page = self.care.metadata_care_entries(
+            actor.user_id,
+            &query,
+            &self.library_namespace()?,
+            &self.metadata_language(actor.user_id)?,
+        )?;
         let mut items = Vec::new();
-        for item in page.items {
-            items.push(self.item_presented(actor, item.id)?);
+        let mut roles = std::collections::BTreeMap::new();
+        for source in page.items {
+            let role = match roles.get(&source.entry.collection_id) {
+                Some(role) => *role,
+                None => {
+                    let role = self.authorize(actor, source.entry.collection_id, Action::Curate)?;
+                    roles.insert(source.entry.collection_id, role);
+                    role
+                }
+            };
+            if role != source.role {
+                return Err(Error::Conflict);
+            }
+            items.push(source.entry);
+        }
+        if revision != self.care.library_revision()? {
+            return Err(Error::Conflict);
         }
         Ok(Page {
             items,
@@ -207,5 +237,58 @@ impl CollectionService {
             items,
             next_cursor: page.next_cursor,
         })
+    }
+}
+
+/// Only fields consumed by Metadata rows; full graphs stay behind detail reads.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataCareEntry {
+    pub id: ItemId,
+    pub collection_id: CollectionId,
+    pub title: String,
+    pub subtitle: String,
+    pub module: ModuleId,
+    pub artwork: Option<LibraryArtwork>,
+    pub summary_state: LibrarySummaryState,
+    pub metadata_provisional: bool,
+    pub metadata_tentative: bool,
+    pub matching: Option<MetadataMatchingStatus>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MetadataMatchingStatus {
+    pub phase: String,
+    pub id: JobId,
+    pub state: JobState,
+}
+pub struct MetadataCareRow {
+    pub entry: MetadataCareEntry,
+    pub role: Role,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct MetadataReadRevision {
+    pub revision: String,
+}
+impl CollectionService {
+    pub fn metadata_read_revision(
+        &self,
+        actor: &Principal,
+        item: ItemId,
+    ) -> Result<MetadataReadRevision> {
+        let collection = self.care.metadata_item_scope(item)?;
+        let role = self.authorize(actor, collection, Action::Curate)?;
+        let revision = Digest::sha256(
+            &serde_json::to_vec(&(
+                item,
+                role,
+                self.metadata_language(actor.user_id)?,
+                self.care.metadata_read_clock()?,
+                self.library_namespace()?,
+                self.streaming_providers.keys().collect::<Vec<_>>(),
+            ))
+            .map_err(|e| Error::Storage(e.to_string()))?,
+        )
+        .hex;
+        Ok(MetadataReadRevision { revision })
     }
 }

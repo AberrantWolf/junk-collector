@@ -14,8 +14,10 @@ pub fn acquisition_key(frozen: &FrozenAcquisitionJob) -> Result<String> {
     frozen.request.validate()?;
     let mut request =
         serde_json::to_value(&frozen.request).map_err(|e| Error::Invalid(e.to_string()))?;
-    if frozen.request.provider.0 == "org.junk.providers.musicbrainz"
-        && let Some(query) = request.get_mut("query").and_then(|v| v.as_object_mut())
+    if matches!(
+        frozen.request.provider.0.as_str(),
+        "org.junk.providers.musicbrainz" | "org.junk.providers.acoustid"
+    ) && let Some(query) = request.get_mut("query").and_then(|v| v.as_object_mut())
     {
         query.remove("refresh");
     }
@@ -112,8 +114,10 @@ pub fn reuses_equivalent_provider_responses(provider: &ModuleId) -> bool {
 /// Operational cache bypass is not part of provider response meaning.
 pub fn snapshot_response_key(record: &SnapshotRecord) -> Result<String> {
     let mut parsed = record.parsed_observation.value()?;
-    if record.provider.0 == "org.junk.providers.musicbrainz"
-        && let Some(query) = parsed.get_mut("query").and_then(|v| v.as_object_mut())
+    if matches!(
+        record.provider.0.as_str(),
+        "org.junk.providers.musicbrainz" | "org.junk.providers.acoustid"
+    ) && let Some(query) = parsed.get_mut("query").and_then(|v| v.as_object_mut())
     {
         query.remove("refresh");
     }
@@ -130,4 +134,45 @@ pub fn snapshot_response_key(record: &SnapshotRecord) -> Result<String> {
         .map_err(|e| Error::Invalid(e.to_string()))?,
     )
     .hex)
+}
+
+/// Application-owned freshness policy; verification datasets and explicit image
+/// acquisition keep their own refresh semantics.
+pub struct ProviderCachePolicy {
+    pub success_seconds: i64,
+    pub negative_seconds: i64,
+}
+pub fn provider_cache_policy(request: &ProviderRequest) -> Option<ProviderCachePolicy> {
+    let allowed = matches!(
+        request.provider.0.as_str(),
+        "org.junk.providers.acoustid" | "org.junk.providers.musicbrainz"
+    ) || request.provider.0
+        == collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
+        && request
+            .query
+            .parse::<collector_modules::music::CoverArtArchiveQuery>()
+            .is_ok_and(|q| {
+                matches!(
+                    q,
+                    collector_modules::music::CoverArtArchiveQuery::Listing { .. }
+                )
+            });
+    allowed.then_some(ProviderCachePolicy {
+        success_seconds: 86400,
+        negative_seconds: 3600,
+    })
+}
+pub fn provider_requests_refresh(request: &ProviderRequest) -> Result<bool> {
+    if !matches!(
+        request.provider.0.as_str(),
+        "org.junk.providers.acoustid" | "org.junk.providers.musicbrainz"
+    ) {
+        return Ok(false);
+    }
+    Ok(request
+        .query
+        .value()?
+        .get("refresh")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
 }

@@ -752,6 +752,15 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
         collection: CollectionId,
         source: PackageScope,
     ) -> Result<SourceFingerprint>;
+    fn validated_fingerprint_file(
+        &self,
+        collection: CollectionId,
+        source: PackageScope,
+        file: &collector_core::PackageFileFingerprint,
+        checkpoint: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<Box<dyn crate::MediaReader>>;
+    fn fingerprint_cache(&self, key: &str) -> Result<Option<RawJson>>;
+    fn cache_fingerprint(&self, key: &str, value: &RawJson) -> Result<()>;
     fn package_file(
         &self,
         collection: CollectionId,

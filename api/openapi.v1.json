@@ -5270,6 +5270,14 @@
             "schema": {
               "$ref": "#/components/schemas/ItemId"
             }
+          },
+          {
+            "name": "known_result",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5921,6 +5929,39 @@
           },
           "409": {
             "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/metadata/summary": {
+      "get": {
+        "operationId": "metadata_summary",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataReadRevision"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
           }
         }
       }
@@ -7521,7 +7562,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_PresentedItem"
+                  "$ref": "#/components/schemas/Page_MetadataCareEntry"
                 }
               }
             }
@@ -12000,6 +12041,52 @@
           }
         }
       },
+      "DigitalMatchingProgress": {
+        "type": "object",
+        "required": [
+          "tracks",
+          "fingerprints",
+          "lookups",
+          "recordings",
+          "recordings_total",
+          "releases",
+          "releases_total",
+          "artwork_pending"
+        ],
+        "properties": {
+          "artwork_pending": {
+            "type": "boolean"
+          },
+          "fingerprints": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lookups": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recordings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recordings_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "releases": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "releases_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "DigitalMatchingStatus": {
         "type": "object",
         "required": [
@@ -12029,8 +12116,24 @@
           "job": {
             "$ref": "#/components/schemas/JobView"
           },
+          "progress": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DigitalMatchingProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "result": {
             "type": "object"
+          },
+          "result_revision": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "stale": {
             "type": "boolean"
@@ -12665,6 +12768,12 @@
         "properties": {
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          },
+          "extended": {
+            "type": "boolean"
+          },
+          "refresh": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -15050,6 +15159,9 @@
           "import_in_progress": {
             "type": "boolean"
           },
+          "metadata_provisional": {
+            "type": "boolean"
+          },
           "metadata_tentative": {
             "type": "boolean"
           },
@@ -16163,6 +16275,66 @@
           }
         }
       },
+      "MetadataCareEntry": {
+        "type": "object",
+        "description": "Only fields consumed by Metadata rows; full graphs stay behind detail reads.",
+        "required": [
+          "id",
+          "collection_id",
+          "title",
+          "subtitle",
+          "module",
+          "summary_state",
+          "metadata_provisional",
+          "metadata_tentative"
+        ],
+        "properties": {
+          "artwork": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LibraryArtwork"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "matching": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetadataMatchingStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata_provisional": {
+            "type": "boolean"
+          },
+          "metadata_tentative": {
+            "type": "boolean"
+          },
+          "module": {
+            "$ref": "#/components/schemas/ModuleId"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "summary_state": {
+            "$ref": "#/components/schemas/LibrarySummaryState"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "MetadataCareQuery": {
         "type": "object",
         "properties": {
@@ -16301,6 +16473,25 @@
           "search"
         ]
       },
+      "MetadataMatchingStatus": {
+        "type": "object",
+        "required": [
+          "phase",
+          "id",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        }
+      },
       "MetadataMediumLayout": {
         "type": "object",
         "required": [
@@ -16425,6 +16616,17 @@
           }
         }
       },
+      "MetadataReadRevision": {
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          }
+        }
+      },
       "MetadataRefreshOutcome": {
         "type": "string",
         "enum": [
@@ -16527,6 +16729,7 @@
       "MetadataReviewView": {
         "type": "object",
         "required": [
+          "read_revision",
           "item_id",
           "revision",
           "authority",
@@ -16600,6 +16803,9 @@
             "items": {
               "$ref": "#/components/schemas/MetadataProviderView"
             }
+          },
+          "read_revision": {
+            "type": "string"
           },
           "recognized_systems": {
             "type": "array",
@@ -18863,6 +19069,83 @@
                 "updated_at": {
                   "type": "string",
                   "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_MetadataCareEntry": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Only fields consumed by Metadata rows; full graphs stay behind detail reads.",
+              "required": [
+                "id",
+                "collection_id",
+                "title",
+                "subtitle",
+                "module",
+                "summary_state",
+                "metadata_provisional",
+                "metadata_tentative"
+              ],
+              "properties": {
+                "artwork": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LibraryArtwork"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "collection_id": {
+                  "$ref": "#/components/schemas/CollectionId"
+                },
+                "id": {
+                  "$ref": "#/components/schemas/ItemId"
+                },
+                "matching": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MetadataMatchingStatus"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "metadata_provisional": {
+                  "type": "boolean"
+                },
+                "metadata_tentative": {
+                  "type": "boolean"
+                },
+                "module": {
+                  "$ref": "#/components/schemas/ModuleId"
+                },
+                "subtitle": {
+                  "type": "string"
+                },
+                "summary_state": {
+                  "$ref": "#/components/schemas/LibrarySummaryState"
+                },
+                "title": {
+                  "type": "string"
                 }
               }
             }

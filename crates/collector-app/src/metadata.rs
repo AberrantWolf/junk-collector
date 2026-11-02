@@ -272,6 +272,7 @@ pub enum MetadataReviewReason {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataReviewView {
+    pub read_revision: String,
     pub item_id: ItemId,
     pub revision: Revision,
     pub authority: MetadataAuthority,
@@ -386,27 +387,7 @@ impl CollectionService {
         item: &Item,
         language: &str,
     ) -> Result<ResolvedMetadataDisplay> {
-        let LoadedMetadataAuthority {
-            mut authority,
-            legacy,
-            current,
-            ..
-        } = self.authority_or_inventory(item)?;
-        let mut candidates = self
-            .processing
-            .metadata_candidates(item.collection_id, item.id)?;
-        merge_metadata_candidates(
-            &mut candidates,
-            legacy.iter().flat_map(|value| &value.candidates),
-        )?;
-        let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
-        self.reassess_music_edition(item, &mut authority, &active, language)?;
-        resolve_metadata_display(
-            item,
-            &authority,
-            &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-            language,
-        )
+        Ok(self.metadata_view_for_language(item, language)?.display)
     }
 
     pub fn enqueue_musicbrainz_metadata_acquisition(
@@ -910,12 +891,33 @@ impl CollectionService {
     pub fn metadata_view(&self, actor: &Principal, item_id: ItemId) -> Result<MetadataView> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
+        self.metadata_view_for_language(&item, &self.metadata_language(actor.user_id)?)
+    }
+    fn metadata_view_for_language(&self, item: &Item, language: &str) -> Result<MetadataView> {
+        let generation = self.care.metadata_read_clock()?;
+        let key = Digest::sha256(
+            &serde_json::to_vec(&(item.id, item.revision, language, &generation))
+                .map_err(|e| Error::Storage(e.to_string()))?,
+        )
+        .hex;
+        let cached = self
+            .metadata_reads
+            .lock()
+            .map_err(|_| Error::Unavailable("metadata cache lock failed".into()))?
+            .get(&key)
+            .map(|(view, _)| view.clone());
+        if let Some(view) = cached {
+            if generation != self.care.metadata_read_clock()? {
+                return Err(Error::Conflict);
+            }
+            return Ok(view);
+        }
         let LoadedMetadataAuthority {
             revision,
             mut authority,
             legacy,
             current,
-        } = self.authority_or_inventory(&item)?;
+        } = self.authority_or_inventory(item)?;
         let mut candidates = self
             .processing
             .metadata_candidates(item.collection_id, item.id)?;
@@ -923,14 +925,13 @@ impl CollectionService {
             &mut candidates,
             legacy.iter().flat_map(|value| &value.candidates),
         )?;
-        let language = self.metadata_language(actor.user_id)?;
         let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
-        self.reassess_music_edition(&item, &mut authority, &active, &language)?;
+        self.reassess_music_edition(item, &mut authority, &active, language)?;
         let display = resolve_metadata_display(
-            &item,
+            item,
             &authority,
             &current_metadata_candidates(&authority, &candidates, current.as_deref())?,
-            &self.metadata_language(actor.user_id)?,
+            language,
         )?;
         let current_candidates = current.unwrap_or_else(|| {
             candidates
@@ -946,14 +947,34 @@ impl CollectionService {
             .collect::<Vec<_>>();
         let (candidates, current_candidates) =
             maintenance::consolidate_matches(&candidates, &current_candidates, &preferred)?;
-        Ok(MetadataView {
-            item_id,
+        let view = MetadataView {
+            item_id: item.id,
             revision,
             authority,
             display,
             candidates,
             current_candidates,
-        })
+        };
+        if generation != self.care.metadata_read_clock()? {
+            return Err(Error::Conflict);
+        }
+        let bytes = serde_json::to_vec(&view)
+            .map_err(|e| Error::Storage(e.to_string()))?
+            .len();
+        if bytes <= 1024 * 1024 {
+            let mut cache = self
+                .metadata_reads
+                .lock()
+                .map_err(|_| Error::Unavailable("metadata cache lock failed".into()))?;
+            cache.retain(|_, (v, _)| v.item_id != item.id);
+            while cache.len() >= 32
+                || cache.values().map(|(_, n)| n).sum::<usize>() + bytes > 8 * 1024 * 1024
+            {
+                cache.pop_first();
+            }
+            cache.insert(key, (view.clone(), bytes));
+        }
+        Ok(view)
     }
 
     pub(crate) fn has_computed_disc_id(&self, item: &Item, disc_id: &str) -> Result<bool> {
@@ -1104,6 +1125,7 @@ impl CollectionService {
         actor: &Principal,
         item_id: ItemId,
     ) -> Result<MetadataReviewView> {
+        let read_revision = self.metadata_read_revision(actor, item_id)?.revision;
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
         let view = self.metadata_view(actor, item_id)?;
@@ -1450,7 +1472,11 @@ impl CollectionService {
                 }
             }
         }
+        if read_revision != self.metadata_read_revision(actor, item_id)?.revision {
+            return Err(Error::Conflict);
+        }
         Ok(MetadataReviewView {
+            read_revision,
             terms: self
                 .modules
                 .descriptors()
