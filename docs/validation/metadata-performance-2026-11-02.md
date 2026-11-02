@@ -154,3 +154,78 @@ actual Chrome smoke, digital-matching and metadata-review journeys. Forced trans
 changes while opening all later albums recover and all three requests complete.
 Metadata page requests measured 12 ms and 2 ms locally. Self-review confirms only
 read consistency outcomes changed; mutation and stale-scope fences remain intact.
+
+
+## Publication and Fi acceptance — 2026-11-03 JST
+
+Signed source/tag `ad3ac981f8bfce29a01210748a83d527a4b3febe` is published as
+[beta.19](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.19).
+It includes the existing artwork/presentation documentation and UI commits and the
+WAV delivery, as explicitly authorized, plus both CI read-recovery repairs.
+[Main Checks 41479853813](https://github.com/AberrantWolf/junk-collector/actions/runs/41479853813)
+passes **617 Linux Rust tests, zero failures, five existing ignores**, strict
+workspace/all-target Clippy, architecture/format, web types/build/models, tooling,
+release/mail fixtures and **all 30 browser journeys**. Its clean exact-source
+receipt records full `infra` coverage against beta.18. The prior repaired local
+workspace run passed 616 tests with five ignores; the final read-outcome change
+also has the focused acceptance recorded above.
+
+[Validation 41479897560](https://github.com/AberrantWolf/junk-collector/actions/runs/41479897560)
+passes both native image builds/runtime gates and AMD64 release-image browser
+acceptance. [Publication 41483486037](https://github.com/AberrantWolf/junk-collector/actions/runs/41483486037)
+restores the sealed exports and promotes those validated bytes without rebuilding.
+Release asset SHA-256 checks and the signed tag verify. Independent anonymous
+registry checks confirm both platform manifests, source/version labels, matching
+`preview` and unchanged stable `latest`. The redundant tag-triggered Checks run
+41483448788 was cancelled because main already qualified the identical source;
+it is not additional passing evidence. An accidental dispatch for the preceding
+source while SSH push stalled was cancelled too; HTTPS published the correct source
+before final qualification.
+
+```text
+index:       sha256:238edfe34f478399260dec206776e40c944aeaf781ce92bf14163adf71389b01
+linux/amd64: sha256:31370286bc79e4a3f91ddafd05e59702a84891ce4d40f9ac602e6e00abea6d3b
+linux/arm64: sha256:5e18d00330a6f48d12ae130c5f29f195cfc86c955b5bce5976000eb479156712
+```
+
+Fi anonymously pulled the immutable index and checked the actual AMD64 source and
+version labels before downtime. Frozen source archive SHA-256 is
+`64464b94d041692fbb1fa7556cc7bd6ba591d65636e36e43f555353391970c9e`, verified on both
+Mac and Fi. With zero unfinished Jobs, all five stack services stopped and their
+actual PIDs reached zero. Database quick checks and read-only snapshots passed
+before sealing this matching recovery pair:
+
+- Fi: `/var/backups/collector-fi-pairs/before-beta19-20261103-ad3ac98/fi-data`.
+- NAS: `/volume1/collector-recovery/before-beta19-20261103-ad3ac98`.
+- NAS snapshot UUID: `755d3d96-27a9-ff4c-9483-965af63b0ea7`.
+
+The pair retains local private state/WAL, archive originals, imports/scratch,
+configuration/TLS, Bridge home/profiles and exact old deployment metadata. Neither
+source has excluded nested subvolumes. Private recovery metadata retains the
+previous env/compose/systemd/fstab, image identities and media authority key.
+Rollback requires the matching pair with all writers stopped.
+
+Acceptance completed at **2026-11-03 01:42:19 JST**. Fi reports
+`junk-collector 0.1.0-beta.19`; core/media use the qualified image. All five stack
+containers have zero restarts, and core is healthy. Public and LAN trusted HTTPS
+return 200 with unchanged ServerId `01a15429-856a-7763-b558-3c158b1604a0`; seven
+served web assets match released source. Counts remain **123 Items, one user, two
+grants and 3,758 Jobs**, with zero unfinished work. Both credential-bearing profiles,
+the one connection's configuration/cursor, purchase history, config/TLS and
+authority key are preserved. Mounts, UID/groups, isolation, commands and restart
+policies match. Only core/media were recreated; Bridge/Caddy/tunnel container
+identities and all seven unrelated running services remain unchanged. Bridge status
+is fresh and `synced` with the same certificate pin. No mailbox login, production
+matching retry, credential replacement or production mutation test was issued.
+
+Temporary implementation/repair/shared-library/consumer worktrees and merged
+branches are removed, as is the integration stash. The pre-existing unrelated
+worktree is retained. Verified superseded Fi source staging and the one-use NAS
+snapshot helper were removed; the accepted deployment, logs and all recovery
+points remain. No general image/volume prune or collection-history deletion ran.
+
+Actual authenticated Metadata/whole-album timing on Fi was not benchmarked. Local
+fixture reads, real-browser concurrency and bounded shared-audio vectors establish
+the delivered mechanics; external provider and actual album latency remain
+workload dependent. Hardware/phone/cellular qualification is unchanged. Refresh
+open web clients to load the new assets.

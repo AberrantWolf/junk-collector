@@ -1,4 +1,4 @@
-## Responsive Metadata and digital matching — locally qualified, 2026-11-03
+## Responsive Metadata and digital matching — beta.19 installed on Fi, 2026-11-03
 
 The user-requested delivery replaces full-item Metadata rows with compact cached
 projections and incremental pages, lazily loads related albums, caches resolved
@@ -24,10 +24,11 @@ Session-owned admission survives panel navigation, retains exact receipt inputs
 and shows unconfirmed/rejected requests. Internal children are grouped under their
 album in Activity. Multi-album admission, concurrent track claims, independent
 provider overlap, cancellation/restart, refresh, cache corruption and the real UI
-are covered by focused tests. Combined local qualification passes 615 Rust tests,
-strict Clippy and all 30 browser journeys; GitHub image qualification, publication
-and Fi installation are in progress;
-[the dated delivery record](validation/metadata-performance-2026-11-02.md) owns
+are covered by focused tests. Final GitHub qualification passes 617 Linux Rust
+tests, strict Clippy and all 30 browser journeys, plus both native image gates.
+Signed beta.19 is published and installed healthy on Fi with matched recovery
+snapshots and preserved collection/private state.
+[The dated delivery record](validation/metadata-performance-2026-11-02.md) owns
 results and limits. This entry is the single queue record for the delivery.
 
 ## WAV declared-segment playback — source implementation, 2026-11-02
@@ -45,7 +46,8 @@ WAVs noted in beta.17; existing production failures are not retried automaticall
 65 mounted WAV inspections and exact PCM comparison against FFmpeg for two tracks.
 Review additionally covers preserved retry warnings/FLAC, suffix-only source
 corruption and required padding outside the RIFF boundary; focused checks pass.
-No release or deployment is included.
+This source delivery is included in beta.19; see the
+[combined publication and Fi acceptance](validation/metadata-performance-2026-11-02.md#publication-and-fi-acceptance--2026-11-03-jst).
 
 ## Digital album proposal presentation — source update, 2026-11-02
 
@@ -57,7 +59,8 @@ replacing the repeated paragraph in each card. Mapping counts and real partial,
 ambiguous, duration-conflict and stale-input warnings remain visible.
 See [delivery and validation](validation/digital-album-presentation-2026-11-02.md).
 This is a web presentation update; no provider, authority or API behavior changes.
-No deployment is included.
+This presentation update is included in beta.19; see the
+[combined publication and Fi acceptance](validation/metadata-performance-2026-11-02.md#publication-and-fi-acceptance--2026-11-03-jst).
 
 ## Album artwork consumer flow — source repair, 2026-11-02
 
