@@ -13,7 +13,7 @@ const partial=true;const fingerprints=new Map();const requests=[];const png=Buff
 const provider=createServer(async(req,res)=>{
  try{let body='';for await(const b of req)body+=b;requests.push(`${req.method} ${req.url} ${body}`);const url=new URL(req.url,'http://fixture');let result;
  if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');if(!fingerprints.has(fp))fingerprints.set(fp,fingerprints.size+1);result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))}]}]};}
- else if(url.pathname.startsWith('/ws/2/release')){if(url.searchParams.has('recording'))result={'release-count':1,'release-offset':0,releases:[{id:release,title:'Matched album'}]};else result={id:release,title:'Matched album','artist-credit':[{name:'Matched artist',artist:{id:id(99),name:'Matched artist'}}],media:[{id:id(98),position:1,format:'Digital Media','track-count':2,tracks:[{id:id(97),position:1,number:'1',title:'Matched first',length:12000,recording:{id:id(1),title:'Matched first',length:12000}},{id:id(96),position:2,number:'2',title:'Matched second',length:12000,recording:{id:id(2),title:'Matched second',length:12000}}]}]};}
+ else if(url.pathname.startsWith('/ws/2/release')){if(url.searchParams.has('recording'))result={'release-count':1,'release-offset':0,releases:[{id:release,title:'Matched album'}]};else result={id:release,title:'Matched album',disambiguation:'Steam',date:'2020-09-15',country:'XW','artist-credit':[{name:'Matched artist',artist:{id:id(99),name:'Matched artist'}}],media:[{id:id(98),position:1,format:'Digital Media','track-count':2,tracks:[{id:id(97),position:1,number:'1',title:'Matched first',length:12000,recording:{id:id(1),title:'Matched first',length:12000}},{id:id(96),position:2,number:'2',title:'Matched second',length:12000,recording:{id:id(2),title:'Matched second',length:12000}}]}]};}
  else if(url.pathname===`/release/${release}`)result={release:`https://musicbrainz.org/release/${release}`,images:[{id:1,front:true,back:false,approved:true,types:['Front'],comment:'Generated fixture',image:`https://coverartarchive.org/release/${release}/1`}]};
  else {res.writeHead(200,{'Content-Type':'image/png','Content-Length':png.length});res.end(req.method==='HEAD'?undefined:png);return;}
  const bytes=Buffer.from(JSON.stringify(result));res.writeHead(200,{'Content-Type':'application/json','Content-Length':bytes.length});res.end(bytes);
@@ -53,6 +53,18 @@ try{
  const lostReceipt=await page.evaluate(id=>Object.keys(localStorage).find(key=>key.startsWith('collector.digital-match.')&&key.endsWith(`.${id}`)),item);assert.ok(lostReceipt,'superseded admission must retain its receipt');
  await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
  await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('1 of 2 files associated by audio recognition');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
+ const info=matching.getByText('Recognition can be incomplete.',{exact:false});
+ await expect(info).toBeHidden();
+ await expect(matching.locator('.digital-match-edition-badge')).toHaveText('Steam');
+ await expect(matching.locator('.digital-match-region')).toContainText('Worldwide');
+ const infoControl=matching.getByLabel('About audio recognition');
+ // Native disclosure supports keyboard activation as well as touch/click.
+ await infoControl.focus();await page.keyboard.press('Enter');await expect(info).toBeVisible();
+ await matching.screenshot({path:'/tmp/collector-matching-info-desktop.png'});
+ await page.setViewportSize({width:390,height:844});await info.scrollIntoViewIfNeeded();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'recognition information overflows mobile');
+ await matching.screenshot({path:'/tmp/collector-matching-info-mobile.png'});
+ await infoControl.click();await expect(info).toBeHidden();await page.setViewportSize({width:1440,height:1000});
  await matching.getByText('Review proposed track mapping',{exact:true}).click();await expect(matching).toContainText('01.wav → disc 1, track 1: Matched first');
  const before=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}`)).json(),item);assert.notEqual(before.title,'Matched album');assert.equal(fingerprints.size,2);assert.ok(requests.every(r=>!r.includes('PRIVATE-MATCHING-ORDER')&&!r.includes('Private matching store')));
  await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');await mkdir(path.join(root,'web/test-results'),{recursive:true});await page.screenshot({path:path.join(root,'web/test-results/digital-matching-mobile.png'),fullPage:true});

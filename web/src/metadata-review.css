@@ -28,3 +28,17 @@
 .digital-mapping-editor label { display:grid; gap:.35rem; margin-block:.8rem; overflow-wrap:anywhere; }
 .digital-mapping-editor select { width:100%; min-width:0; max-width:100%; }
 .digital-mapping-editor .inline-check { display:flex; align-items:flex-start; }
+
+.digital-match-guidance { display:flex; align-items:baseline; gap:.5rem; margin-block:1rem; }
+.digital-match-guidance > p { margin:0; }
+.digital-match-info { flex:none; position:relative; }
+.digital-match-info > summary { display:grid; place-items:center; width:1.75rem; height:1.75rem; cursor:pointer; list-style:none; border:1px solid var(--line); border-radius:50%; color:var(--ink); }
+.digital-match-info > summary::-webkit-details-marker { display:none; }
+.digital-match-info > summary:hover { background:var(--accent); }
+.digital-match-info > summary:focus-visible { outline:2px solid var(--green); outline-offset:3px; }
+.digital-match-info > p { position:absolute; z-index:2; inset-inline-end:0; top:100%; width:min(22rem,65vw); box-sizing:border-box; margin:.4rem 0 0; padding:.8rem; border:1px solid var(--line); border-radius:6px; background:var(--paper,#fff); color:var(--ink); box-shadow:0 4px 16px #0002; font-size:.85rem; }
+.digital-album-matching .digital-match-artist { margin: .2rem 0 .6rem; }
+.digital-match-edition { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .8rem; }
+.digital-album-matching .digital-match-edition span { font-size:.85rem; color:var(--ink); }
+.digital-album-matching .digital-match-edition-badge { padding:.15rem .55rem; border:1px solid var(--line); border-radius:4px; background:var(--accent); font-weight:700; }
+.digital-match-region { display:inline-flex; align-items:center; gap:.3rem; }

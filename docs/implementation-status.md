@@ -1,3 +1,15 @@
+## Digital album proposal presentation — source update, 2026-11-02
+
+Digital album proposals show edition notes such as Steam in a distinct badge,
+separate from the date. Release regions use readable names with country flags
+and a globe for Worldwide. Unknown region codes remain visible. A single keyboard/
+touch-accessible info disclosure above the proposals holds the recognition caveat,
+replacing the repeated paragraph in each card. Mapping counts and real partial,
+ambiguous, duration-conflict and stale-input warnings remain visible.
+See [delivery and validation](validation/digital-album-presentation-2026-11-02.md).
+This is a web presentation update; no provider, authority or API behavior changes.
+No deployment is included.
+
 ## Album artwork consumer flow — source repair, 2026-11-02
 
 A player-only artwork report exposed two Trash Amp orchestration gaps: a failed

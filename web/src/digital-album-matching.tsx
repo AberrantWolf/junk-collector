@@ -42,13 +42,20 @@ export default function DigitalAlbumMatching({userId,item,metadataRevision,disab
  <button disabled={disabled||busy||!!pending||!status?.available} onClick={()=>void start()}>Find matching albums</button>
  {pending&&<div role="status"><p>{pending.job.phase.replaceAll('_',' ')}…</p><button disabled={busy} onClick={()=>void jobAction(pending.job.id,'DELETE')}>Cancel album matching</button></div>}
  {latest?.job.error&&<p role="alert">{latest.job.error}</p>}{latest?.job.retryable&&!latest.stale&&!pending&&<button disabled={busy||disabled} onClick={()=>void jobAction(latest.job.id,'POST')}>Retry album matching</button>}{loadError&&<p role="alert">{loadError}</p>}{error&&<p role="alert">{error}</p>}
- {completed?.result&&<><p>These are identity suggestions, not catalog verification. Review the track mapping before applying a release.</p>{inventoryChanged&&<p className="notice">Album inventory or metadata changed. Find matching albums again before applying a release.</p>}{completed.result.truncated&&<p className="notice">The search reached its candidate budget. These results are incomplete.</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No album candidates are available to review. Try a manual MusicBrainz search below.</p>}
+ {completed?.result&&<><div className="digital-match-guidance"><p>Review track mappings before choosing a release.</p><details className="digital-match-info"><summary aria-label="About audio recognition">ⓘ</summary><p>Recognition can be incomplete. These are identity suggestions, not catalog verification. Choosing a release applies the album and every mapped track title; it does not verify the audio.</p></details></div>{inventoryChanged&&<p className="notice">Album inventory or metadata changed. Find matching albums again before applying a release.</p>}{completed.result.truncated&&<p className="notice">The search reached its candidate budget. These results are incomplete.</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No album candidates are available to review. Try a manual MusicBrainz search below.</p>}
  {completed.result.matches.map(candidate=><AlbumCandidate key={`${completed.job.id}:${candidate.release.id}`} candidate={candidate} result={completed.result!} item={item} stale={inventoryChanged} disabled={disabled||busy||!!pending} onChoose={assignments=>callbacks.current.onChoose(completed.job.id,candidate.release.id,assignments)}/> )}</>}
 
  </section>;
 }
 
 function duration(ms:number|null|undefined){return ms==null?'duration unknown':`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;}
+function ReleaseRegion({code}:{code:string}){
+ const region=code.toUpperCase();
+ let name=region==='XW'?'Worldwide':region;
+ if(region!=='XW')try{name=new Intl.DisplayNames(['en'],{type:'region'}).of(region)||region;}catch{}
+ const flag=/^[A-Z]{2}$/.test(region)&&name!==region&&!region.startsWith('X')&&region!=='ZZ'?String.fromCodePoint(...[...region].map(c=>127397+c.charCodeAt(0))):'🌐';
+ return <span className="digital-match-region"><span aria-hidden="true">{flag}</span> {name}</span>;
+}
 function AlbumCandidate({candidate,result,item,stale,disabled,onChoose}:{candidate:Candidate;result:Result;item:Item;stale:boolean;disabled:boolean;onChoose:(assignments?:Assignment[])=>Promise<void>}){
  const automatic=candidate.complete_tracklist&&!candidate.ambiguous_mapping&&!candidate.duration_conflicts&&candidate.mappings.length===candidate.local_tracks&&candidate.release_tracks===candidate.local_tracks;
  const [editing,setEditing]=useState(false);const [confirmed,setConfirmed]=useState(false);
@@ -63,10 +70,10 @@ function AlbumCandidate({candidate,result,item,stale,disabled,onChoose}:{candida
  function update(next:Record<string,string>){setDraft(next);setConfirmed(false);}
  const assignments=()=>files.map(t=>{const slot=slots.find(s=>s.value===draft[`${t.source}:${t.file}`])!;return {key:`${t.source}:${t.file}`,medium:slot.medium,position:slot.position};});
  return <article className="candidate"><div className="digital-match-cover">{cover?<img loading="lazy" src={`/api/v1/items/${item.id}/metadata/artwork/${cover.snapshot_id}/${encodeURIComponent(cover.image_id)}/thumbnail`} alt={`Cover of ${candidate.release.title}`}/>:<span role="img" aria-label="No cover preview">♫</span>}</div><div>
- <strong>{candidate.release.title}</strong><p>{candidate.release.artist}</p><p>{[candidate.release.disambiguation,candidate.release.date,candidate.release.country].filter(Boolean).join(' · ')}</p>
+ <strong>{candidate.release.title}</strong><p className="digital-match-artist">{candidate.release.artist}</p>
+ <div className="digital-match-edition">{candidate.release.disambiguation&&<span className="digital-match-edition-badge">{candidate.release.disambiguation}</span>}{candidate.release.date&&<span>{candidate.release.date}</span>}{candidate.release.country&&<ReleaseRegion code={candidate.release.country}/>}</div>
  <p>{candidate.mappings.length} of {candidate.local_tracks} files associated by audio recognition · {candidate.release_tracks} release tracks{candidate.ambiguous_mapping?' · ambiguous track assignment':''}{candidate.duration_conflicts?' · conflicting durations':''}</p>
  {candidate.mappings.length<candidate.local_tracks&&<p className="notice">Partial album evidence: the remaining files have no recording association to this release.</p>}
- <p>Recognition can be incomplete. Confirming a mapping applies the album and every mapped track title; it does not verify the audio.</p>
  <details><summary>Review proposed track mapping</summary><p>AcoustID scores describe recording associations, not the probability that the whole album is correct.</p><ul>{[...candidate.mappings].sort((a,b)=>a.medium-b.medium||a.position-b.position).map(m=>{const track=slots.find(t=>t.medium===m.medium&&t.position===m.position);return <li key={m.key}>{result.tracks.find(t=>`${t.source}:${t.file}`===m.key)?.name||`File ${m.key.slice(-8)}`} → disc {m.medium}, track {m.position}: {track?.title||'Untitled'}{m.duration_delta_ms!=null?` (duration difference ${(m.duration_delta_ms/1000).toFixed(1)} s)`:''} · AcoustID score {m.score.toFixed(2)}</li>;})}</ul></details>
  {!stale&&canMap&&<button disabled={disabled} onClick={()=>{setEditing(v=>!v);setConfirmed(false);}}>{editing?'Close mapping editor':'Edit track mapping'}</button>}
  {!automatic&&!editing&&!stale&&<p>{canMap?'Complete and confirm the track mapping to use this album.':'This release needs a complete tracklist with one release track per local file. Use manual metadata tools for other layouts.'}</p>}
