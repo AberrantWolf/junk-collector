@@ -213,6 +213,16 @@ pub trait BulkIntakePort: Send + Sync {
         limit: u16,
         pending: bool,
     ) -> Result<Page<IntakePackageRecord>>;
+    /// Frozen packages sharing this child's reviewed destination, including
+    /// members not yet admitted on later pages. Separate destinations return self.
+    fn intake_destination_members(
+        &self,
+        user: UserId,
+        id: JobId,
+        import: ImportId,
+        after: Option<u32>,
+        limit: u16,
+    ) -> Result<Page<IntakePackageRecord>>;
     fn admit_intake_members(
         &self,
         claim: &JobClaim,

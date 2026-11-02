@@ -445,37 +445,17 @@ impl BulkIntakePort for Store {
         limit: u16,
         pending: bool,
     ) -> Result<Page<IntakePackageRecord>> {
-        let limit = page_limit(limit)?;
-        let db = lock(&self.db)?;
-        let record = read_intake(&db, user, id)?;
-        allowed(&db, user, record.session.collection_id)?;
-        let mut stmt=db.prepare("SELECT record FROM private.intake_members WHERE intake_id=? AND (?=0 OR (import_id IS NULL AND json_extract(record,'$.error') IS NULL)) AND (? IS NULL OR position>?) ORDER BY position LIMIT ?").map_err(storage)?;
-        let mut rows = stmt
-            .query(params![id.to_string(), pending, after, after, limit + 1])
-            .map_err(storage)?;
-        let mut items = Vec::new();
-        let mut bytes = 0usize;
-        let mut more = false;
-        while let Some(row) = rows.next().map_err(storage)? {
-            let raw: String = row.get(0).map_err(storage)?;
-            if items.len() >= limit || (!items.is_empty() && bytes + raw.len() > 12 * 1024 * 1024) {
-                more = true;
-                break;
-            }
-            if raw.len() > 12 * 1024 * 1024 {
-                return Err(Error::Storage(
-                    "Stored package manifest exceeds its 12 MiB limit.".into(),
-                ));
-            }
-            bytes += raw.len();
-            items.push(serde_json::from_str::<IntakePackageRecord>(&raw).map_err(storage)?);
-        }
-        let next_cursor = if more {
-            items.last().map(|member| member.position.to_string())
-        } else {
-            None
-        };
-        Ok(Page { items, next_cursor })
+        self.read_intake_members(user, id, after, limit, pending, None)
+    }
+    fn intake_destination_members(
+        &self,
+        user: UserId,
+        id: JobId,
+        import: ImportId,
+        after: Option<u32>,
+        limit: u16,
+    ) -> Result<Page<IntakePackageRecord>> {
+        self.read_intake_members(user, id, after, limit, false, Some(import))
     }
     fn admit_intake_members(
         &self,
@@ -644,5 +624,66 @@ impl Store {
         }
         tx.commit().map_err(storage)?;
         Ok(record.session)
+    }
+}
+
+impl Store {
+    fn read_intake_members(
+        &self,
+        user: UserId,
+        id: JobId,
+        after: Option<u32>,
+        limit: u16,
+        pending: bool,
+        destination_import: Option<ImportId>,
+    ) -> Result<Page<IntakePackageRecord>> {
+        let limit = page_limit(limit)?;
+        let db = lock(&self.db)?;
+        let record = read_intake(&db, user, id)?;
+        allowed(&db, user, record.session.collection_id)?;
+        let mut stmt=db.prepare("SELECT m.record FROM private.intake_members m
+            WHERE m.intake_id=?1 AND (?2=0 OR (m.import_id IS NULL AND json_extract(m.record,'$.error') IS NULL))
+            AND (?3 IS NULL OR m.position>?3)
+            AND (?5 IS NULL OR EXISTS (
+                SELECT 1 FROM private.intake_members origin WHERE origin.intake_id=m.intake_id AND origin.import_id=?5
+                AND (origin.position=m.position OR (
+                    json_extract(origin.record,'$.destination.destination')=json_extract(m.record,'$.destination.destination') AND (
+                        (json_extract(m.record,'$.destination.destination')='album_group' AND json_extract(origin.record,'$.destination.key')=json_extract(m.record,'$.destination.key')) OR
+                        (json_extract(m.record,'$.destination.destination')='existing' AND json_extract(origin.record,'$.destination.item_id')=json_extract(m.record,'$.destination.item_id'))
+                    )
+                ))
+            )) ORDER BY m.position LIMIT ?4").map_err(storage)?;
+        let mut rows = stmt
+            .query(params![
+                id.to_string(),
+                pending,
+                after,
+                limit + 1,
+                destination_import.map(|id| id.to_string())
+            ])
+            .map_err(storage)?;
+        let mut items = Vec::new();
+        let mut bytes = 0usize;
+        let mut more = false;
+        while let Some(row) = rows.next().map_err(storage)? {
+            let raw: String = row.get(0).map_err(storage)?;
+            if items.len() >= limit || (!items.is_empty() && bytes + raw.len() > 12 * 1024 * 1024) {
+                more = true;
+                break;
+            }
+            if raw.len() > 12 * 1024 * 1024 {
+                return Err(Error::Storage(
+                    "Stored package manifest exceeds its 12 MiB limit.".into(),
+                ));
+            }
+            bytes += raw.len();
+            items.push(serde_json::from_str::<IntakePackageRecord>(&raw).map_err(storage)?);
+        }
+        let next_cursor = if more {
+            items.last().map(|member| member.position.to_string())
+        } else {
+            None
+        };
+        Ok(Page { items, next_cursor })
     }
 }

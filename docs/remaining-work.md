@@ -37,19 +37,14 @@ browser run exposed a separate intake copy-setup revision race; its isolated
 rerun and remaining journeys pass, with the failure retained in the record.
 This is not deployed or sealed release qualification.
 
-## Grouped intake copy setup — open, discovered 2026-11-02
+## Grouped intake copy setup — repaired for beta.18, 2026-11-02
 
-During the album-adoption qualification, intake-review failed once when a package
-froze Item revision 1 before another reviewed physical copy was created at revision
-2. A sibling then published evidence at revision 3. The existing publication guard
-refused this inventory change; the intake stayed accepted with one failed import.
-An isolated rerun passed. See [the retained validation failure](validation/digital-album-adoption-2026-11-02.md#validation).
-Make group copy setup and child publication admission consistent without permitting
-unrelated inventory edits. Add a deterministic interleaving test that creates the
-second reviewed copy after the first package freezes its destination. Keep safe
-failure/review and retained originals. This separate admission race was not changed
-by the album-matching/artwork delivery, and a clean combined release run is still
-required before publication.
+Guided intake establishes every reviewed physical copy for the destination before
+freezing the first child's Item revision, using bounded pages of the accepted
+manifest. Later-staged siblings cannot introduce a copy-setup revision conflict.
+Manual inventory edits still fail closed. Deterministic regressions cover distinct
+copies with staggered staging, failed retry, retained bytes and reindex.
+See [beta.18 qualification](validation/container-beta18-publication-2026-11-02.md).
 
 ## Beta.17 published and installed on Fi — 2026-11-01
 

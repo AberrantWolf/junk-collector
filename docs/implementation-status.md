@@ -1,3 +1,12 @@
+## Beta.18 preparation — 2026-11-02
+
+Grouped intake copy setup now precedes the first child publication revision freeze,
+including distinct physical copies and later manifest pages. Manual inventory edits
+retain conflict protection. The broad playback journey waits for lazy track rows
+before asserting queue contents. Beta.18 packages the layered Library refresh and
+manual digital album adoption/cover work already on main. Publication/deployment
+are pending [exact-source qualification](validation/container-beta18-publication-2026-11-02.md).
+
 ## Layered library refresh — source implementation, 2026-11-02
 
 [Main-publication review and complete-source validation](validation/layered-library-refresh-review-2026-11-02.md)

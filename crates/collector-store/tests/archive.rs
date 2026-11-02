@@ -18534,17 +18534,17 @@ fn album_group_publication_faults_recover_all_members_or_none() {
 
 #[test]
 fn grouped_disc_publication_survives_sibling_evidence_revision() {
-    grouped_disc_publication_case(false, false, true);
+    grouped_disc_publication_case(false, false, true, false);
 }
 
 #[test]
 fn grouped_disc_failed_publication_retries_after_restart_without_duplicate_copies() {
-    grouped_disc_publication_case(true, false, true);
+    grouped_disc_publication_case(true, false, true, false);
 }
 
 #[test]
 fn grouped_disc_publication_keeps_manual_inventory_revision_conflicts() {
-    grouped_disc_publication_case(true, true, true);
+    grouped_disc_publication_case(true, true, true, false);
 }
 
 #[test]
@@ -18580,10 +18580,25 @@ fn grouped_publication_revision_policy_rejects_unrelated_evidence_and_metadata_c
 
 #[test]
 fn grouped_discs_keep_automatic_title_authority_through_failed_retry_and_reindex() {
-    grouped_disc_publication_case(true, false, false);
+    grouped_disc_publication_case(true, false, false, false);
 }
 
-fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual_title: bool) {
+#[test]
+fn grouped_distinct_copies_are_established_before_first_package_freezes_revision() {
+    grouped_disc_publication_case(false, false, true, true);
+}
+
+#[test]
+fn grouped_distinct_copies_keep_manual_conflicts_on_retry() {
+    grouped_disc_publication_case(true, true, true, true);
+}
+
+fn grouped_disc_publication_case(
+    restart_failed: bool,
+    manual_edit: bool,
+    manual_title: bool,
+    distinct_copies: bool,
+) {
     use collector_app::{
         AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
     };
@@ -18621,7 +18636,11 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual
             destination: IntakeDestination::AlbumGroup {
                 key: "album".into(),
                 title: manual_title.then(|| "Album".into()),
-                copy_key: "my copy".into(),
+                copy_key: if distinct_copies {
+                    format!("copy {position}")
+                } else {
+                    "my copy".into()
+                },
             },
         })
         .collect();
@@ -18652,11 +18671,31 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual
         .intake_members(&actor, session.id, None, 32)
         .unwrap()
         .items;
-    for member in &members {
+    for (index, member) in members.iter().enumerate() {
         let id = member.import_id.unwrap();
         service
             .stage_provisional_import_chunk(&actor, id, 0, 0, &[member.position as u8])
             .unwrap();
+        if distinct_copies && index == 0 {
+            let frozen = store
+                .import_record(id)
+                .unwrap()
+                .view
+                .expected_item_revision
+                .unwrap();
+            let target = store
+                .guided_ingest_intent(id)
+                .unwrap()
+                .unwrap()
+                .target_item_id;
+            let item = store.item(target).unwrap();
+            assert_eq!(
+                item.specimens.len(),
+                2,
+                "all reviewed copies precede the first freeze"
+            );
+            assert_eq!(item.revision, frozen);
+        }
     }
     // Both preservation Jobs now hold the same reviewed album revision. Publish
     // one before allowing the other to observe its sibling's Evidence reference.
@@ -18729,7 +18768,7 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual
     }
     let item = store.item(target).unwrap();
     assert_eq!(item.captures.len(), if manual_edit { 1 } else { 2 });
-    assert_eq!(item.specimens.len(), 1);
+    assert_eq!(item.specimens.len(), if distinct_copies { 2 } else { 1 });
     if manual_edit {
         assert_eq!(
             item.specimens[0].private_notes.as_deref(),
@@ -18776,7 +18815,7 @@ fn grouped_disc_publication_case(restart_failed: bool, manual_edit: bool, manual
     store.reindex().unwrap();
     let rebuilt = store.item(target).unwrap();
     assert_eq!(rebuilt.captures.len(), if manual_edit { 1 } else { 2 });
-    assert_eq!(rebuilt.specimens.len(), 1);
+    assert_eq!(rebuilt.specimens.len(), if distinct_copies { 2 } else { 1 });
     if manual_edit {
         assert_eq!(
             rebuilt.specimens[0].private_notes.as_deref(),
@@ -18893,11 +18932,15 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
                 }],
                 anchor_file_index: None,
             },
-            destination: if position < 2 {
+            destination: if position < 66 {
                 IntakeDestination::AlbumGroup {
                     key: "two-disc-album".into(),
                     title: Some("A confirmed album".into()),
-                    copy_key: "one set".into(),
+                    copy_key: if position == 65 {
+                        "second set".into()
+                    } else {
+                        "one set".into()
+                    },
                 }
             } else {
                 IntakeDestination::Separate
@@ -18964,7 +19007,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
             .unwrap()
             .specimens
             .len(),
-        1
+        2
     );
     drop(service);
     drop(store);

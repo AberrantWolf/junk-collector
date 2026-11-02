@@ -1,3 +1,12 @@
+## Grouped import copy setup — 2026-11-02
+
+Application guided intake establishes all physical copies in the accepted destination
+manifest before a child freezes its Item revision. The store supplies bounded pages
+of the same reviewed destination, including children not yet admitted. Digital-only
+packages do not create specimens. Later staging order cannot introduce a sibling
+copy revision after the first freeze; manual edits still conflict at publication.
+Originals and independent evidence revision checks retain their existing policy.
+
 ## Layered library refresh and playback reads — source implementation, 2026-11-02
 
 [The layered contract](layered-library-refresh.md) uses one compact Library query

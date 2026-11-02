@@ -712,6 +712,7 @@ impl CollectionService {
                 f.name.to_ascii_lowercase().ends_with(".cue")
                     || f.name.to_ascii_lowercase().ends_with(".toc")
             });
+        let mut created = false;
         let mut item = match self.reader.item(intent.target_item_id) {
             Ok(item) => {
                 if item.deleted || item.collection_id != record.view.collection_id {
@@ -781,27 +782,87 @@ impl CollectionService {
                     item.specimens.clear();
                 }
                 self.modules.inspect(&item.domain).map_err(Error::from)?;
+                created = true;
                 self.writer.save(item, Revision(0))?
             }
             Err(error) => return Err(error),
         };
         if let Some(context) = &intent.bulk_context
-            && !digital
-            && !item.specimens.iter().any(|copy| copy.id == context.copy_id)
+            && (created
+                || record.view.association.item_id != Some(item.id)
+                || (!digital && !item.specimens.iter().any(|copy| copy.id == context.copy_id)))
         {
+            // Establish every reviewed copy before the first child freezes the
+            // album revision. Later packages may finish staging in any order.
             let expected = item.revision;
-            item.specimens.push(Specimen {
-                id: context.copy_id,
-                label: context.copy_label.clone(),
-                condition: Condition::Unknown,
-                ownership: Ownership::Owned,
-                possession: Possession::Present,
-                components: vec![],
-                acquisition: None,
-                private_notes: None,
-                loans: vec![],
-            });
-            item = self.writer.save(item, expected)?;
+            let previous_copy_count = item.specimens.len();
+            let mut after = None;
+            loop {
+                let page = self.intake_port.intake_destination_members(
+                    intent.user_id,
+                    context.intake_id,
+                    intent.import_id,
+                    after,
+                    64,
+                )?;
+                for member in &page.items {
+                    let (target, copy_key) = match &member.destination {
+                        IntakeDestination::AlbumGroup { key, copy_key, .. } => (
+                            ItemId(super::deterministic_inventory_uuid(
+                                intent.user_id,
+                                "intake.album",
+                                &format!("{}:{key}", context.intake_id),
+                            )),
+                            copy_key,
+                        ),
+                        IntakeDestination::Existing {
+                            item_id, copy_key, ..
+                        } => (*item_id, copy_key),
+                        IntakeDestination::Separate => continue,
+                    };
+                    if target != item.id || member.error.is_some() {
+                        continue;
+                    }
+                    let digital = eligibility.owner.0 == "org.junk.music"
+                        && member
+                            .plan
+                            .files
+                            .iter()
+                            .any(|f| collector_modules::music::files::is_audio_name(&f.name))
+                        && !member.plan.files.iter().any(|f| {
+                            let name = f.name.to_ascii_lowercase();
+                            name.ends_with(".cue") || name.ends_with(".toc")
+                        });
+                    if digital {
+                        continue;
+                    }
+                    let id = SpecimenId(super::deterministic_inventory_uuid(
+                        intent.user_id,
+                        "intake.copy",
+                        &format!("{}:{}:{copy_key}", context.intake_id, target),
+                    ));
+                    if !item.specimens.iter().any(|copy| copy.id == id) {
+                        item.specimens.push(Specimen {
+                            id,
+                            label: format!("Imported copy {copy_key}"),
+                            condition: Condition::Unknown,
+                            ownership: Ownership::Owned,
+                            possession: Possession::Present,
+                            components: vec![],
+                            acquisition: None,
+                            private_notes: None,
+                            loans: vec![],
+                        });
+                    }
+                }
+                if page.next_cursor.is_none() {
+                    break;
+                }
+                after = Some(page.items.last().ok_or(Error::Conflict)?.position);
+            }
+            if item.specimens.len() > previous_copy_count {
+                item = self.writer.save(item, expected)?;
+            }
         }
         if intent.created_item
             && self

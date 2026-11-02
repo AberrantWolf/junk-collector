@@ -974,7 +974,7 @@ try{
   assert.equal(await playbackPage.evaluate(()=>performance.getEntriesByType('resource').some(entry=>entry.name.endsWith('/curation.js'))),false,'viewer player imported the curation bundle');
   const expected=await playbackPage.evaluate(async id=>{const rows=await(await fetch(`/api/v1/items/${id}/music-tracks`)).json();return rows.filter(row=>row.profile.codec==='flac'&&row.state.status==='available').map(row=>({position:row.track_position,representation:row.state.representation_id,capture:row.capture_id,source:row.source_representation_id}));},playbackFixture.itemId);
   assert.equal(expected.length,2);assert.equal(new Set(expected.map(row=>`${row.capture}/${row.source}`)).size,1,'fixture unexpectedly crossed disc queue boundaries');
-  assert.equal(await album.locator('.music-disc').count(),1);assert.equal(await album.locator('.music-track').count(),2,'profile variants became duplicate queue tracks');
+  await expect(album.locator('.music-disc')).toHaveCount(1);await expect(album.locator('.music-track')).toHaveCount(2);
   assert.equal(await album.locator('.music-track').nth(0).getAttribute('data-representation-id'),expected[0].representation);
   assert.equal(await album.locator('.music-track').nth(1).getAttribute('data-representation-id'),expected[1].representation);
   await playbackPage.evaluate(()=>{window.savedCanPlayType=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=()=>'';});
