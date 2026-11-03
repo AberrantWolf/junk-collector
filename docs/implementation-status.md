@@ -1,3 +1,11 @@
+## Beta.20 candidate and requested Fi update — 2026-11-03
+
+The user requested release qualification/failure repair, publication, and Fi
+installation after the gates pass. The candidate packages the latest digital
+matching/review and GitHub issue repairs. [The operation record](validation/container-beta20-publication-2026-11-03.md)
+tracks exact-source validation, publication and matched-pair recovery/installation.
+Candidate preparation alone does not claim any of those steps passed.
+
 ## GitHub #9: error presentation review — source implementation, 2026-11-03
 
 The issue's 75 flagged boundaries have explicit correction/retention dispositions
