@@ -29,7 +29,15 @@ try{
  await page.route('**/*',route=>{const url=new URL(route.request().url());if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.toString());return route.abort();}return route.continue();});
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  const collection=await page.evaluate(async()=>{const r=await fetch('/api/v1/admin/collections',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({name:'Game fixtures',module:'org.junk.games'})});if(!r.ok)throw Error(await r.text());return r.json();});
- async function read(url){return page.evaluate(async url=>{const r=await fetch('/api/v1'+url);if(!r.ok)throw Error(await r.text());return r.json();},url);}
+ async function read(url){return page.evaluate(async url=>{
+  const until=Date.now()+5000;
+  for(;;){
+   const response=await fetch('/api/v1'+url);if(response.ok)return response.json();
+   const text=await response.text();let error;try{error=JSON.parse(text).error;}catch{}
+   if(response.status===503&&error?.code==='catalog_busy'&&Date.now()<until){await new Promise(resolve=>setTimeout(resolve,100));continue;}
+   throw Error(text);
+  }
+ },url);}
  async function importGame(){
   const previous=(await read(`/items?collection_id=${collection.id}&limit=50`)).items.filter(i=>i.captures?.length).length;
   await page.goto(`${origin}/?collection=${collection.id}`);await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog',{name:'Add or import',exact:true});
@@ -66,7 +74,14 @@ try{
  await review.getByLabel('System mode').selectOption('manual');await review.getByLabel('Selected system').selectOption('Sega - Saturn');await review.getByRole('button',{name:'Save system',exact:true}).click();await expect.poll(async()=>(await read(`/items/${item.id}`)).effective_metadata.domain_fields.platform.value).toBe('Sega - Saturn');await review.getByRole('button',{name:'Use detected system',exact:true}).click();await expect.poll(async()=>(await read(`/items/${item.id}`)).effective_metadata.domain_fields.platform.value).toBe('Sony - PlayStation');await expect.poll(async()=>(await read(`/items/${item.id}`)).effective_metadata.resolution).toBe('automatic');
  await page.screenshot({path:'/tmp/collector-game-existing-match.png',fullPage:true});
  await page.goto(`${origin}/?collection=${collection.id}&search=Final%20Fantasy`);await expect(page.locator('.collection-row').filter({hasText:'Final Fantasy & Tactics (USA)'}).first()).toBeVisible();
- const future=await importGame();await expect.poll(async()=>{const rows=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return rows.filter(i=>i.captures?.length&&i.title==='Final Fantasy & Tactics (USA)').length;},{timeout:45000}).toBe(2);
+ const future=await importGame();
+ // The post-import read can briefly race catalog projection. Exercise only its
+ // typed transient response; all other API failures still abort the journey.
+ const collectionItems='**/api/v1/items?collection_id='+collection.id+'&limit=50';
+ let injectedReadContention=false;
+ await page.route(collectionItems,route=>{injectedReadContention=true;return route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}});},{times:1});
+ await expect.poll(async()=>{const rows=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return rows.filter(i=>i.captures?.length&&i.title==='Final Fantasy & Tactics (USA)').length;},{timeout:45000}).toBe(2);
+ assert.equal(injectedReadContention,true,'post-import read must exercise catalog contention');
  assert.equal(future.length,2);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
  console.log('Automatic game journey passed: provisional disc, mixed DAT/ZIP content detection, two active systems, activation scan, immediate title/system/search refresh, deliberate overrides and use-detected controls, future automatic imports, malformed upload rejection; offline.');
 }catch(error){if(page){console.error((await page.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(-14000));await page.screenshot({path:'/tmp/collector-game-failure.png',fullPage:true}).catch(()=>{});}throw error;}finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

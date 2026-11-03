@@ -1546,6 +1546,15 @@ P06 reuses the incrementally maintained catalog at startup when a checkpoint mat
 
 The archive rename remains the commit point. After projection commit, a separate SQLite transaction updates observations for only the publication's artifacts and seals its projection epoch, before removing the durable journal. Projection-table/FTS/ownership/reference changes invalidate that epoch. A pending or incomplete journal, absent/incompatible checkpoint, different archive path or changed filesystem observation forces an atomic complete rebuild; external changes are not selectively replayed. Full rebuild validates archive records/snapshots and refreshes the checkpoint in the same catalog transaction. Missing/corrupt/incomplete catalogs rebuild; damaged catalog files are retained under unique diagnostic names while private state remains untouched. A restored archive is authoritative, never a stale local projection. Pre-release schema changes must advance the checkpoint format or catalog version whenever projection semantics change. The measured fixtures and recovery evidence are recorded in [P06 validation](validation/p06-indexing.md). Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
 
+V4 publication cleans its own uncommitted journal/staging when an attempt is
+cancelled, loses its claim or yields typed catalog contention, before releasing
+the archive writer. A later Job can then publish the same observation identity
+without leaving an earlier journal pointed at its different revision bytes.
+Cleanup still refuses an existing committed revision; post-commit work remains
+recoverable. Other failures retain their existing recovery policy, and startup
+still rejects malformed or conflicting committed artifacts. Existing-observation
+lookup errors propagate; only an explicit missing record permits new publication.
+
 ## Ingest and assets
 
 ### Explicit inbox source cleanup

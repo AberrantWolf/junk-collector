@@ -10058,6 +10058,209 @@ fn streamed_snapshot_is_hashed_and_survives_archive_only_rebuild() {
 }
 
 #[test]
+fn cancelled_processing_publication_cannot_poison_a_later_observation_or_restart() {
+    use collector_app::PortableProcessingRecord;
+    use collector_store::PublicationFaultPoint as Point;
+
+    for (point, interruption) in [
+        (Point::Prepared, None),
+        (Point::BytesStaged, None),
+        (Point::ProjectionApplied, None),
+        (Point::BytesStaged, Some(Error::CatalogBusy)),
+        (Point::BytesStaged, Some(Error::CommandInProgress)),
+    ] {
+        let (root, store, actor, service, collection) = setup();
+        let imported = derivative_import(&service, &actor, collection.id);
+        let source = store
+            .recorded_source(
+                collection.id,
+                PackageScope::Representation(imported.representation_id),
+            )
+            .unwrap();
+        let captures = std::fs::read_dir(root.path().join("archive/collections"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+            .join("captures");
+        let originals = tree_hashes(&captures);
+        drop(service);
+        drop(store);
+
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let store = Arc::new(
+            Store::open_with_publication_fault(
+                root.path().join("archive"),
+                root.path().join("state"),
+                Arc::new(PausePublicationPhase {
+                    point,
+                    reached: std::sync::Mutex::new(Some(reached_tx)),
+                    resume: std::sync::Mutex::new(resume_rx),
+                }),
+            )
+            .unwrap(),
+        );
+        let claim = |store: &Store| {
+            store
+                .enqueue_job(JobSpec {
+                    id: JobId::new(),
+                    user_id: actor.user_id,
+                    collection_id: Some(collection.id),
+                    item_id: None,
+                    kind: "test.processing".into(),
+                    phase: "queued".into(),
+                    total_units: 1,
+                    request: serde_json::json!({}),
+                    frozen_input: None,
+                })
+                .unwrap();
+            store
+                .claim_job("processing-publication", 300)
+                .unwrap()
+                .unwrap()
+        };
+        let first = claim(&store);
+        let record = PortableProcessingRecord {
+            inputs: None,
+            import_rebinding: None,
+            observation: ProcessingObservation {
+                id: ObservationId::new(),
+                collection_id: collection.id,
+                operation: OperationId::new("org.example.reader.inspect").unwrap(),
+                operation_version: 1,
+                source_fingerprint: source.clone(),
+                snapshot_id: None,
+                support: OperationSupport::Supported,
+                raw_observations: vec![],
+                typed_result: ModuleData {
+                    module: ModuleId("org.example.reader".into()),
+                    schema_version: 1,
+                    payload: RawJson::from_value(
+                        serde_json::json!({"sha256":Digest::sha256(b"result").hex}),
+                    ),
+                },
+                limitations: vec![],
+                created_at: chrono::Utc::now(),
+            },
+        };
+        let publisher = {
+            let store = store.clone();
+            let first = first.clone();
+            let record = record.clone();
+            thread::spawn(move || store.publish_processing_record(&first, record))
+        };
+        // Cancel only after the writer really reaches the selected boundary.
+        reached_rx.recv_timeout(Duration::from_secs(15)).unwrap();
+        let yielded = interruption.is_some();
+        let cancellation = if yielded {
+            Ok(())
+        } else {
+            store.request_job_cancellation(first.id, actor.user_id)
+        };
+        resume_tx.send(interruption.map_or(Ok(()), Err)).unwrap();
+        let outcome = publisher.join().unwrap();
+        let mut later = record.clone();
+        later.observation.created_at += chrono::Duration::seconds(60);
+        if point == Point::ProjectionApplied {
+            assert!(matches!(cancellation, Err(Error::CancellationTooLate)));
+            outcome.unwrap();
+            store
+                .complete_job(first.id, &first.claim_token, serde_json::json!({}))
+                .unwrap();
+        } else {
+            cancellation.unwrap();
+            if yielded {
+                assert!(matches!(
+                    outcome,
+                    Err(Error::CatalogBusy | Error::CommandInProgress)
+                ));
+                // An owner may cancel after a yield or lost claim as well.
+                store
+                    .request_job_cancellation(first.id, actor.user_id)
+                    .unwrap();
+            } else {
+                assert!(matches!(outcome, Err(Error::JobCancelled)), "{point:?}");
+            }
+            store
+                .cancel_claimed_job(first.id, &first.claim_token)
+                .unwrap();
+            assert_eq!(
+                store.job_record(first.id, actor.user_id).unwrap().state,
+                JobState::Cancelled
+            );
+            assert!(matches!(
+                store.processing_record(record.observation.id),
+                Err(Error::NotFound)
+            ));
+        }
+        // Reproduce Fi's collision: same immutable ID, a different Job and timestamp,
+        // without a restart in between the cancelled and successful attempts.
+        let second = claim(&store);
+        let result = store.publish_processing_record(&second, later.clone());
+        let expected = if point == Point::ProjectionApplied {
+            assert!(matches!(result, Err(Error::Storage(_))));
+            store
+                .fail_job(
+                    second.id,
+                    &second.claim_token,
+                    "immutable observation conflict",
+                )
+                .unwrap();
+            record
+        } else {
+            result.unwrap();
+            store
+                .complete_job(second.id, &second.claim_token, serde_json::json!({}))
+                .unwrap();
+            later
+        };
+        if point == Point::ProjectionApplied {
+            // A failed lookup is not absence. A damaged disposable projection
+            // must not admit a second publication over the valid archive record.
+            let db = rusqlite::Connection::open(root.path().join("state/catalog.sqlite")).unwrap();
+            db.execute(
+                "UPDATE processing_observations SET record='invalid JSON' WHERE id=?",
+                [expected.observation.id.to_string()],
+            )
+            .unwrap();
+            drop(db);
+            let third = claim(&store);
+            assert!(matches!(
+                store.publish_processing_record(&third, expected.clone()),
+                Err(Error::Storage(_))
+            ));
+            store
+                .fail_job(third.id, &third.claim_token, "invalid projection")
+                .unwrap();
+        }
+        drop(store);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        reopened.reindex().unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.processing_record(expected.observation.id).unwrap())
+                .unwrap(),
+            serde_json::to_value(expected).unwrap(),
+            "{point:?}"
+        );
+        assert_eq!(tree_hashes(&captures), originals, "{point:?}");
+        assert_eq!(
+            std::fs::read_dir(root.path().join("archive/.transactions"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(
+            std::fs::read_dir(root.path().join("archive/.staging"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
 fn streamed_snapshot_cancellation_aborts_before_commit_and_recovers_cleanly() {
     let (root, store, _actor, service, collection) = setup();
     let bytes = vec![7_u8; 2 * 1024 * 1024];
@@ -14731,18 +14934,19 @@ fn derivative_publication_failures_restart_without_reencoding_committed_output()
     }
 }
 
-struct PauseDerivativePhase {
+struct PausePublicationPhase {
     point: collector_store::PublicationFaultPoint,
     reached: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
-    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<Result<()>>>,
 }
-impl collector_store::PublicationFaultInjector for PauseDerivativePhase {
+impl collector_store::PublicationFaultInjector for PausePublicationPhase {
     fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
         if point == self.point
             && let Some(sender) = self.reached.lock().unwrap().take()
         {
             sender.send(()).unwrap();
-            self.resume
+            return self
+                .resume
                 .lock()
                 .unwrap()
                 .recv_timeout(std::time::Duration::from_secs(15))
@@ -14765,7 +14969,7 @@ fn derivative_cancellation_at_every_publication_phase_is_atomic() {
             Store::open_with_publication_fault(
                 root.path().join("archive"),
                 root.path().join("state"),
-                Arc::new(PauseDerivativePhase {
+                Arc::new(PausePublicationPhase {
                     point,
                     reached: std::sync::Mutex::new(Some(reached_tx)),
                     resume: std::sync::Mutex::new(resume_rx),
@@ -14796,7 +15000,7 @@ fn derivative_cancellation_at_every_publication_phase_is_atomic() {
             } else {
                 assert!(matches!(cancel, Err(Error::CancellationTooLate)));
             }
-            resume_tx.send(()).unwrap();
+            resume_tx.send(Ok(())).unwrap();
             worker.join().unwrap().unwrap();
         });
         assert_eq!(

@@ -77,16 +77,20 @@ impl Store {
             let db = lock(&self.db)?;
             validate_processing_reference(&db, &record)?;
         }
-        if let Ok(existing) = self.processing_record(record.observation.id) {
-            return if serde_json::to_value(existing).map_err(storage)?
-                == serde_json::to_value(&record).map_err(storage)?
-            {
-                Ok(())
-            } else {
-                Err(Error::Storage(
-                    "immutable processing observation identity conflicts".into(),
-                ))
-            };
+        match self.processing_record(record.observation.id) {
+            Ok(existing) => {
+                return if serde_json::to_value(existing).map_err(storage)?
+                    == serde_json::to_value(&record).map_err(storage)?
+                {
+                    Ok(())
+                } else {
+                    Err(Error::Storage(
+                        "immutable processing observation identity conflicts".into(),
+                    ))
+                };
+            }
+            Err(Error::NotFound) => {}
+            Err(error) => return Err(error),
         }
         let txid = TransactionId(job.0);
         let result_key = collector_app::processing_result_key(&record)?;
@@ -259,6 +263,35 @@ impl Store {
     }
 
     fn publish_v4<T: Serialize>(
+        &self,
+        target: V4Target<'_>,
+        value: &T,
+        payload: Option<(&mut dyn Read, u64, &Digest)>,
+        cancelled: &mut dyn FnMut() -> Result<bool>,
+    ) -> Result<Option<String>> {
+        let transaction_id = target.transaction_id;
+        let result = self.publish_v4_attempt(target, value, payload, cancelled);
+        // All callers hold the archive writer across this attempt and cleanup.
+        // A cancelled, superseded or yielded attempt must not leave a journal
+        // that a later Job can collide with before the next server restart.
+        // Leave other failures to the caller's existing recovery policy. Committed
+        // revisions stay authoritative even if a continuation was interrupted.
+        if matches!(
+            result,
+            Err(Error::JobCancelled | Error::CommandInProgress | Error::CatalogBusy)
+        ) {
+            let journals = publication::PublicationJournalStore::new(&self.archive);
+            if journals
+                .phase(transaction_id)?
+                .is_some_and(|phase| phase < publication::PublicationPhase::RevisionCommitted)
+            {
+                journals.abort(transaction_id)?;
+            }
+        }
+        result
+    }
+
+    fn publish_v4_attempt<T: Serialize>(
         &self,
         target: V4Target<'_>,
         value: &T,

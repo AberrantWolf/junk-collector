@@ -1,3 +1,17 @@
+## Cancelled processing publication cleanup — source implementation, 2026-11-03
+
+V4 publication now removes its own unpublished journal/staging on cancellation,
+lost claims and catalog-busy yields before releasing the writer. Existing-record
+lookup failures propagate instead of authorizing another publication. A regression
+reproduced Fi's restart digest mismatch on the old code; the fix passes cancellation,
+yield/lost-claim, late-cancellation, immutable-content and damaged-projection cases,
+including a later Job with the same observation ID and a different timestamp,
+restart/reindex and unchanged originals. Workspace tests (634 passed, five existing
+ignores), strict Clippy, web/tooling checks and all 30 browser journeys pass; a
+test-only transient-read defect found during validation was repaired and covered.
+See [cause, review and validation](validation/cancelled-publication-2026-11-03.md).
+This source change is not released or installed on Fi; beta.20 remains deployed.
+
 ## Beta.20 published and installed on Fi — 2026-11-03
 
 Signed source `253e37e` is published as beta.20 and installed on Fi. Full exact-source
