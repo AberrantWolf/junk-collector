@@ -1,3 +1,11 @@
+## GitHub Metadata review issues #8 and #10 — 2026-11-03
+
+The release actually supplying metadata owns the selected/automatic cue. Retained
+candidates outside the current result set appear as earlier results, without an
+accepted-choice warning or warning border. Both album lookup methods use matching
+panels, spacing and primary actions with concise provider descriptions.
+See [review and validation](validation/github-metadata-review-2026-11-03.md).
+
 ## Incremental digital matching and independent review choices — source implementation, 2026-11-03
 
 Application-owned matching seeds from one available strong recording, fetches a

@@ -308,7 +308,6 @@ try{
  await clickAction(curator,'Review metadata');
  await curator.waitFor({state:'detached'});
  const metadataReview=page.getByRole('region',{name:'Metadata review'});
- await metadataReview.getByText('Look up album and track names with MusicBrainz',{exact:false}).waitFor();
  // Optional help works by keyboard and touch, stays within the viewport, and
  // Escape dismisses it without navigating away from the metadata review.
  const metadataHelp=metadataReview.getByRole('button',{name:'About metadata',exact:true});
@@ -364,7 +363,8 @@ try{
  await metadataReview.getByText('No album match was found.',{exact:false}).waitFor();
  assert.equal(await metadataReview.locator('.candidate.current').count(),0,'no-match lookup left automatic current candidates');
  assert.equal(await metadataReview.locator('.candidate').count(),3,'no-match lookup lost selectable observation history');
- assert.equal(await metadataReview.locator('.candidate.unmatched').count(),1,'selected choice was not marked unmatched');
+ await expect(metadataReview.locator('.candidate.in-use')).toHaveCount(1);
+ await expect(metadataReview.locator('.candidate.in-use')).toContainText('試験盤');
  await metadataReview.getByLabel('Title mode',{exact:true}).selectOption('manual');
  const titleAuthority=metadataReview.getByLabel('Displayed title',{exact:true});
  await titleAuthority.fill('Draft survives metadata conflict');

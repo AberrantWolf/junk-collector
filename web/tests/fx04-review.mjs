@@ -58,7 +58,7 @@ try{
   const response=await route.fetch();const review=await response.json();
   review.read_revision=fixtureRevision();
   const candidate=(title,strength,current,extra={})=>({identity:{provider:'org.junk.providers.musicbrainz',provider_record_id:title,provider_record_version:null},title:{value:title,language:'en'},subtitle:null,artwork:null,complete_identity:true,strength,provider_priority:0,current,selected:false,accepted_automatically:false,unmatched:false,details:null,music_layout:null,...extra});
-  review.candidates=[candidate('Saved name choice','name',false,{selected:using==='selected',unmatched:using==='selected'}),candidate(automaticTitle,'name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false)];
+  review.candidates=[candidate('Saved name choice','name',false,{selected:using==='selected',unmatched:using==='selected'}),candidate(automaticTitle,'name',true,{accepted_automatically:true}),candidate('Detected disc match','disc_layout',true),candidate('Recorded release match','identifier',true),candidate('Obsolete name search','name',false),candidate('New name suggestion','name',true),candidate('Old disc match','disc_layout',false),candidate('Previous automatic choice','identifier',false,{unmatched:true})];
   review.authority.selected_candidate=using==='selected'?review.candidates[0].identity:null;
   review.display.candidate=using==='selected'?review.candidates[0].identity:using==='automatic'?review.candidates[1].identity:null;
   review.display.resolution=using==='selected'?'selected':using==='automatic'?'automatic':'manual';
@@ -71,6 +71,8 @@ try{
  const ledger=page.locator('.candidate-ledger');const titles=ledger.locator('.candidate > div:first-child > strong');await titles.getByText('Saved name choice',{exact:true}).waitFor();
  for(const title of ['Accepted release','Detected disc match','Recorded release match'])assert.equal(await titles.getByText(title,{exact:true}).count(),1);
  for(const title of ['Obsolete name search','New name suggestion','Old disc match'])assert.equal(await titles.getByText(title,{exact:true}).count(),0);
+ await expect(ledger.locator('.candidate').filter({hasText:'Previous automatic choice'})).toContainText('Earlier result');
+ await expect(ledger.locator('.candidate').filter({hasText:'Previous automatic choice'})).not.toHaveClass(/in-use|unmatched/);
  await expect(ledger.locator('.candidate.in-use')).toHaveCount(1);
  await expect(ledger.locator('.candidate.in-use')).toContainText('Saved name choice');
  await expect(ledger.locator('.candidate.in-use').getByText('Currently using · selected by you',{exact:true})).toBeVisible();
