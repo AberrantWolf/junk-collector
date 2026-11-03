@@ -1,7 +1,9 @@
 //! Application-owned, resumable track/lookup pipeline; workers and providers own mechanisms.
 use crate::*;
 use collector_modules::music::*;
-use junk_libs_music::{LocalTrack, Release, fingerprint::AudioFingerprint, provider};
+use junk_libs_music::{
+    LocalTrack, Release, fingerprint::AudioFingerprint, matching::AlbumMatch, provider,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
@@ -14,8 +16,11 @@ pub struct DigitalMatchingProgress {
     pub releases: usize,
     pub releases_total: usize,
     pub artwork_pending: bool,
+    #[serde(default)]
+    pub editions_pending: bool,
 }
 #[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
 struct Checkpoint {
     fingerprints: BTreeMap<ObservationId, Vec<DigitalFileFingerprint>>,
     local: BTreeMap<String, LocalTrack>,
@@ -24,6 +29,16 @@ struct Checkpoint {
     release_hits: BTreeMap<String, usize>,
     releases: BTreeMap<String, Release>,
     skipped_releases: BTreeSet<String>,
+    release_targets: BTreeSet<String>,
+    release_priority: BTreeMap<String, (bool, usize)>,
+    releases_at_recording: usize,
+    edition_group: Option<String>,
+    edition_releases: BTreeSet<String>,
+    edition_next: u32,
+    edition_pages: usize,
+    edition_done: bool,
+    edition_error: Option<String>,
+    detail_limited: bool,
     snapshots: BTreeMap<String, SnapshotId>,
     covers: BTreeSet<String>,
     artwork: Vec<MetadataArtworkOption>,
@@ -290,68 +305,166 @@ impl CollectionService {
                 },
             );
         }
-        let recordings: BTreeSet<_> = state
-            .local
-            .values()
-            .flat_map(|t| {
-                t.recordings
-                    .iter()
-                    .filter(|r| r.score >= 0.5)
-                    .map(|r| r.recording_id.clone())
-            })
-            .collect();
-        state.truncated |= recordings.len() > 32;
-        for recording in &recordings {
-            if state.recording_targets.len() >= 32 {
-                break;
+        let cancellation = crate::processing_cancellation::ProcessingCancellation::new(
+            self.jobs.clone(),
+            claim.id,
+            claim.claim_token.clone(),
+        );
+        let mut checkpoint = || {
+            if cancellation.requested()? {
+                Err(Error::JobCancelled)
+            } else {
+                Ok(())
             }
-            state.recording_targets.insert(recording.clone());
-        }
-        // MusicBrainz starts while other AcoustID lookups and local calculations are running.
-        for recording in state.recording_targets.clone() {
-            if state.recording_pages.contains(&recording) {
-                continue;
-            }
-            let child=self.digital_provider_child(claim,f,&format!("recording:{recording}"),(MUSICBRAINZ_PROVIDER_ID,MUSICBRAINZ_ACQUIRE_OPERATION),serde_json::json!({"kind":"recording_releases","recording_id":recording,"offset":0,"refresh":false}),8*1024*1024)?;
-            if child.state != JobState::Completed {
-                pending_child(&child, &mut waiting)?;
-                continue;
-            }
-            let snapshot = self.digital_child_snapshot(&child, f.sources[0].collection_id)?;
-            let page = provider::parse_releases(
-                &self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?,
-                false,
-            )
-            .map_err(|e| Error::Unavailable(e.to_string()))?;
-            state.truncated |= page.total.is_some_and(|n| n as usize > page.releases.len());
-            for r in page.releases {
-                *state.release_hits.entry(r.id).or_default() += 1;
-            }
-            state.recording_pages.insert(recording.clone());
-        }
-        let discovery_done = state.local.len() == f.tracks.len()
-            && state
-                .recording_targets
-                .iter()
-                .all(|id| state.recording_pages.contains(id));
-        // Rank release demand after all recording responses; avoid speculative expansion.
-        let mut release_ids: Vec<_> = state
-            .release_hits
-            .iter()
-            .map(|(id, hits)| (id.clone(), *hits))
-            .collect();
-        release_ids.sort_by_key(|(id, hits)| (std::cmp::Reverse(*hits), id.clone()));
-        state.truncated |= release_ids.len() > f.release_limit;
-        let requested: Vec<_> = release_ids
-            .into_iter()
-            .take(f.release_limit)
-            .map(|(id, _)| id)
-            .collect();
-        if discovery_done {
-            for id in &requested {
-                if state.releases.contains_key(id) || state.skipped_releases.contains(id) {
+        };
+        // Search decisions use canonical inputs, never the bounded UI projection.
+        let mut matches: Vec<AlbumMatch> = Vec::new();
+        let mut ranked_inputs = None;
+        let mut releases_done = false;
+        // Admit one useful discovery/detail request at a time. Fingerprinting and
+        // recognition remain concurrent, but album membership searches do not fan out.
+        loop {
+            checkpoint()?;
+            let mut recording_pending = false;
+            for recording in state.recording_targets.clone() {
+                if state.recording_pages.contains(&recording) {
                     continue;
                 }
+                let child = self.digital_provider_child(claim, f, &format!("recording:{recording}"),
+                    (MUSICBRAINZ_PROVIDER_ID, MUSICBRAINZ_ACQUIRE_OPERATION),
+                    serde_json::json!({"kind":"recording_releases","recording_id":recording,"offset":0,"refresh":false}), 8*1024*1024)?;
+                if child.state != JobState::Completed {
+                    pending_child(&child, &mut waiting)?;
+                    recording_pending = true;
+                    continue;
+                }
+                let snapshot = self.digital_child_snapshot(&child, f.sources[0].collection_id)?;
+                let page = provider::parse_releases(
+                    &self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?,
+                    false,
+                )
+                .map_err(|e| Error::Unavailable(e.to_string()))?;
+                state.truncated |= page.total.is_some_and(|n| n as usize > page.releases.len());
+                remember_release_hints(&mut state, &page.releases, f.tracks.len())?;
+                state.recording_pages.insert(recording);
+            }
+            let all_tracks = state.local.len() == f.tracks.len();
+            if all_tracks && ranked_inputs != Some((state.local.len(), state.releases.len())) {
+                matches = rank_candidates(&state, &mut checkpoint)?;
+                ranked_inputs = Some((state.local.len(), state.releases.len()));
+            }
+            let perfect = all_tracks && matches.iter().any(complete_album_match);
+            if perfect && state.edition_group.is_none() {
+                state.edition_group = matches
+                    .iter()
+                    .find(|m| complete_album_match(m))
+                    .and_then(|m| m.release.release_group_id.clone());
+                if state.edition_group.is_none() {
+                    state.edition_done = true;
+                }
+            }
+            if recording_pending {
+                break;
+            }
+            let used = state.releases.len() + state.skipped_releases.len();
+            let known_editions_pending = state
+                .edition_releases
+                .iter()
+                .any(|id| !state.releases.contains_key(id) && !state.skipped_releases.contains(id));
+            if perfect && !state.edition_done && !known_editions_pending {
+                if used >= f.release_limit || state.edition_pages >= 4 {
+                    state.detail_limited |= used >= f.release_limit;
+                    state.truncated = true;
+                    state.edition_done = true;
+                } else {
+                    let group = state.edition_group.as_ref().ok_or(Error::Conflict)?.clone();
+                    let offset = state.edition_next;
+                    let child = self.digital_provider_child(claim, f, &format!("editions:{group}:{offset}"),
+                        (MUSICBRAINZ_PROVIDER_ID, MUSICBRAINZ_ACQUIRE_OPERATION),
+                        serde_json::json!({"kind":"release_group_releases","release_group_id":group,"offset":offset,"refresh":false}), 8*1024*1024)?;
+                    if child.state == JobState::Failed {
+                        state.edition_error = Some(
+                            child
+                                .error
+                                .unwrap_or_else(|| "Edition lookup failed".into()),
+                        );
+                        state.edition_done = true;
+                    } else if child.state != JobState::Completed {
+                        pending_child(&child, &mut waiting)?;
+                        break;
+                    } else {
+                        let snapshot =
+                            self.digital_child_snapshot(&child, f.sources[0].collection_id)?;
+                        let page = provider::parse_releases(
+                            &self.matching_bytes(claim, &snapshot, 8 * 1024 * 1024)?,
+                            false,
+                        )
+                        .map_err(|e| Error::Unavailable(e.to_string()))?;
+                        if page.offset != offset
+                            || page
+                                .releases
+                                .iter()
+                                .any(|r| r.release_group_id.as_deref() != Some(&group))
+                        {
+                            return Err(Error::Conflict);
+                        }
+                        state.edition_next = offset + page.releases.len() as u32;
+                        state.edition_pages += 1;
+                        state.edition_done = page.releases.is_empty()
+                            || page.total.is_none_or(|total| state.edition_next >= total);
+                        state
+                            .edition_releases
+                            .extend(page.releases.iter().map(|r| r.id.clone()));
+                        remember_release_hints(&mut state, &page.releases, f.tracks.len())?;
+                    }
+                }
+            }
+            // A failed/partial candidate directs the next search to an unexplained
+            // track. Do not broaden discovery while its remaining recognition is pending.
+            let next_recording = if !perfect && state.recording_targets.len() < 32 {
+                next_recording_unbounded(&state, &matches, &f.tracks)
+            } else {
+                None
+            };
+            let candidate = state
+                .release_hits
+                .keys()
+                .filter(|id| {
+                    !state.releases.contains_key(*id) && !state.skipped_releases.contains(*id)
+                })
+                .filter(|id| !perfect || state.edition_releases.contains(*id))
+                .min_by_key(|id| {
+                    (
+                        std::cmp::Reverse(state.release_hits[*id]),
+                        state
+                            .release_priority
+                            .get(*id)
+                            .copied()
+                            .unwrap_or((true, usize::MAX)),
+                        (*id).clone(),
+                    )
+                })
+                .cloned();
+            if used >= f.release_limit {
+                state.detail_limited |= candidate.is_some() || next_recording.is_some();
+                state.truncated |= state.detail_limited;
+                releases_done = all_tracks;
+                break;
+            }
+            if let Some(recording) = next_recording
+                && may_discover_recording(&state, all_tracks, candidate.is_some())
+            {
+                state.releases_at_recording = state.releases.len();
+                state.recording_targets.insert(recording);
+                continue;
+            }
+            if let Some(id) = candidate {
+                // Fetch the first candidate while recognition of later files runs;
+                // subsequent expansion waits until we can actually assess that candidate.
+                if !all_tracks && !state.releases.is_empty() {
+                    break;
+                }
+                state.release_targets.insert(id.clone());
                 let child = self.digital_provider_child(
                     claim,
                     f,
@@ -360,9 +473,27 @@ impl CollectionService {
                     serde_json::json!({"kind":"release_id","release_id":id,"refresh":false}),
                     8 * 1024 * 1024,
                 )?;
+                if perfect && child.state == JobState::Failed {
+                    // Edition enrichment is optional once a full candidate is available.
+                    // Do not hide it because a different edition could not be downloaded.
+                    state.edition_error = Some(
+                        child
+                            .error
+                            .unwrap_or_else(|| "Edition lookup failed".into()),
+                    );
+                    state.edition_done = true;
+                    state.skipped_releases.extend(
+                        state
+                            .edition_releases
+                            .iter()
+                            .filter(|id| !state.releases.contains_key(*id))
+                            .cloned(),
+                    );
+                    continue;
+                }
                 if child.state != JobState::Completed {
                     pending_child(&child, &mut waiting)?;
-                    continue;
+                    break;
                 }
                 let snapshot = self.digital_child_snapshot(&child, f.sources[0].collection_id)?;
                 let page = provider::parse_releases(
@@ -370,50 +501,51 @@ impl CollectionService {
                     true,
                 )
                 .map_err(|e| Error::Unavailable(e.to_string()))?;
-                if page.releases.len() != 1
-                    || page.releases[0].id != *id
-                    || page.releases[0]
-                        .media
-                        .iter()
-                        .map(|m| m.tracks.len())
-                        .sum::<usize>()
-                        > junk_libs_music::MAX_TRACKS
-                {
+                if page.releases.len() != 1 || page.releases[0].id != id {
                     return Err(Error::Conflict);
+                }
+                if page.releases[0]
+                    .media
+                    .iter()
+                    .map(|medium| medium.tracks.len())
+                    .sum::<usize>()
+                    > junk_libs_music::MAX_TRACKS
+                {
+                    // A valid larger edition cannot be compared within this workflow's bound.
+                    state.truncated = true;
+                    state.skipped_releases.insert(id);
+                    continue;
                 }
                 let cost = serde_json::to_vec(&page.releases[0])
                     .map_err(|e| Error::Storage(e.to_string()))?
                     .len();
-                let used = serde_json::to_vec(&state.releases)
+                let used_bytes = serde_json::to_vec(&state.releases)
                     .map_err(|e| Error::Storage(e.to_string()))?
                     .len();
-                if cost > 512 * 1024 || used + cost > 4 * 1024 * 1024 {
+                if cost > 512 * 1024 || used_bytes + cost > 4 * 1024 * 1024 {
                     state.truncated = true;
-                    state.skipped_releases.insert(id.clone());
-                    continue;
+                    state.skipped_releases.insert(id);
+                } else {
+                    state.snapshots.insert(id.clone(), snapshot.id);
+                    state
+                        .releases
+                        .insert(id, page.releases.into_iter().next().ok_or(Error::Conflict)?);
                 }
-                state.snapshots.insert(id.clone(), snapshot.id);
-                state
-                    .releases
-                    .insert(id.clone(), page.releases.into_iter().next().unwrap());
+                continue;
             }
+            if perfect && !state.edition_done {
+                continue;
+            }
+            if all_tracks {
+                state.truncated |= !perfect
+                    && state.recording_targets.len() >= 32
+                    && next_recording_unbounded(&state, &matches, &f.tracks).is_some();
+                releases_done = true;
+            }
+            break;
         }
-        let releases_done = discovery_done
-            && requested
-                .iter()
-                .all(|id| state.releases.contains_key(id) || state.skipped_releases.contains(id));
-        if discovery_done && (!state.releases.is_empty() || releases_done) {
-            let matches = junk_libs_music::matching::rank(
-                &state.local.values().cloned().collect::<Vec<_>>(),
-                &state.releases.values().cloned().collect::<Vec<_>>(),
-                &mut || {
-                    self.current_digital_matching(claim, f)
-                        .map(|_| ())
-                        .map_err(|_| junk_libs_music::Error::Cancelled)
-                },
-            )
-            .map_err(|e| Error::Unavailable(e.to_string()))?;
-            if releases_done
+        if state.local.len() == f.tracks.len() {
+            if !matches.is_empty()
                 && self
                     .streaming_providers
                     .contains_key(COVER_ART_ARCHIVE_PROVIDER_ID)
@@ -486,7 +618,8 @@ impl CollectionService {
             }
             state.result = Some(crate::digital_matching::bounded_digital_result(
                 DigitalMatchingResult {
-                    can_expand: f.release_limit < 32 && state.release_hits.len() > f.release_limit,
+                    can_expand: f.release_limit < 32 && state.detail_limited,
+                    edition_error: state.edition_error.clone(),
                     artwork: state.artwork.clone(),
                     artwork_error: state.artwork_error.clone(),
                     matches,
@@ -496,7 +629,7 @@ impl CollectionService {
                     fingerprints: f.sources.iter().map(|s| s.observation_id).collect(),
                     inventory_revision: f.inventory_revision,
                 },
-                &mut || self.current_digital_matching(claim, f).map(|_| ()),
+                &mut checkpoint,
             )?);
         }
         state.progress = DigitalMatchingProgress {
@@ -506,11 +639,12 @@ impl CollectionService {
             recordings: state.recording_pages.len(),
             recordings_total: state.recording_targets.len(),
             releases: state.releases.len(),
-            releases_total: if discovery_done { requested.len() } else { 0 },
+            releases_total: state.release_targets.len(),
+            editions_pending: state.edition_group.is_some() && !releases_done,
             artwork_pending: releases_done && !waiting.is_empty(),
         };
+        self.current_digital_matching(claim, f)?;
         if waiting.is_empty() {
-            self.current_digital_matching(claim, f)?;
             self.jobs.wait_digital(
                 claim,
                 serde_json::to_value(&state).map_err(|e| Error::Storage(e.to_string()))?,
@@ -539,5 +673,216 @@ fn pending_child(child: &JobRecord, waiting: &mut Vec<JobId>) -> Result<()> {
             waiting.push(child.id);
             Ok(())
         }
+    }
+}
+
+fn complete_album_match(candidate: &AlbumMatch) -> bool {
+    candidate.complete_tracklist
+        && !candidate.ambiguous_mapping
+        && candidate.duration_conflicts == 0
+        && candidate.mappings.len() == candidate.local_tracks
+        && candidate.release_tracks == candidate.local_tracks
+        && candidate.mappings.iter().all(|mapping| {
+            mapping.score >= 0.95 && mapping.duration_delta_ms.is_some_and(|delta| delta <= 2000)
+        })
+}
+fn remember_release_hints(
+    state: &mut Checkpoint,
+    releases: &[Release],
+    tracks: usize,
+) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for release in releases {
+        if !seen.insert(&release.id) {
+            return Err(Error::Conflict);
+        }
+        *state.release_hits.entry(release.id.clone()).or_default() += 1;
+        let count: usize = release.media.iter().map(|m| m.track_count as usize).sum();
+        let digital = !release.media.is_empty()
+            && release
+                .media
+                .iter()
+                .all(|m| m.format.as_deref() == Some("Digital Media"));
+        state
+            .release_priority
+            .insert(release.id.clone(), (!digital, count.abs_diff(tracks)));
+    }
+    Ok(())
+}
+fn next_recording_unbounded(
+    state: &Checkpoint,
+    matches: &[AlbumMatch],
+    tracks: &[FrozenMatchTrack],
+) -> Option<String> {
+    let best = matches.first();
+    let mut choices = Vec::new();
+    for (order, track) in tracks.iter().enumerate() {
+        let key = format!("{}:{}", track.source, track.file);
+        let Some(local) = state.local.get(&key) else {
+            continue;
+        };
+        let explained = best.is_some_and(|m| {
+            m.mappings.iter().any(|mapping| {
+                mapping.key == key && mapping.duration_delta_ms.is_none_or(|delta| delta <= 2000)
+            })
+        });
+        for recording in &local.recordings {
+            if recording.score >= 0.5 && !state.recording_targets.contains(&recording.recording_id)
+            {
+                choices.push((explained, recording.score, order, &recording.recording_id));
+            }
+        }
+    }
+    choices.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| b.1.total_cmp(&a.1))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(b.3))
+    });
+    choices.first().map(|value| value.3.clone())
+}
+
+fn may_discover_recording(state: &Checkpoint, all_tracks: bool, has_candidate: bool) -> bool {
+    state.recording_targets.is_empty()
+        || all_tracks && (!has_candidate || state.releases.len() > state.releases_at_recording)
+}
+
+fn rank_candidates(
+    state: &Checkpoint,
+    checkpoint: &mut dyn FnMut() -> Result<()>,
+) -> Result<Vec<AlbumMatch>> {
+    let mut matches = junk_libs_music::matching::rank(
+        &state.local.values().cloned().collect::<Vec<_>>(),
+        &state.releases.values().cloned().collect::<Vec<_>>(),
+        &mut || checkpoint().map_err(|_| junk_libs_music::Error::Cancelled),
+    )
+    .map_err(|error| match error {
+        junk_libs_music::Error::Cancelled => Error::JobCancelled,
+        other => Error::Unavailable(other.to_string()),
+    })?;
+    // Retain the strongest candidate first when the presentation budget truncates editions.
+    matches.sort_by_key(|candidate| !complete_album_match(candidate));
+    Ok(matches)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use junk_libs_music::{Medium, RecordingMatch, Track};
+    fn id(n: usize) -> String {
+        format!("00000000-0000-4000-8000-{n:012}")
+    }
+    #[test]
+    fn resume_ranks_canonical_releases_even_when_projection_drops_the_strong_match() {
+        let source = RepresentationId::new();
+        let frozen: Vec<_> = (1..=256)
+            .map(|i| FrozenMatchTrack {
+                name: format!("{i:03}.flac"),
+                source,
+                file: PackageFileId::new(),
+                source_position: i,
+                frames: 576000,
+                sample_rate: 48000,
+                disc: Some(1),
+                position: Some(i),
+            })
+            .collect();
+        let local: Vec<_> = frozen
+            .iter()
+            .enumerate()
+            .map(|(i, t)| LocalTrack {
+                key: format!("{}:{}", t.source, t.file),
+                duration_ms: 12000,
+                disc: Some(1),
+                position: Some((i + 1) as u16),
+                recordings: vec![
+                    RecordingMatch {
+                        recording_id: id(i + 1),
+                        score: 0.8,
+                    },
+                    RecordingMatch {
+                        recording_id: id(1000 + i + 1),
+                        score: 1.0,
+                    },
+                ],
+            })
+            .collect();
+        let releases: Vec<_> = (0..4)
+            .map(|n| Release {
+                id: id(10000 + n),
+                title: format!("Edition {n}"),
+                artist: "Artist".into(),
+                artist_ids: vec![],
+                release_group_id: Some(id(80)),
+                disambiguation: None,
+                language: None,
+                script: None,
+                date: None,
+                country: None,
+                barcode: None,
+                media: vec![Medium {
+                    position: Some(1),
+                    format: Some("Digital Media".into()),
+                    track_count: 256,
+                    disc_ids: vec![],
+                    tracks: (0..256)
+                        .map(|i| Track {
+                            position: (i + 1) as u16,
+                            title: format!("{} {i}", "t".repeat(650)),
+                            artist: String::new(),
+                            recording_id: Some(id(if n == 3 || i <= n {
+                                1000 + i + 1
+                            } else {
+                                i + 1
+                            })),
+                            duration_ms: Some(12000),
+                        })
+                        .collect(),
+                }],
+            })
+            .collect();
+        assert!(
+            releases
+                .iter()
+                .all(|r| serde_json::to_vec(r).unwrap().len() < 512 * 1024)
+        );
+
+        let raw_matches =
+            junk_libs_music::matching::rank(&local, &releases, &mut || Ok(())).unwrap();
+        let projected = bounded_digital_result(
+            DigitalMatchingResult {
+                edition_error: None,
+                can_expand: false,
+                artwork: vec![],
+                artwork_error: None,
+                matches: raw_matches,
+                truncated: false,
+                snapshots: BTreeMap::new(),
+                tracks: frozen,
+                fingerprints: vec![],
+                inventory_revision: Revision(1),
+            },
+            &mut || Ok(()),
+        )
+        .unwrap();
+        let shown: DigitalMatchingResult = serde_json::from_value(projected.clone()).unwrap();
+        assert!(shown.truncated && !shown.matches.iter().any(complete_album_match));
+        let state = Checkpoint {
+            local: local
+                .into_iter()
+                .map(|track| (track.key.clone(), track))
+                .collect(),
+            releases: releases
+                .into_iter()
+                .map(|release| (release.id.clone(), release))
+                .collect(),
+            result: Some(projected),
+            ..Default::default()
+        };
+        let resumed: Checkpoint =
+            serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap();
+        let ranked = rank_candidates(&resumed, &mut || Ok(())).unwrap();
+        assert!(complete_album_match(&ranked[0]));
+        assert_eq!(ranked[0].release.id, id(10003));
     }
 }

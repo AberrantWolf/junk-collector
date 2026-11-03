@@ -17,12 +17,11 @@
 .candidate.in-use{border:2px solid var(--green);border-left-width:6px;border-radius:6px;background:var(--accent);padding:16px;margin-block:12px;opacity:1}.candidate.in-use>div:first-child>strong{font-size:19px}.candidate .candidate-use-badge{justify-self:start;background:var(--green);color:#fff;border-radius:4px;padding:6px 10px;font-size:13px;font-weight:700;line-height:1.4}.effective-metadata>.metadata-use-status{display:flex;align-items:flex-start;flex-direction:column;gap:7px;max-width:24rem}.effective-metadata .metadata-use-label{font-size:14px;font-weight:700;color:var(--ink)}.effective-metadata .metadata-override-badge{background:#fff4db;color:#6f4a16;border:1px solid #bd914c;border-radius:4px;padding:5px 8px;font-size:12px;font-weight:650}
 
 .effective-metadata .metadata-use-release-name{font-size:14px;font-weight:650;color:var(--ink)}
-.digital-album-matching .candidate { display:flex; align-items:flex-start; gap:1rem; }
-.digital-match-cover { width:5rem; flex:0 0 5rem; }
+.digital-match-cover { width:5rem; }
 .digital-match-cover img { width:100%; height:auto; object-fit:contain; }
 .digital-match-cover span { display:grid; place-items:center; min-height:5rem; background:var(--panel-muted,#eee); font-size:2rem; }
 .digital-album-matching .candidate > div:last-child { min-width:0; overflow-wrap:anywhere; }
-@media(max-width:480px) { .digital-match-cover { width:3rem; flex-basis:3rem; } }
+@media(max-width:480px) { .digital-match-cover { width:3rem; } }
 
 .digital-mapping-editor { min-width:0; margin-block:1rem; }
 .digital-mapping-editor label { display:grid; gap:.35rem; margin-block:.8rem; overflow-wrap:anywhere; }
@@ -42,3 +41,33 @@
 .digital-album-matching .digital-match-edition span { font-size:.85rem; color:var(--ink); }
 .digital-album-matching .digital-match-edition-badge { padding:.15rem .55rem; border:1px solid var(--line); border-radius:4px; background:var(--accent); font-weight:700; }
 .digital-match-region { display:inline-flex; align-items:center; gap:.3rem; }
+
+.digital-mapping-table { max-width:100%; overflow-x:auto; margin-block:1rem; }
+.digital-mapping-table table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:.8rem; }
+.digital-mapping-table th, .digital-mapping-table td { text-align:left; padding:.5rem .4rem; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+.digital-mapping-table th { font-weight:700; background:var(--accent); }
+.digital-mapping-table th:first-child { width:30%; }
+.digital-mapping-table th:nth-child(2) { width:38%; }
+.digital-mapping-table th:nth-child(3) { width:18%; }
+.digital-mapping-table th:last-child { width:14%; white-space:nowrap; }
+.digital-mapping-table tr:nth-child(even) { background:#f3f1e9; }
+.mapping-position { display:block; font-size:.8rem; color:var(--muted); white-space:nowrap; }
+.digital-track-counts { padding-left:1.25rem; }
+.digital-album-matching .candidate > div { min-width:0; }
+
+.digital-mapping-table td:last-child { white-space:nowrap; }
+@media(max-width:600px) {
+ .digital-mapping-table table, .digital-mapping-table tbody { display:block; }
+ .digital-mapping-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ .digital-mapping-table tr { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); padding:.5rem 0; border-bottom:1px solid var(--line); }
+ .digital-mapping-table td { border:0; padding:.35rem .5rem; min-width:0; }
+ .digital-mapping-table td:nth-child(-n+2) { grid-column:1/-1; }
+ .digital-mapping-table td::before { content:attr(data-label); display:block; font-size:.7rem; color:var(--muted); margin-bottom:.15rem; white-space:normal; }
+}
+/* Mapping review uses the whole card rather than the cover's text column. */
+.digital-album-matching .candidate { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:.6rem 1rem; }
+.digital-album-matching .candidate > .digital-match-cover { grid-column:1; grid-row:1 / span 3; }
+.digital-album-matching .candidate > div:last-child { display:contents; }
+.digital-album-matching .candidate > div:last-child > * { grid-column:2; min-width:0; }
+.digital-album-matching .candidate > div:last-child > :is(details,fieldset,button,.digital-track-counts,p:not(.digital-match-artist)) { grid-column:1 / -1; }
+@media(max-width:480px) { .digital-album-matching .candidate { grid-template-columns:3rem minmax(0,1fr); } }

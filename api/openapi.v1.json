@@ -9469,6 +9469,30 @@
           {
             "type": "object",
             "required": [
+              "release_id",
+              "source"
+            ],
+            "properties": {
+              "image_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "cover_art_release"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
               "candidate",
               "source"
             ],
@@ -12055,6 +12079,9 @@
         ],
         "properties": {
           "artwork_pending": {
+            "type": "boolean"
+          },
+          "editions_pending": {
             "type": "boolean"
           },
           "fingerprints": {
@@ -16692,9 +16719,18 @@
           }
         }
       },
+      "MetadataResolutionStage": {
+        "type": "string",
+        "enum": [
+          "metadata",
+          "artwork_listing",
+          "artwork_image"
+        ]
+      },
       "MetadataResolutionView": {
         "type": "object",
         "required": [
+          "stage",
           "job"
         ],
         "properties": {
@@ -16710,6 +16746,9 @@
                 "type": "null"
               }
             ]
+          },
+          "stage": {
+            "$ref": "#/components/schemas/MetadataResolutionStage"
           }
         }
       },
@@ -16729,6 +16768,7 @@
       "MetadataReviewView": {
         "type": "object",
         "required": [
+          "digital_source_eligible",
           "read_revision",
           "item_id",
           "revision",
@@ -16759,6 +16799,9 @@
             "items": {
               "$ref": "#/components/schemas/MetadataCatalogSourceView"
             }
+          },
+          "digital_source_eligible": {
+            "type": "boolean"
           },
           "display": {
             "$ref": "#/components/schemas/ResolvedMetadataDisplay"

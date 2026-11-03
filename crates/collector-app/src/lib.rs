@@ -5511,8 +5511,6 @@ impl CollectionService {
     }
 
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
-        self.jobs.reconcile_game_scans()?;
-        self.jobs.reconcile_acquisitions()?;
         let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
             return Ok(false);
         };
@@ -5837,7 +5835,7 @@ impl CollectionService {
                 )?;
             }
         }
-        self.jobs.reconcile_acquisitions()?;
+        self.reconcile_background_jobs()?;
         if let Some(id) = guided_import_id {
             self.reconcile_guided_ingest(id)?;
         }

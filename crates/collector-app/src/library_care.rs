@@ -75,7 +75,11 @@ pub trait LibraryCarePort: Send + Sync {
         collection: CollectionId,
         command: &UpdateCdLibrarySettings,
     ) -> Result<CdLibrarySettings>;
-    fn metadata_resolution_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<JobRecord>>;
+    fn metadata_resolution_jobs(
+        &self,
+        user: UserId,
+        item: ItemId,
+    ) -> Result<Vec<crate::MetadataResolutionRecord>>;
     fn metadata_care_entries(
         &self,
         user: UserId,

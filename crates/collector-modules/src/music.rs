@@ -65,6 +65,8 @@ pub struct MusicItemPatch {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MusicMetadataOverrides {
+    /// User-recorded storefront/distribution source, independent of release identity.
+    pub digital_source: Option<String>,
     #[serde(default)]
     pub track_overrides: Vec<crate::disc_audio::TrackMetadataOverride>,
     pub artist: Option<String>,
@@ -2157,7 +2159,12 @@ impl CollectionModule for Music {
             .payload
             .parse()
             .map_err(|error| ModuleError::Invalid(error.to_string()))?;
-        validate_texts([&value.artist])?;
+        validate_texts([&value.artist, &value.digital_source])?;
+        if value.digital_source.as_ref().is_some_and(|source| {
+            source.trim().is_empty() || source.len() > 256 || source.trim() != source
+        }) {
+            return Err(ModuleError::Invalid("invalid digital source".into()));
+        }
         crate::disc_audio::validate_track_overrides(&value.track_overrides)?;
         if value.disc_assignments.len() > 128 {
             return Err(ModuleError::Invalid("too many disc assignments".into()));

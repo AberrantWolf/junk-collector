@@ -210,11 +210,16 @@ impl Store {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        crate::digital_pipeline::reconcile(&tx)?;
-        // Remove only unsettled ownership; completed bindings remain for uncertain retries.
-        tx.execute("DELETE FROM private.acquisition_links WHERE snapshot_id IS NULL AND owner_job IN (SELECT j.id FROM private.jobs j LEFT JOIN items i ON i.id=j.item_id LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state IN ('cancelled','cancel_requested','failed') OR j.cancellation_requested=1 OR (i.id IS NOT NULL AND (i.deleted=1 OR COALESCE(g.generation,0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))))",[]).map_err(storage)?;
-        tx.execute("UPDATE private.jobs SET state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END,cancellation_requested=1 WHERE kind='provider_acquisition' AND state IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM private.acquisition_links l JOIN private.jobs owner ON owner.id=l.owner_job WHERE l.acquisition_job=jobs.id AND owner.state IN ('queued','running') AND owner.cancellation_requested=0)",[]).map_err(storage)?;
-        tx.execute("UPDATE private.jobs SET phase='queued' WHERE state='queued' AND phase IN ('waiting_provider','waiting_shared_provider') AND EXISTS(SELECT 1 FROM private.acquisition_waits w JOIN private.jobs a ON a.id=w.acquisition_job WHERE w.owner_job=jobs.id AND a.state IN ('completed','failed','cancelled'))",[]).map_err(storage)?;
+        reconcile_provider_work_tx(&tx)?;
         tx.commit().map_err(storage)
     }
+}
+
+pub(crate) fn reconcile_provider_work_tx(tx: &Connection) -> Result<()> {
+    crate::digital_pipeline::reconcile(tx)?;
+    // Remove only unsettled ownership; completed bindings remain for uncertain retries.
+    tx.execute("DELETE FROM private.acquisition_links WHERE snapshot_id IS NULL AND owner_job IN (SELECT j.id FROM private.jobs j LEFT JOIN items i ON i.id=j.item_id LEFT JOIN private.item_job_generations g ON g.job_id=j.id WHERE j.state IN ('cancelled','cancel_requested','failed') OR j.cancellation_requested=1 OR (i.id IS NOT NULL AND (i.deleted=1 OR COALESCE(g.generation,0)<>COALESCE(json_extract(i.record,'$.lifecycle.generation'),0))))",[]).map_err(storage)?;
+    tx.execute("UPDATE private.jobs SET state=CASE WHEN state='queued' THEN 'cancelled' ELSE 'cancel_requested' END,cancellation_requested=1 WHERE kind='provider_acquisition' AND state IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM private.acquisition_links l JOIN private.jobs owner ON owner.id=l.owner_job WHERE l.acquisition_job=jobs.id AND owner.state IN ('queued','running') AND owner.cancellation_requested=0)",[]).map_err(storage)?;
+    tx.execute("UPDATE private.jobs SET phase='queued' WHERE state='queued' AND phase IN ('waiting_provider','waiting_shared_provider') AND EXISTS(SELECT 1 FROM private.acquisition_waits w JOIN private.jobs a ON a.id=w.acquisition_job WHERE w.owner_job=jobs.id AND a.state IN ('completed','failed','cancelled'))",[]).map_err(storage)?;
+    Ok(())
 }

@@ -26,8 +26,11 @@ pub fn acquisition_key(frozen: &FrozenAcquisitionJob) -> Result<String> {
 }
 
 impl CollectionService {
-    pub fn reconcile_provider_acquisitions(&self) -> Result<()> {
-        self.jobs.reconcile_acquisitions()
+    /// One recovery owner calls this periodically; workers call it after state changes.
+    pub fn reconcile_background_jobs(&self) -> Result<()> {
+        let scans = self.jobs.reconcile_game_scans();
+        let acquisitions = self.jobs.reconcile_acquisitions();
+        scans.and(acquisitions)
     }
     pub(crate) fn validate_acquisition_owners(
         &self,

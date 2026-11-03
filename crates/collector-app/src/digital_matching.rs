@@ -84,6 +84,8 @@ impl FrozenDigitalMatching {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DigitalMatchingResult {
     #[serde(default)]
+    pub edition_error: Option<String>,
+    #[serde(default)]
     pub can_expand: bool,
     #[serde(default)]
     pub artwork: Vec<MetadataArtworkOption>,
@@ -470,8 +472,17 @@ impl CollectionService {
             return Err(Error::Conflict);
         }
         self.validate_digital_metadata_revision(&item, f)?;
+        let mut seen = BTreeMap::new();
         for source in &f.sources {
             self.validate_frozen_binding(&eligibility, &source.collection_binding)?;
+            let key =
+                serde_json::to_string(&source.source).map_err(|e| Error::Storage(e.to_string()))?;
+            if let Some(previous) = seen.insert(key, &source.source_fingerprint) {
+                if previous != &source.source_fingerprint {
+                    return Err(Error::Conflict);
+                }
+                continue;
+            }
             if self
                 .processing
                 .recorded_source(item.collection_id, source.source)?
@@ -784,6 +795,7 @@ mod tests {
             unmatched: vec![],
         };
         let result = DigitalMatchingResult {
+            edition_error: None,
             can_expand: false,
             artwork: vec![],
             artwork_error: None,

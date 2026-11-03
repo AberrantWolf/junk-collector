@@ -18,6 +18,12 @@ pub const MUSICBRAINZ_PROVIDER_PRIORITY: u16 = 20;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MusicBrainzQuery {
+    ReleaseGroupReleases {
+        release_group_id: String,
+        offset: u32,
+        #[serde(default)]
+        refresh: bool,
+    },
     RecordingReleases {
         recording_id: String,
         offset: u32,
@@ -55,6 +61,17 @@ impl MusicBrainzQuery {
                 }
                 Ok(())
             }
+            Self::ReleaseGroupReleases {
+                release_group_id,
+                offset,
+                ..
+            } => {
+                validate_mbid(release_group_id)?;
+                if *offset > 10000 {
+                    return Err(Error::Invalid("browse offset exceeds bound".into()));
+                }
+                Ok(())
+            }
             Self::ReleaseId { release_id, .. } => validate_mbid(release_id),
             Self::DiscId { disc_id, .. } => {
                 if disc_id.is_empty()
@@ -81,7 +98,8 @@ impl MusicBrainzQuery {
 
     pub fn refresh(&self) -> bool {
         match self {
-            Self::RecordingReleases { refresh, .. }
+            Self::ReleaseGroupReleases { refresh, .. }
+            | Self::RecordingReleases { refresh, .. }
             | Self::ReleaseId { refresh, .. }
             | Self::DiscId { refresh, .. }
             | Self::Search { refresh, .. } => *refresh,
@@ -338,9 +356,9 @@ pub fn musicbrainz_metadata_candidates(
             }
             (true, MatchStrength::DiscLayout)
         }
-        MusicBrainzQuery::Search { .. } | MusicBrainzQuery::RecordingReleases { .. } => {
-            (false, MatchStrength::Name)
-        }
+        MusicBrainzQuery::Search { .. }
+        | MusicBrainzQuery::RecordingReleases { .. }
+        | MusicBrainzQuery::ReleaseGroupReleases { .. } => (false, MatchStrength::Name),
     };
     let requested_release = match &snapshot.query {
         MusicBrainzQuery::ReleaseId { release_id, .. } => Some(release_id),
@@ -353,6 +371,15 @@ pub fn musicbrainz_metadata_candidates(
         if requested_release.is_some_and(|expected| expected != &release.release_id) {
             return Err(Error::Invalid(
                 "MusicBrainz release response is misdirected".into(),
+            ));
+        }
+        if let MusicBrainzQuery::ReleaseGroupReleases {
+            release_group_id, ..
+        } = &snapshot.query
+            && release.release_group_id.as_ref() != Some(release_group_id)
+        {
+            return Err(Error::Invalid(
+                "MusicBrainz edition response is misdirected".into(),
             ));
         }
         // A candidate version describes this release, not unrelated response entries.

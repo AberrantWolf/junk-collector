@@ -193,19 +193,33 @@ impl LibraryCarePort for Store {
         &self,
         user: UserId,
         item: ItemId,
-    ) -> Result<Vec<collector_app::JobRecord>> {
-        let ids = {
+    ) -> Result<Vec<collector_app::MetadataResolutionRecord>> {
+        let mut rows = {
             let db = lock(&self.db)?;
-            let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='metadata_resolution' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 25").map_err(storage)?;
+            // Keep active work in the bounded window; present that window in admission order.
+            // Project only the lookup, never deserialize a full frozen source inventory on polling.
+            let mut stmt=db.prepare("SELECT j.id,j.rowid,json_extract(p.frozen_input,'$.input.acquisition.request.provider'),json_extract(p.frozen_input,'$.input.acquisition.request.query') FROM private.jobs j JOIN private.processing_jobs p ON p.job_id=j.id WHERE j.user_id=? AND j.item_id=? AND j.kind='metadata_resolution' ORDER BY CASE WHEN j.state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,j.rowid DESC LIMIT 25").map_err(storage)?;
             stmt.query_map(params![user.to_string(), item.to_string()], |row| {
-                row.get::<_, String>(0)
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
             })
             .map_err(storage)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(storage)?
         };
-        ids.into_iter()
-            .map(|id| self.job_record(id.parse().map_err(storage)?, user))
+        rows.sort_by_key(|row| std::cmp::Reverse(row.1));
+        rows.into_iter()
+            .map(|(id, _, provider, query)| {
+                Ok(collector_app::MetadataResolutionRecord {
+                    job: self.job_record(id.parse().map_err(storage)?, user)?,
+                    provider: ModuleId(provider),
+                    query: RawJson::from_json(query)?,
+                })
+            })
             .collect()
     }
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>> {

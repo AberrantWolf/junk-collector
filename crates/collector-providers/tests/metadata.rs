@@ -236,6 +236,63 @@ fn musicbrainz_versions_candidate_changes_but_reuses_equivalent_responses() {
 }
 
 #[test]
+fn musicbrainz_release_group_browse_is_paged_and_does_not_claim_release_identity() {
+    let server = serve(vec![reply("200 OK", releases_json("Edition"))]);
+    let provider = MusicBrainzProvider::with_test_origin(
+        "junk-collector-test/0.1 (test@example.invalid)",
+        &server.origin,
+        Duration::from_secs(1),
+        Duration::ZERO,
+        Duration::from_secs(60),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    let query = MusicBrainzQuery::ReleaseGroupReleases {
+        release_group_id: "00000000-0000-4000-8000-000000000003".into(),
+        offset: 7,
+        refresh: false,
+    };
+    let response = provider
+        .acquire(&mb_request(&query, 1024 * 1024), &mut Execution::active())
+        .unwrap();
+    let candidates = provider.parse_response_candidates(&response, &[]).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert!(!candidates[0].complete_identity);
+    let requests = server.requests.lock().unwrap();
+    let target = requests[0]
+        .1
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap();
+    let url = reqwest::Url::parse(&format!("http://fixture{target}")).unwrap();
+    let parameters: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(
+        parameters["release-group"],
+        "00000000-0000-4000-8000-000000000003"
+    );
+    assert_eq!(parameters["offset"], "7");
+    assert_eq!(parameters["limit"], "100");
+    assert!(
+        parameters["inc"]
+            .split('+')
+            .any(|value| value == "release-groups")
+    );
+    let mut wrong = response.clone();
+    let mut observation: collector_modules::music::MusicBrainzSnapshotObservation =
+        wrong.parsed_observation.parse().unwrap();
+    observation.query = MusicBrainzQuery::ReleaseGroupReleases {
+        release_group_id: "00000000-0000-4000-8000-000000000009".into(),
+        offset: 7,
+        refresh: false,
+    };
+    wrong.parsed_observation = RawJson::from_value(serde_json::to_value(observation).unwrap());
+    assert!(provider.parse_response_candidates(&wrong, &[]).is_err());
+}
+
+#[test]
 fn musicbrainz_generated_ambiguous_fixture_keeps_stable_alternatives() {
     let fixture = ambiguous_releases_json();
     assert_eq!(fixture.len(), 175);

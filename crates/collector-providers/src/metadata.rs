@@ -189,6 +189,20 @@ impl MusicBrainzProvider {
     fn request_url(&self, query: &MusicBrainzQuery) -> Result<Url> {
         query.validate()?;
         let (path, parameters) = match query {
+            MusicBrainzQuery::ReleaseGroupReleases {
+                release_group_id,
+                offset,
+                ..
+            } => (
+                "/ws/2/release".into(),
+                vec![
+                    ("fmt", "json".into()),
+                    ("release-group", release_group_id.clone()),
+                    ("limit", "100".into()),
+                    ("offset", offset.to_string()),
+                    ("inc", "artist-credits+release-groups+media".into()),
+                ],
+            ),
             MusicBrainzQuery::RecordingReleases {
                 recording_id,
                 offset,
@@ -198,6 +212,7 @@ impl MusicBrainzProvider {
                 vec![
                     ("fmt", "json".into()),
                     ("recording", recording_id.clone()),
+                    ("inc", "artist-credits+release-groups+media".into()),
                     ("limit", "100".into()),
                     ("offset", offset.to_string()),
                 ],

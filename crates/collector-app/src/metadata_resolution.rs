@@ -85,8 +85,24 @@ pub struct MetadataResolutionResult {
     pub artwork_error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataResolutionStage {
+    Metadata,
+    ArtworkListing,
+    ArtworkImage,
+}
+
+/// Compact frozen lookup projection used to recover a resolution without decoding its sources.
+pub struct MetadataResolutionRecord {
+    pub job: JobRecord,
+    pub provider: ModuleId,
+    pub query: RawJson,
+}
+
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataResolutionView {
+    pub stage: MetadataResolutionStage,
     pub job: JobView,
     pub result: Option<MetadataResolutionResult>,
 }
@@ -125,7 +141,25 @@ impl CollectionService {
         self.care
             .metadata_resolution_jobs(actor.user_id, item_id)?
             .into_iter()
-            .map(|job| {
+            .map(|record| {
+                let job = record.job;
+                let stage = if record.provider.0
+                    == collector_modules::music::COVER_ART_ARCHIVE_PROVIDER_ID
+                {
+                    match record
+                        .query
+                        .parse::<collector_modules::music::CoverArtArchiveQuery>()?
+                    {
+                        collector_modules::music::CoverArtArchiveQuery::Listing { .. } => {
+                            MetadataResolutionStage::ArtworkListing
+                        }
+                        collector_modules::music::CoverArtArchiveQuery::Image { .. } => {
+                            MetadataResolutionStage::ArtworkImage
+                        }
+                    }
+                } else {
+                    MetadataResolutionStage::Metadata
+                };
                 let result = job
                     .result
                     .as_ref()
@@ -137,6 +171,7 @@ impl CollectionService {
                     })
                     .transpose()?;
                 Ok(MetadataResolutionView {
+                    stage,
                     job: job.into(),
                     result,
                 })
@@ -233,6 +268,10 @@ impl CollectionService {
         let explicit_image = matches!(
             &command.lookup,
             AcquireMetadataCommand::CoverArtImage { .. }
+                | AcquireMetadataCommand::CoverArtRelease {
+                    image_id: Some(_),
+                    ..
+                }
         );
         let archived_cover_restores = if explicit_image {
             let revisions = self
@@ -274,6 +313,29 @@ impl CollectionService {
                 8 * 1024 * 1024,
                 None,
             ),
+            AcquireMetadataCommand::CoverArtRelease {
+                release_id,
+                image_id,
+            } => {
+                let maximum = if image_id.is_some() {
+                    MAX_PROVIDER_ARTWORK_BYTES as u64
+                } else {
+                    8 * 1024 * 1024
+                };
+                (
+                    COVER_ART_ARCHIVE_PROVIDER_ID,
+                    COVER_ART_ARCHIVE_ACQUIRE_OPERATION,
+                    serde_json::to_value(match image_id {
+                        Some(image_id) => CoverArtArchiveQuery::Image {
+                            release_id,
+                            image_id,
+                        },
+                        None => CoverArtArchiveQuery::Listing { release_id },
+                    }),
+                    maximum,
+                    None,
+                )
+            }
             AcquireMetadataCommand::CoverArtListing { candidate } => {
                 self.ensure_resolution_candidate(item, &candidate)?;
                 (

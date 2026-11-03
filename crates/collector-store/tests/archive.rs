@@ -21947,7 +21947,8 @@ fn shared_provider_input(collection: &Collection, input: &str) -> FrozenAcquisit
     }
 }
 fn provider_drain(service: &CollectionService) {
-    for _ in 0..40 {
+    // Include bounded multi-edition discovery, detail and cover continuations.
+    for _ in 0..160 {
         if !service.run_next_job("shared-provider-test").unwrap() {
             return;
         }
@@ -22100,6 +22101,8 @@ fn shared_provider_download_has_reserved_capacity_and_private_cross_user_ownersh
 struct BlockingSharedProvider {
     started: Arc<AtomicBool>,
     release: Arc<AtomicBool>,
+    cancellation_seen: Arc<AtomicBool>,
+    acknowledge_cancellation: Arc<AtomicBool>,
 }
 impl StreamingProviderPort for BlockingSharedProvider {
     fn acquire_stream(
@@ -22110,6 +22113,16 @@ impl StreamingProviderPort for BlockingSharedProvider {
         self.started.store(true, Ordering::SeqCst);
         while !self.release.load(Ordering::SeqCst) {
             if execution.cancellation_requested()? {
+                self.cancellation_seen.store(true, Ordering::SeqCst);
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while !self.acknowledge_cancellation.load(Ordering::SeqCst) {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(Error::Unavailable(
+                            "fixture cancellation acknowledgement timed out".into(),
+                        ));
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
                 return Err(Error::JobCancelled);
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -22130,12 +22143,16 @@ fn shared_provider_later_owner_survives_cancel_and_last_owner_fences_admission()
     let (_root, store, actor, base, collection) = setup_with_clock(Some(clock.clone()));
     let started = Arc::new(AtomicBool::new(false));
     let release = Arc::new(AtomicBool::new(false));
+    let cancellation_seen = Arc::new(AtomicBool::new(false));
+    let acknowledge_cancellation = Arc::new(AtomicBool::new(false));
     let service = Arc::new(
         base.with_streaming_provider(
             ModuleId(ACCURATERIP_PROVIDER_ID.into()),
             Arc::new(BlockingSharedProvider {
                 started: started.clone(),
                 release: release.clone(),
+                cancellation_seen: cancellation_seen.clone(),
+                acknowledge_cancellation: acknowledge_cancellation.clone(),
             }),
         )
         .unwrap(),
@@ -22163,9 +22180,20 @@ fn shared_provider_later_owner_survives_cancel_and_last_owner_fences_admission()
         )
         .unwrap();
     service.cancel_job(&actor, first, &command()).unwrap();
-    service.reconcile_provider_acquisitions().unwrap();
     assert_eq!(service.job(&actor, second).unwrap().state, JobState::Queued);
+    assert!(
+        !cancellation_seen.load(Ordering::SeqCst),
+        "a later owner keeps the shared request alive"
+    );
     service.cancel_job(&actor, second, &command()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !cancellation_seen.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "last-owner cancellation must reach the provider without an idle recovery poll"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
     assert!(
         matches!(
             service.enqueue_catalog_acquisition(
@@ -22177,7 +22205,7 @@ fn shared_provider_later_owner_survives_cancel_and_last_owner_fences_admission()
         ),
         "cannot resurrect last-owner cancellation before settlement"
     );
-    service.reconcile_provider_acquisitions().unwrap();
+    acknowledge_cancellation.store(true, Ordering::SeqCst);
     assert!(worker.join().unwrap().unwrap());
     assert!(
         service
@@ -28463,12 +28491,33 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
     );
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum DigitalDiscoveryScenario {
+    #[default]
+    Normal,
+    MisleadingSeed,
+    EditionFailure,
+    EditionDetailFailure,
+    OversizedEdition,
+    ManyEditions,
+}
+fn digital_fixture_release(release: &str, bonus: bool) -> serde_json::Value {
+    let id = |n: usize| format!("00000000-0000-4000-8000-{n:012}");
+    let mut value = serde_json::json!({"id":release,"title":"Matched album","release-group":{"id":id(80),"title":"Album"},"artist-credit":[{"name":"Matched artist","artist":{"id":id(99),"name":"Matched artist"}}],"media":[{"id":id(98),"position":1,"format":"Digital Media","track-count":2,"tracks":[{"id":id(97),"position":1,"number":"1","title":"Matched first","length":12000,"recording":{"id":id(1),"title":"Matched first","length":12000}},{"id":id(96),"position":2,"number":"2","title":"Matched second","length":12000,"recording":{"id":id(2),"title":"Matched second","length":12000}}]}]});
+    if bonus {
+        value["media"][0]["track-count"] = serde_json::json!(3);
+        value["media"][0]["tracks"].as_array_mut().unwrap().push(serde_json::json!({"id":id(95),"position":3,"number":"3","title":"Bonus track","length":12000,"recording":{"id":id(3),"title":"Bonus track","length":12000}}));
+    }
+    value
+}
 struct DigitalMatchingFixtureProvider {
     fail_lookup: std::sync::atomic::AtomicBool,
     partial: bool,
     covers: std::sync::Mutex<Vec<String>>,
     fingerprints: std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
     calls: std::sync::atomic::AtomicUsize,
+    musicbrainz_requests: std::sync::Mutex<Vec<collector_modules::music::MusicBrainzQuery>>,
+    scenario: DigitalDiscoveryScenario,
 }
 impl StreamingProviderPort for DigitalMatchingFixtureProvider {
     fn acquire_stream(
@@ -28521,11 +28570,82 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
             )
         } else {
             let query: MusicBrainzQuery = request.query.parse()?;
+            self.musicbrainz_requests
+                .lock()
+                .unwrap()
+                .push(query.clone());
             let (body, count) = match &query {
+                MusicBrainzQuery::ReleaseGroupReleases {
+                    release_group_id,
+                    offset,
+                    ..
+                } => {
+                    if self.scenario == DigitalDiscoveryScenario::EditionFailure {
+                        return Err(Error::Unavailable("edition fixture refusal".into()));
+                    }
+                    assert_eq!(release_group_id, &recording(80));
+                    assert_eq!(
+                        *offset, 0,
+                        "do not request another page while this one supplies the detail budget"
+                    );
+                    let ids: Vec<_> = if self.scenario == DigitalDiscoveryScenario::ManyEditions {
+                        [90, 92, 93, 94, 95, 96, 97, 98]
+                            .into_iter()
+                            .map(recording)
+                            .collect()
+                    } else if matches!(
+                        self.scenario,
+                        DigitalDiscoveryScenario::EditionDetailFailure
+                            | DigitalDiscoveryScenario::OversizedEdition
+                    ) {
+                        vec![release.to_owned(), recording(92), recording(93)]
+                    } else {
+                        vec![release.to_owned()]
+                    };
+                    let releases: Vec<_> = ids.iter().map(|id| serde_json::json!({"id":id,"title":"Matched album","release-group":{"id":recording(80),"title":"Album"}})).collect();
+                    (
+                        serde_json::json!({"releases":releases,"release-count":if self.scenario == DigitalDiscoveryScenario::ManyEditions {200} else {ids.len()},"release-offset":0}),
+                        ids.len(),
+                    )
+                }
+                MusicBrainzQuery::RecordingReleases { .. }
+                    if self.scenario == DigitalDiscoveryScenario::MisleadingSeed
+                        && self
+                            .musicbrainz_requests
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|query| {
+                                matches!(query, MusicBrainzQuery::RecordingReleases { .. })
+                            })
+                            .count()
+                            == 1 =>
+                {
+                    (
+                        serde_json::json!({"releases":[{"id":recording(91),"title":"Wrong seed album"}],"release-count":1,"release-offset":0}),
+                        1,
+                    )
+                }
                 MusicBrainzQuery::RecordingReleases { .. } => (
                     serde_json::json!({"releases":[{"id":release,"title":"Matched album"}],"release-count":1,"release-offset":0}),
                     1,
                 ),
+                MusicBrainzQuery::ReleaseId { release_id, .. }
+                    if self.scenario == DigitalDiscoveryScenario::EditionDetailFailure
+                        && [recording(92), recording(93)].contains(release_id) =>
+                {
+                    return Err(Error::Unavailable("edition detail fixture refusal".into()));
+                }
+                MusicBrainzQuery::ReleaseId { release_id, .. }
+                    if self.scenario == DigitalDiscoveryScenario::OversizedEdition
+                        && [recording(92), recording(93)].contains(release_id) =>
+                {
+                    let mut edition = digital_fixture_release(release_id, false);
+                    let tracks: Vec<_> = (1..=257).map(|n| serde_json::json!({"id":recording(1000+n),"position":n,"number":n.to_string(),"title":format!("Track {n}"),"length":12000,"recording":{"id":recording(n),"title":format!("Track {n}"),"length":12000}})).collect();
+                    edition["media"][0]["track-count"] = serde_json::json!(tracks.len());
+                    edition["media"][0]["tracks"] = serde_json::json!(tracks);
+                    (edition, 1)
+                }
                 MusicBrainzQuery::ReleaseId { release_id, .. }
                     if release_id.ends_with("000000000091") =>
                 {
@@ -28534,10 +28654,18 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
                         1,
                     )
                 }
-                MusicBrainzQuery::ReleaseId { release_id, .. } if release_id == release => (
-                    serde_json::json!({"id":release,"title":"Matched album","artist-credit":[{"name":"Matched artist","artist":{"id":recording(99),"name":"Matched artist"}}],"media":[{"id":recording(98),"position":1,"format":"Digital Media","track-count":2,"tracks":[{"id":recording(97),"position":1,"number":"1","title":"Matched first","length":12000,"recording":{"id":recording(1),"title":"Matched first","length":12000}},{"id":recording(96),"position":2,"number":"2","title":"Matched second","length":12000,"recording":{"id":recording(2),"title":"Matched second","length":12000}}]}]}),
-                    1,
-                ),
+                MusicBrainzQuery::ReleaseId { release_id, .. }
+                    if release_id == release
+                        || self.scenario == DigitalDiscoveryScenario::ManyEditions
+                            && [92, 93, 94, 95, 96, 97, 98]
+                                .iter()
+                                .any(|n| release_id == &recording(*n)) =>
+                {
+                    (
+                        digital_fixture_release(release_id, release_id == &recording(93)),
+                        1,
+                    )
+                }
                 _ => return Err(Error::Invalid("unexpected fixture query".into())),
             };
             (
@@ -28556,21 +28684,126 @@ impl StreamingProviderPort for DigitalMatchingFixtureProvider {
     }
 }
 #[test]
+fn digital_source_override_is_independent_validated_revision_fenced_and_reindexed() {
+    use collector_app::{MetadataAuthorityChange, UpdateMetadataAuthorityCommand};
+    let (_root, store, actor, service, collection) = setup();
+    let bytes = include_bytes!("fixtures/digital-matching/01.flac");
+    let detail =
+        admit_digital_test_package(&service, &actor, collection.id, &["01.flac"], &[bytes]);
+    let id = detail.summary.target_item_id.unwrap();
+    let before = service.metadata_review(&actor, id).unwrap();
+    assert!(before.digital_source_eligible);
+    let change = |revision, source| UpdateMetadataAuthorityCommand {
+        expected_revision: revision,
+        change: MetadataAuthorityChange::SetDomainOverrides {
+            overrides: ModuleData {
+                module: ModuleId("org.junk.music".into()),
+                schema_version: 1,
+                payload: RawJson::from_value(serde_json::json!({"digital_source": source})),
+            },
+        },
+    };
+    let oversized = "x".repeat(257);
+    for invalid in ["", " Steam", "Steam\n", &oversized] {
+        assert!(matches!(
+            service.update_metadata_authority(
+                &actor,
+                id,
+                change(before.revision, Some(invalid)),
+                &command()
+            ),
+            Err(Error::Invalid(_))
+        ));
+    }
+    service
+        .update_metadata_authority(
+            &actor,
+            id,
+            change(before.revision, Some("Steam")),
+            &command(),
+        )
+        .unwrap();
+    assert!(matches!(
+        service.update_metadata_authority(
+            &actor,
+            id,
+            change(before.revision, Some("GOG")),
+            &command()
+        ),
+        Err(Error::Conflict)
+    ));
+    store.reindex().unwrap();
+    let after = service.metadata_review(&actor, id).unwrap();
+    assert_eq!(after.display.title, before.display.title);
+    assert_eq!(after.display.subtitle, before.display.subtitle);
+    assert_eq!(after.display.candidate, before.display.candidate);
+    assert_eq!(after.display.artwork, before.display.artwork);
+    assert_eq!(after.display.domain_fields["digital_source"].value, "Steam");
+    assert!(matches!(
+        after.display.domain_fields["digital_source"].source,
+        MetadataValueSource::Manual
+    ));
+    service
+        .update_metadata_authority(&actor, id, change(after.revision, None::<&str>), &command())
+        .unwrap();
+    assert!(
+        !service
+            .metadata_review(&actor, id)
+            .unwrap()
+            .display
+            .domain_fields
+            .contains_key("digital_source")
+    );
+    let physical = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let review = service.metadata_review(&actor, physical.id).unwrap();
+    assert!(!review.digital_source_eligible);
+    assert!(matches!(
+        service.update_metadata_authority(
+            &actor,
+            physical.id,
+            change(review.revision, Some("Steam")),
+            &command()
+        ),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
 fn digital_album_matching_uses_real_audio_and_applies_reviewed_tracks_without_rewriting_masters() {
-    digital_matching_full_workflow(false, false);
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::Normal);
 }
 #[test]
 fn wav_completion_matching_uses_original_pcm_and_retains_retry_apply_workflow() {
     if std::env::var_os("COLLECTOR_TEST_FLAC").is_none() {
         return;
     }
-    digital_matching_full_workflow(true, false);
+    digital_matching_full_workflow(true, false, DigitalDiscoveryScenario::Normal);
 }
 #[test]
 fn digital_album_partial_recognition_accepts_only_complete_reviewed_assignments() {
-    digital_matching_full_workflow(false, true);
+    digital_matching_full_workflow(false, true, DigitalDiscoveryScenario::Normal);
 }
-fn digital_matching_full_workflow(wav: bool, manual: bool) {
+#[test]
+fn digital_album_discovery_expands_after_an_unrelated_seed_candidate() {
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::MisleadingSeed);
+}
+#[test]
+fn digital_album_complete_match_remains_usable_when_edition_lookup_fails() {
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::EditionFailure);
+}
+#[test]
+fn digital_album_complete_match_survives_an_edition_detail_refusal() {
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::EditionDetailFailure);
+}
+#[test]
+fn digital_album_complete_match_survives_editions_above_the_track_bound() {
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::OversizedEdition);
+}
+#[test]
+fn digital_album_editions_use_existing_page_before_expansion_and_check_bonus_layouts() {
+    digital_matching_full_workflow(false, false, DigitalDiscoveryScenario::ManyEditions);
+}
+fn digital_matching_full_workflow(wav: bool, manual: bool, scenario: DigitalDiscoveryScenario) {
     use collector_app::{AcquireMetadataCommand, FindDigitalAlbums, ResolveMetadataCommand};
     use collector_modules::music::*;
     let (root, store, actor, base, collection) = setup();
@@ -28607,6 +28840,8 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
         covers: Default::default(),
         fingerprints: Default::default(),
         calls: 0.into(),
+        musicbrainz_requests: Default::default(),
+        scenario,
     });
     let parser = Arc::new(
         MusicBrainzProvider::with_test_origin(
@@ -28752,7 +28987,77 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     assert!(!view.stale);
     let result: collector_app::DigitalMatchingResult =
         serde_json::from_value(view.result.clone().unwrap()).unwrap();
-    assert_eq!(result.matches.len(), 1);
+    let discovery = provider.musicbrainz_requests.lock().unwrap().clone();
+    let membership: Vec<_> = discovery
+        .iter()
+        .filter(|query| matches!(query, MusicBrainzQuery::RecordingReleases { .. }))
+        .collect();
+    assert_eq!(
+        membership.len(),
+        if scenario == DigitalDiscoveryScenario::MisleadingSeed {
+            2
+        } else {
+            1
+        },
+        "a complete candidate must stop per-track album discovery: {discovery:?}"
+    );
+    assert_eq!(
+        discovery
+            .iter()
+            .filter(|query| matches!(query, MusicBrainzQuery::ReleaseGroupReleases { .. }))
+            .count(),
+        usize::from(!manual)
+    );
+    assert_eq!(
+        result.edition_error.is_some(),
+        matches!(
+            scenario,
+            DigitalDiscoveryScenario::EditionFailure
+                | DigitalDiscoveryScenario::EditionDetailFailure
+        ) && !manual
+    );
+    assert_eq!(
+        result.matches.len(),
+        if scenario == DigitalDiscoveryScenario::ManyEditions {
+            8
+        } else {
+            1
+        }
+    );
+    if scenario == DigitalDiscoveryScenario::OversizedEdition {
+        assert!(result.truncated);
+    }
+    if scenario == DigitalDiscoveryScenario::EditionDetailFailure {
+        assert_eq!(discovery.iter().filter(|query| matches!(query, MusicBrainzQuery::ReleaseId { release_id, .. } if [92,93].iter().any(|n| release_id.ends_with(&format!("{n:012}"))))).count(), 1);
+    }
+    if scenario == DigitalDiscoveryScenario::ManyEditions {
+        assert!(result.truncated && result.can_expand);
+        let bonus = result
+            .matches
+            .iter()
+            .find(|candidate| candidate.release.id.ends_with("000000000093"))
+            .unwrap();
+        assert_eq!(bonus.release_tracks, 3);
+        assert_eq!(bonus.mappings.len(), 2);
+        assert!(
+            service
+                .resolve_metadata(
+                    &actor,
+                    item,
+                    ResolveMetadataCommand {
+                        lookup: AcquireMetadataCommand::DigitalAlbumChoice {
+                            job_id: job,
+                            release_id: bonus.release.id.clone(),
+                            assignments: None
+                        },
+                        acquire_artwork: false,
+                    },
+                    &command()
+                )
+                .is_err(),
+            "release-group membership cannot make a bonus-track edition a complete local album"
+        );
+    }
     assert_eq!(result.matches[0].mappings.len(), if manual { 1 } else { 2 });
     assert!(!result.matches[0].ambiguous_mapping);
     assert!(result.matches[0].complete_tracklist);
@@ -28865,7 +29170,11 @@ fn digital_matching_full_workflow(wav: bool, manual: bool) {
     assert!(
         covers
             .iter()
-            .all(|id| id == "00000000-0000-4000-8000-000000000090"),
+            .all(|id| id == "00000000-0000-4000-8000-000000000090"
+                || scenario == DigitalDiscoveryScenario::ManyEditions
+                    && [92, 93, 94, 95, 96, 97, 98]
+                        .iter()
+                        .any(|n| id.ends_with(&format!("{n:012}")))),
         "artwork must follow the newly reviewed release: {covers:?}"
     );
     let rows = service
@@ -30269,6 +30578,8 @@ fn digital_multiple_album_fixture(cancel_first: bool) {
         covers: Default::default(),
         fingerprints: Default::default(),
         calls: 0.into(),
+        musicbrainz_requests: Default::default(),
+        scenario: DigitalDiscoveryScenario::Normal,
     });
     let configure = |store: Arc<Store>| {
         CollectionService::new(store, Arc::new(Registry::builtins()))

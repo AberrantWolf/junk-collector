@@ -2883,6 +2883,11 @@ export interface components {
             /** @enum {string} */
             source: "music_brainz_search";
         } | {
+            image_id?: string | null;
+            release_id: string;
+            /** @enum {string} */
+            source: "cover_art_release";
+        } | {
             candidate: components["schemas"]["MetadataCandidateIdentity"];
             /** @enum {string} */
             source: "cover_art_listing";
@@ -3496,6 +3501,7 @@ export interface components {
         };
         DigitalMatchingProgress: {
             artwork_pending: boolean;
+            editions_pending?: boolean;
             fingerprints: number;
             lookups: number;
             recordings: number;
@@ -4608,9 +4614,12 @@ export interface components {
             response_status?: components["schemas"]["ProviderResponseStatus"] | null;
             snapshot_id: components["schemas"]["SnapshotId"];
         };
+        /** @enum {string} */
+        MetadataResolutionStage: "metadata" | "artwork_listing" | "artwork_image";
         MetadataResolutionView: {
             job: components["schemas"]["JobView"];
             result?: components["schemas"]["MetadataResolutionResult"] | null;
+            stage: components["schemas"]["MetadataResolutionStage"];
         };
         /** @enum {string} */
         MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal";
@@ -4618,6 +4627,7 @@ export interface components {
             authority: components["schemas"]["MetadataAuthority"];
             candidates: components["schemas"]["MetadataCandidateView"][];
             catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
+            digital_source_eligible: boolean;
             display: components["schemas"]["ResolvedMetadataDisplay"];
             identification?: components["schemas"]["GameIdentification"] | null;
             item_id: components["schemas"]["ItemId"];

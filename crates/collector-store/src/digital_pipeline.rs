@@ -8,6 +8,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.digital_checkpoints(job_id TEXT PRIMARY KEY,record TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS private.digital_children(parent TEXT NOT NULL,child TEXT NOT NULL,PRIMARY KEY(parent,child));
+    CREATE INDEX IF NOT EXISTS private.digital_children_child ON digital_children(child,parent);
     CREATE TABLE IF NOT EXISTS private.digital_waits(parent TEXT NOT NULL,child TEXT NOT NULL,PRIMARY KEY(parent,child));
     CREATE TABLE IF NOT EXISTS private.audio_fingerprint_cache(key TEXT PRIMARY KEY,record TEXT NOT NULL,digest TEXT NOT NULL,used_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS private.provider_request_cache ON jobs(json_extract(request,'$.input_key'),kind,state,updated_at);").map_err(storage)
@@ -26,10 +27,19 @@ impl Store {
         id: JobId,
         user: UserId,
     ) -> Result<Option<serde_json::Value>> {
-        let db = self.db.read_lock()?;
-        let raw:Option<String>=db.query_row("SELECT c.record FROM private.digital_checkpoints c JOIN private.jobs j ON j.id=c.job_id WHERE j.id=? AND j.user_id=?",params![id.to_string(),user.to_string()],|r|r.get(0)).optional().map_err(storage)?;
-        raw.map(|v| serde_json::from_str(&v).map_err(storage))
-            .transpose()
+        self.decode_digital_checkpoint(id, user, |raw| serde_json::from_str(raw).map_err(storage))
+    }
+    fn decode_digital_checkpoint<T>(
+        &self,
+        id: JobId,
+        user: UserId,
+        decode: impl FnOnce(&str) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let raw: Option<String> = {
+            let db = self.db.read_lock()?;
+            db.query_row("SELECT c.record FROM private.digital_checkpoints c JOIN private.jobs j ON j.id=c.job_id WHERE j.id=? AND j.user_id=?",params![id.to_string(),user.to_string()],|r|r.get(0)).optional().map_err(storage)?
+        };
+        raw.as_deref().map(decode).transpose()
     }
     pub(crate) fn wait_digital_record(
         &self,
@@ -191,6 +201,126 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn fixture_job(store: &Store, user: UserId, kind: &str, phase: &str) -> JobId {
+        let id = JobId::new();
+        store
+            .enqueue_job_record(collector_app::JobSpec {
+                id,
+                user_id: user,
+                collection_id: None,
+                item_id: None,
+                kind: kind.into(),
+                phase: phase.into(),
+                total_units: 1,
+                request: serde_json::json!({}),
+                frozen_input: None,
+            })
+            .unwrap();
+        id
+    }
+    #[test]
+    fn checkpoint_decoding_leaves_catalog_available_and_keeps_owner_fence() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        let user = UserId::new();
+        let job = fixture_job(&store, user, "digital_album_matching", "waiting_digital");
+        let raw =
+            serde_json::to_string(&serde_json::json!({"payload":"x".repeat(4*1024*1024)})).unwrap();
+        lock(&store.db)
+            .unwrap()
+            .execute(
+                "INSERT INTO private.digital_checkpoints VALUES(?,?)",
+                params![job.to_string(), raw],
+            )
+            .unwrap();
+        let decoded = store
+            .decode_digital_checkpoint(job, user, |raw| {
+                // A catalog writer can acquire the mutex during potentially expensive decoding.
+                let db = store
+                    .db
+                    .inner
+                    .try_lock()
+                    .expect("checkpoint decode holds the catalog mutex");
+                db.execute(
+                    "UPDATE private.jobs SET completed_units=1 WHERE id=?",
+                    [job.to_string()],
+                )
+                .unwrap();
+                drop(db);
+                serde_json::from_str::<serde_json::Value>(raw).map_err(storage)
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(decoded["payload"].as_str().unwrap().len(), 4 * 1024 * 1024);
+        assert!(
+            store
+                .digital_checkpoint_record(job, UserId::new())
+                .unwrap()
+                .is_none()
+        );
+    }
+    #[test]
+    fn idle_workers_leave_workflow_recovery_to_the_periodic_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let store =
+            Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+        let user = UserId::new();
+        let digital = fixture_job(&store, user, "digital_album_matching", "waiting_digital");
+        let game = fixture_job(&store, user, "game_catalog_scan", "waiting_games");
+        let child = fixture_job(&store, user, "processing_operation", "completed");
+        {
+            let db = lock(&store.db).unwrap();
+            db.execute(
+                "UPDATE private.jobs SET state='completed' WHERE id=?",
+                [child.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO private.digital_waits VALUES(?,?)",
+                params![digital.to_string(), child.to_string()],
+            )
+            .unwrap();
+        }
+        let service = collector_app::CollectionService::new(
+            store.clone(),
+            Arc::new(collector_modules::Registry::builtins()),
+        );
+        lock(&store.db)
+            .unwrap()
+            .pragma_update(None, "query_only", true)
+            .unwrap();
+        // Idle polling must work even when this connection cannot reserve a writer.
+        assert!(!service.run_next_job("idle-worker").unwrap());
+        lock(&store.db)
+            .unwrap()
+            .pragma_update(None, "query_only", false)
+            .unwrap();
+        assert_eq!(
+            store.job_record(digital, user).unwrap().phase,
+            "waiting_digital"
+        );
+        assert_eq!(store.job_record(game, user).unwrap().phase, "waiting_games");
+        service.reconcile_background_jobs().unwrap();
+        assert_eq!(store.job_record(digital, user).unwrap().phase, "queued");
+        assert_eq!(store.job_record(game, user).unwrap().phase, "queued");
+        for _ in 0..collector_app::JobPort::job_settings(&*store)
+            .unwrap()
+            .processing_workers
+        {
+            let running = fixture_job(&store, user, "processing_operation", "working");
+            lock(&store.db).unwrap().execute("UPDATE private.jobs SET state='running',worker_instance='idle-worker',claim_token=?,lease_expires=? WHERE id=?", params![running.to_string(), store.clock.now().timestamp()+30, running.to_string()]).unwrap();
+        }
+        lock(&store.db)
+            .unwrap()
+            .pragma_update(None, "query_only", true)
+            .unwrap();
+        // Queued work with exhausted capacity must not reserve a writer either.
+        assert!(!service.run_next_job("idle-worker").unwrap());
+        lock(&store.db)
+            .unwrap()
+            .pragma_update(None, "query_only", false)
+            .unwrap();
+    }
     #[test]
     fn fingerprint_cache_rejects_corruption_and_bounds_storage() {
         let root = tempfile::tempdir().unwrap();

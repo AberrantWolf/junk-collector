@@ -156,7 +156,7 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
             let state = recovery_state.clone();
             match tokio::task::spawn_blocking(move || {
                 let recovery = (|| {
-                    state.service.reconcile_provider_acquisitions()?;
+                    state.service.reconcile_background_jobs()?;
                     recover_guided_inbox_staging(&state)?;
                     state.service.resume_bulk_intakes()?;
                     state.service.resume_bulk_library()?;

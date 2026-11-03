@@ -272,6 +272,7 @@ pub enum MetadataReviewReason {
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataReviewView {
+    pub digital_source_eligible: bool,
     pub read_revision: String,
     pub item_id: ItemId,
     pub revision: Revision,
@@ -313,6 +314,11 @@ pub enum AcquireMetadataCommand {
         query: String,
         #[serde(default)]
         refresh: bool,
+    },
+    CoverArtRelease {
+        release_id: String,
+        #[serde(default)]
+        image_id: Option<String>,
     },
     CoverArtListing {
         candidate: MetadataCandidateIdentity,
@@ -1386,7 +1392,7 @@ impl CollectionService {
             .care
             .metadata_resolution_jobs(actor.user_id, item.id)?
             .first()
-            .is_some_and(|job| job.state == JobState::Failed)
+            .is_some_and(|record| record.job.state == JobState::Failed)
         {
             review_reasons.push(MetadataReviewReason::LookupFailed);
         }
@@ -1513,6 +1519,7 @@ impl CollectionService {
             ],
             lookup_choices,
             catalog_sources,
+            digital_source_eligible: digital_source_eligible(&item),
             permissions: MetadataPermissions { can_update },
             review_reasons,
             proposed_candidate,
@@ -1635,6 +1642,19 @@ impl CollectionService {
                     collector_modules::music::MusicBrainzQuery::Search { query, refresh },
                     context,
                 ),
+            AcquireMetadataCommand::CoverArtRelease {
+                release_id,
+                image_id,
+            } => {
+                let query = match image_id {
+                    Some(image_id) => collector_modules::music::CoverArtArchiveQuery::Image {
+                        release_id,
+                        image_id,
+                    },
+                    None => collector_modules::music::CoverArtArchiveQuery::Listing { release_id },
+                };
+                self.enqueue_cover_art_acquisition(actor, item_id, query, context)
+            }
             AcquireMetadataCommand::CoverArtListing { candidate } => {
                 self.validate_musicbrainz_candidate(actor, item_id, &candidate)?;
                 self.enqueue_cover_art_acquisition(
@@ -1860,6 +1880,20 @@ impl CollectionService {
                     MetadataAuthorityChange::SetDomainOverrides { .. }
                 ) && item.domain.module.0 == "org.junk.music"
                 {
+                    let next: collector_modules::music::MusicMetadataOverrides = authority
+                        .domain_overrides
+                        .as_ref()
+                        .ok_or(Error::Conflict)?
+                        .payload
+                        .parse()?;
+                    if next.digital_source.is_some()
+                        && next.digital_source != previous_music_overrides.digital_source
+                        && !digital_source_eligible(&item)
+                    {
+                        return Err(Error::Invalid(
+                            "digital source requires a digital-only album".into(),
+                        ));
+                    }
                     self.validate_listening_track_edits(
                         &item,
                         &authority,
@@ -2851,6 +2885,27 @@ pub(crate) fn resolve_metadata_domain(
     candidates: &[MetadataCandidateObservation],
     display: &mut ResolvedMetadataDisplay,
 ) -> Result<()> {
+    if domain.module.0 == "org.junk.music" && domain.schema_version == 1 {
+        let overrides = authority
+            .domain_overrides
+            .as_ref()
+            .filter(|data| data.module == domain.module && data.schema_version == 1)
+            .and_then(|data| {
+                data.payload
+                    .parse::<collector_modules::music::MusicMetadataOverrides>()
+                    .ok()
+            });
+        if let Some(value) = overrides.and_then(|value| value.digital_source) {
+            display.domain_fields.insert(
+                "digital_source".into(),
+                ResolvedMetadataText {
+                    value,
+                    language: None,
+                    source: MetadataValueSource::Manual,
+                },
+            );
+        }
+    }
     if domain.module.0 == "org.junk.games" && domain.schema_version == 1 {
         let overrides = authority
             .domain_overrides
@@ -2910,6 +2965,17 @@ pub(crate) fn resolve_metadata_domain(
         }
     }
     Ok(())
+}
+
+fn digital_source_eligible(item: &Item) -> bool {
+    item.domain.module.0 == "org.junk.music"
+        && item.domain.schema_version == 1
+        && item.specimens.is_empty()
+        && item.captures.iter().any(|capture| {
+            capture.representations.iter().any(|representation| {
+                representation.format.as_str() == "original-file-audio-package"
+            })
+        })
 }
 
 pub(crate) fn resolve_metadata_fields(

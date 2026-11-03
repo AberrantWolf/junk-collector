@@ -1,3 +1,45 @@
+## Incremental digital matching and independent review choices — source implementation, 2026-11-03
+
+Application-owned matching seeds from one available strong recording, fetches a
+promising release immediately and compares against all recognized files. Partial
+candidates direct discovery toward unexplained tracks; a complete unambiguous
+one-to-one match with scores at least 0.95 and known duration differences within
+two seconds stops further recording-membership searches. Release-group browse then
+finds alternate editions, whose track lists are compared independently. Candidate
+readiness precedes optional editions/artwork. Initial/expanded detail budgets remain
+eight/32, with 32 recording searches and four edition pages maximum. These are
+bounded identity suggestions, never catalog verification or exhaustive searches.
+Ranking reuses unchanged inputs within one worker invocation; every resumed claim
+ranks canonical checkpoint inputs independently of the bounded UI projection, with
+complete matches retained first. A pending track lookup permits the initial seed,
+then further membership searches wait until all recognition can assess it. Optional
+edition download refusals preserve the complete match and stop edition expansion.
+Shared algorithms use bounded cancellation polling; full authority/source/claim
+validation remains at execution/checkpoint boundaries. Repeated file sources
+resolve their recorded identity once per guard.
+
+Checkpoint and claimed frozen-input JSON decoding release the catalog mutex
+before parsing; frozen claim decoding also releases the dispatcher. Idle worker
+polls perform no global workflow reconciliation and reserve no SQLite writer when
+no work is eligible, including when worker slots are occupied. Cached completed downloads admit their owners as runnable
+inside the admission transaction. Workers reconcile game/provider
+continuations after state changes; cancellation releases provider ownership in its
+existing transaction. One server recovery loop reconciles interrupted workflows
+every five seconds. Artwork history exposes the frozen operation type in admission
+order; reopened panels recover the current listing, including pending/empty results,
+and fence superseded continuations. Choices remain bound to their listing Job.
+
+Metadata review supports a free-text Digital source (such as Steam) independent
+of release identity, and artwork-only listing/selection from a candidate or an
+explicit MusicBrainz release ID. Existing revision-fenced authority and provider
+publication own both effects. Source-only edits preserve other overrides; artwork
+selection preserves album identity, text and tracks. Refresh/adoption preserve manual
+source/artwork choices. Application eligibility limits new/changed sources to
+digital-only file albums; historical values remain readable/clearable. Mapping review
+uses a table and shows declared/received counts plus unmatched release tracks.
+No preserved originals, purchase facts or existing provider observations are rewritten.
+See [delivery and validation](validation/digital-matching-and-review-2026-11-03.md).
+
 ## Responsive Metadata and digital matching — beta.19 installed on Fi, 2026-11-03
 
 The user-requested delivery replaces full-item Metadata rows with compact cached

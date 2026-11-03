@@ -989,7 +989,7 @@ impl Store {
             Self::attach_acquisition(&tx, spec.id, input, now)?;
             tx.execute("INSERT OR REPLACE INTO private.acquisition_waits(owner_job,acquisition_job) SELECT owner_job,acquisition_job FROM private.acquisition_links WHERE owner_job=? AND input_key=?",params![spec.id.to_string(),collector_app::acquisition_key(input)?]).map_err(storage)?;
             tx.execute(
-                "UPDATE private.jobs SET phase=CASE WHEN (SELECT COUNT(*) FROM private.acquisition_links WHERE acquisition_job=(SELECT acquisition_job FROM private.acquisition_links WHERE owner_job=jobs.id LIMIT 1))>1 THEN 'waiting_shared_provider' ELSE 'waiting_provider' END WHERE id=? AND state='queued'",
+                "UPDATE private.jobs SET phase=CASE WHEN EXISTS(SELECT 1 FROM private.acquisition_waits w JOIN private.jobs child ON child.id=w.acquisition_job WHERE w.owner_job=jobs.id AND child.state IN ('completed','failed','cancelled')) THEN 'queued' WHEN (SELECT COUNT(*) FROM private.acquisition_links WHERE acquisition_job=(SELECT acquisition_job FROM private.acquisition_links WHERE owner_job=jobs.id LIMIT 1))>1 THEN 'waiting_shared_provider' ELSE 'waiting_provider' END WHERE id=? AND state='queued'",
                 [spec.id.to_string()],
             )
             .map_err(storage)?;
@@ -1024,14 +1024,41 @@ impl Store {
         let now = self.clock.now().timestamp();
         let lease_expires = now.saturating_add(lease_seconds);
         let mut db = lock(&self.db)?;
-        let tx = db
-            .transaction_with_behavior(TransactionBehavior::Immediate)
+        // Idle polls need no SQLite write reservation. Admission readies cached
+        // work; completion and the periodic recovery owner wake continuations.
+        let work: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE
+                (state='queued' AND phase='queued') OR
+                (state='running' AND claim_token IS NOT NULL AND
+                    (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)) OR
+                (state='cancel_requested' AND
+                    (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)
+                    AND id IN (SELECT child FROM private.digital_children)))",
+                params![worker_instance, now],
+                |row| row.get(0),
+            )
             .map_err(storage)?;
+        if !work {
+            return Ok(None);
+        }
+        let settle_needed: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2) AND id IN (SELECT child FROM private.digital_children))",
+            params![worker_instance, now], |row| row.get(0),
+        ).map_err(storage)?;
+        if settle_needed {
+            let tx = db
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',worker_instance=NULL,claim_token=NULL,lease_expires=NULL,updated_at=?1 WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?2 OR lease_expires<=?1) AND id IN (SELECT child FROM private.digital_children)",params![now,worker_instance]).map_err(storage)?;
+            crate::acquisitions::reconcile_provider_work_tx(&tx)?;
+            tx.commit().map_err(storage)?;
+        }
         let mut dispatch = lock(&self.job_dispatch)?;
-        let settings = crate::library_settings::read_workers(&tx, dispatch.settings)?.jobs;
-        // A replacement worker instance must settle cancelled matching children whose old owner cannot acknowledge them.
-        tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',worker_instance=NULL,claim_token=NULL,lease_expires=NULL,updated_at=?1 WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?2 OR lease_expires<=?1) AND id IN (SELECT child FROM private.digital_children)",params![now,worker_instance]).map_err(storage)?;
-        let candidate: Option<String> = tx
+        let settings = crate::library_settings::read_workers(&db, dispatch.settings)?.jobs;
+        // The same catalog mutex covers selection through claim commit. Capacity
+        // checks need no write reservation when every eligible slot is occupied.
+        let candidate: Option<String> = db
             .query_row(
                 "WITH active AS (
                    SELECT id,kind,(kind=?3 OR (kind='preservation_import'
@@ -1097,9 +1124,11 @@ impl Store {
             .optional()
             .map_err(storage)?;
         let Some(id) = candidate else {
-            tx.commit().map_err(storage)?;
             return Ok(None);
         };
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage)?;
         let claim_token = TransactionId::new().to_string();
         if tx
             .execute(
@@ -1153,11 +1182,12 @@ impl Store {
             .optional()
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
-        dispatch.admitted(
-            &row.3,
-            row.0.parse().map_err(storage)?,
-            &serde_json::from_str::<serde_json::Value>(&row.4).map_err(storage)?,
-        );
+        // Claim persistence is complete; decoding potentially large inputs must
+        // not block catalog readers or another worker's dispatcher.
+        drop(db);
+        let request = serde_json::from_str::<serde_json::Value>(&row.4).map_err(storage)?;
+        dispatch.admitted(&row.3, row.0.parse().map_err(storage)?, &request);
+        drop(dispatch);
         let created_at = chrono::DateTime::from_timestamp(row.8, 0)
             .ok_or_else(|| Error::Storage("job creation timestamp is invalid".into()))?;
         Ok(Some(JobClaim {
@@ -1172,7 +1202,7 @@ impl Store {
                 .map(|value| value.parse().map_err(storage))
                 .transpose()?,
             kind: row.3,
-            request: serde_json::from_str(&row.4).map_err(storage)?,
+            request,
             claim_token,
             attempt: row.5,
             phase: row.6,
@@ -1479,6 +1509,7 @@ impl Store {
             )
             .map_err(storage)?;
         }
+        crate::acquisitions::reconcile_provider_work_tx(&tx)?;
         self.record_command(&tx, &())?;
         tx.commit().map_err(storage)?;
         Ok(())
