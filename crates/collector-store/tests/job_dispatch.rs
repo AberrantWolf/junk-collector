@@ -309,3 +309,71 @@ fn metadata_overtakes_encoding_but_cannot_monopolize_processing() {
         }
     }
 }
+
+#[test]
+fn busy_yield_preserves_work_and_committed_phase_fences_old_workers_and_cancellation() {
+    let root = tempfile::tempdir().unwrap();
+    let clock = Arc::new(TestClock(AtomicI64::new(1_800_000_000)));
+    let store = Store::open_with_clock(
+        root.path().join("archive"),
+        root.path().join("state"),
+        clock.clone(),
+    )
+    .unwrap();
+    let user = UserId::new();
+    for phase in ["reading", "revision_committed"] {
+        let id = enqueue(&store, "music_derivative", user, None);
+        let claim = store.claim_job("worker", 30).unwrap().unwrap();
+        store
+            .heartbeat_job(id, &claim.claim_token, phase, 1, 30)
+            .unwrap();
+        let before = store.job_record(id, user).unwrap();
+        clock.0.fetch_add(1, Ordering::SeqCst);
+        store.defer_busy_job(id, &claim.claim_token).unwrap();
+        let queued = store.job_record(id, user).unwrap();
+        assert_eq!(queued.state, JobState::Queued);
+        assert_eq!(queued.attempt, before.attempt);
+        assert_eq!(queued.completed_units, before.completed_units);
+        assert_eq!(queued.created_at, before.created_at);
+        assert!(queued.error.is_none());
+        let resumed = store.claim_job("worker", 30).unwrap().unwrap();
+        assert_eq!(resumed.id, id);
+        assert_eq!(
+            resumed.phase,
+            if phase == "revision_committed" {
+                phase
+            } else {
+                "starting"
+            }
+        );
+        assert_ne!(resumed.claim_token, claim.claim_token);
+        assert!(matches!(
+            store.defer_busy_job(id, &claim.claim_token),
+            Err(Error::CommandInProgress)
+        ));
+        assert!(matches!(
+            store.complete_job(id, &claim.claim_token, serde_json::json!({})),
+            Err(Error::CommandInProgress)
+        ));
+        finish(&store, &resumed);
+    }
+    let expired = enqueue(&store, "digital_album_matching", user, None);
+    let expired_claim = store.claim_job("worker", 30).unwrap().unwrap();
+    clock.0.fetch_add(31, Ordering::SeqCst);
+    assert!(matches!(
+        store.defer_busy_job(expired, &expired_claim.claim_token),
+        Err(Error::CommandInProgress)
+    ));
+    let recovered = store.claim_job("worker", 30).unwrap().unwrap();
+    assert_eq!(recovered.id, expired);
+    finish(&store, &recovered);
+    let id = enqueue(&store, "digital_album_matching", user, None);
+    let claim = store.claim_job("worker", 30).unwrap().unwrap();
+    store.request_job_cancellation(id, user).unwrap();
+    store.defer_busy_job(id, &claim.claim_token).unwrap();
+    assert_eq!(
+        store.job_record(id, user).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(store.claim_job("worker", 30).unwrap().is_none());
+}

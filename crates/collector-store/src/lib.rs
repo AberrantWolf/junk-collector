@@ -1850,6 +1850,10 @@ impl JobPort for Store {
         self.fail_job_record(id, claim_token, message)
     }
 
+    fn defer_busy_job(&self, id: JobId, claim_token: &str) -> Result<()> {
+        self.defer_busy_job_record(id, claim_token)
+    }
+
     fn cancel_claimed_job(&self, id: JobId, claim_token: &str) -> Result<()> {
         self.cancel_claimed_job_record(id, claim_token)
     }

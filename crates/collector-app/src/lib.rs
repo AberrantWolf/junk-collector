@@ -1269,6 +1269,9 @@ pub trait JobPort: Send + Sync {
     ) -> Result<()>;
     fn complete_job(&self, id: JobId, claim_token: &str, result: serde_json::Value) -> Result<()>;
     fn fail_job(&self, id: JobId, claim_token: &str, message: &str) -> Result<()>;
+    /// Yield transient catalog contention without creating a failed attempt.
+    /// Preserve committed publication checkpoints and settle concurrent cancellation.
+    fn defer_busy_job(&self, id: JobId, claim_token: &str) -> Result<()>;
     fn cancel_claimed_job(&self, id: JobId, claim_token: &str) -> Result<()>;
     fn cancellation_requested(&self, id: JobId, claim_token: &str) -> Result<bool>;
     fn request_job_cancellation(&self, id: JobId, user: UserId) -> Result<()>;
@@ -5802,6 +5805,10 @@ impl CollectionService {
                     .job_record(claim.id, claim.user_id)?
                     .phase
                     .starts_with("waiting_") => {}
+            Err(Error::CatalogBusy) => {
+                self.jobs.defer_busy_job(claim.id, &claim.claim_token)?;
+                return Ok(false);
+            }
             Err(Error::JobCancelled) => {
                 if claim.kind.starts_with("import_")
                     && let Some(import_id) = claim

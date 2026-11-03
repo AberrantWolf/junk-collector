@@ -1,3 +1,13 @@
+## GitHub #11: catalog contention during background work — 2026-11-03
+
+Typed catalog contention yields the claimed Job back to the server queue instead
+of recording a failed attempt. Claim tokens fence old workers; cancellation and
+committed publication checkpoints survive the handoff. The worker backs off on
+yield and normal dispatcher capacity applies. Existing failed Jobs still need an
+explicit retry; no error-text matching or automatic retry of provider refusals.
+Candidate decoding and cached-track encoding/decoding release the catalog mutex.
+See [review and validation](validation/github-background-contention-2026-11-03.md).
+
 ## GitHub Metadata review issues #8 and #10 — 2026-11-03
 
 The release actually supplying metadata owns the selected/automatic cue. Retained

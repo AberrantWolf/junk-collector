@@ -30818,3 +30818,53 @@ fn provider_workers_overlap_independent_services_and_bound_same_service_dispatch
         assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
     }
 }
+
+struct BusyOnceProvider(AtomicBool);
+impl StreamingProviderPort for BusyOnceProvider {
+    fn acquire_stream(
+        &self,
+        request: &ProviderRequest,
+        execution: &mut dyn ProcessingExecutionContext,
+    ) -> Result<ProviderStreamResponse> {
+        if self.0.swap(false, Ordering::SeqCst) {
+            return Err(Error::CatalogBusy);
+        }
+        FixtureStreamingProvider {
+            calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bytes: b"resumed provider response".to_vec(),
+        }
+        .acquire_stream(request, execution)
+    }
+}
+
+#[test]
+fn worker_catalog_contention_resumes_shared_provider_work_without_manual_retry() {
+    let (_root, store, actor, base, collection) = setup();
+    let service = base
+        .with_streaming_provider(
+            ModuleId(ACCURATERIP_PROVIDER_ID.into()),
+            Arc::new(BusyOnceProvider(AtomicBool::new(true))),
+        )
+        .unwrap();
+    let parent = service
+        .enqueue_catalog_acquisition(
+            &actor,
+            shared_provider_input(&collection, "busy-once"),
+            &command(),
+        )
+        .unwrap();
+    // The parent yields to its durable shared acquisition; no browser is driving this loop.
+    for _ in 0..20 {
+        service.run_next_job("contention-test").unwrap();
+        let view = service.job(&actor, parent).unwrap();
+        assert_ne!(view.state, JobState::Failed, "{:?}", view.error);
+        if view.state == JobState::Completed {
+            completed_provider_snapshot(&service, &actor, parent);
+            return;
+        }
+    }
+    panic!(
+        "shared provider did not resume after catalog contention: {:?}",
+        store.job_record(parent, actor.user_id)
+    );
+}

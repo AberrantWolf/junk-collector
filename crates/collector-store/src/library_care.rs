@@ -67,6 +67,7 @@ impl LibraryCarePort for Store {
     ) -> Result<Option<(String, Vec<collector_app::MusicTrackAvailability>)>> {
         let db = self.db.read_lock()?;
         let row: Option<(String,String)> = db.query_row("SELECT t.token,t.record FROM library_track_entries t JOIN library_entry_versions v ON v.item_id=t.item_id AND v.token=t.token WHERE t.item_id=? AND t.namespace=? AND t.language=? AND t.role=?", params![item.to_string(),namespace,language,role as u8], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
+        drop(db);
         row.map(|(token, raw)| Ok((token, serde_json::from_str(&raw).map_err(storage)?)))
             .transpose()
     }
@@ -79,8 +80,9 @@ impl LibraryCarePort for Store {
         entry: &collector_app::LibraryEntry,
         tracks: &[collector_app::MusicTrackAvailability],
     ) -> Result<()> {
+        let raw = serde_json::to_string(tracks).map_err(storage)?;
         let db = lock(&self.db)?;
-        db.execute("INSERT OR REPLACE INTO library_track_entries SELECT ?1,?2,?3,?4,token,?6 FROM library_entry_versions WHERE item_id=?1 AND token=?5", params![entry.id.to_string(),namespace,language,role as u8,generation,serde_json::to_string(tracks).map_err(storage)?]).map_err(storage)?;
+        db.execute("INSERT OR REPLACE INTO library_track_entries SELECT ?1,?2,?3,?4,token,?6 FROM library_entry_versions WHERE item_id=?1 AND token=?5", params![entry.id.to_string(),namespace,language,role as u8,generation,raw]).map_err(storage)?;
         db.execute(
             "DELETE FROM library_track_entries WHERE item_id=? AND namespace<>?",
             params![entry.id.to_string(), namespace],

@@ -1029,7 +1029,7 @@ impl Store {
         let work: bool = db
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE
-                (state='queued' AND phase='queued') OR
+                (state='queued' AND phase IN ('queued','revision_committed')) OR
                 (state='running' AND claim_token IS NOT NULL AND
                     (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)) OR
                 (state='cancel_requested' AND
@@ -1068,7 +1068,7 @@ impl Store {
                    SELECT id,kind,created_at,user_id,json_extract(request,'$.digital_parent') AS digital_parent,json_extract(request,'$.import_id') AS import_id,
                      (kind=?3 OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
                    FROM private.jobs
-                   WHERE (state='queued' AND phase='queued') OR
+                   WHERE (state='queued' AND phase IN ('queued','revision_committed')) OR
                      (state='running' AND claim_token IS NOT NULL AND
                        (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2))
                  )
@@ -1356,6 +1356,21 @@ impl Store {
                 params![message, self.clock.now().timestamp(), id.to_string(), claim_token],
             )
             .map_err(storage)?;
+        if changed != 1 {
+            return Err(Error::CommandInProgress);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn defer_busy_job_record(&self, id: JobId, claim_token: &str) -> Result<()> {
+        let changed = lock(&self.db)?.execute(
+            "UPDATE private.jobs SET
+               state=CASE WHEN cancellation_requested=1 AND phase<>'revision_committed' THEN 'cancelled' ELSE 'queued' END,
+               phase=CASE WHEN phase='revision_committed' THEN phase WHEN cancellation_requested=1 THEN 'cancelled' ELSE 'queued' END,
+               worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
+             WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
+            params![self.clock.now().timestamp(), id.to_string(), claim_token, self.clock.now().timestamp()],
+        ).map_err(storage)?;
         if changed != 1 {
             return Err(Error::CommandInProgress);
         }

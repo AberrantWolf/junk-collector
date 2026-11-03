@@ -1579,9 +1579,12 @@ impl ProcessingPort for Store {
                 row.get::<_, String>(0)
             })
             .map_err(storage)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(storage)?
-            .into_iter()
+        let rows = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(storage)?;
+        drop(statement);
+        drop(db);
+        rows.into_iter()
             .map(|value| serde_json::from_str(&value).map_err(storage))
             .collect()
     }
