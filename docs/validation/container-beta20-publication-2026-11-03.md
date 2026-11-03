@@ -61,3 +61,13 @@ The fixture reader now retries only GET + 503 + `catalog_busy`, for at most five
 seconds; mutation and other failures remain fatal. A one-shot injected contention
 response exercises that path before the actual QUIC playback/seek/revocation
 journey. A fresh exact-source run remains required.
+
+The fourth source run [41604077547](https://github.com/AberrantWolf/junk-collector/actions/runs/41604077547)
+passed the repaired local-playback and digital-matching journeys, then hit a
+five-second Play-button assertion immediately after WAV-to-FLAC preparation.
+The worker reported available, and the failure capture already showed the ready
+FLAC. Track availability polls at up to five-second intervals, so the assertion
+was racing the UI's refresh cadence. The bounded UI wait now allows two refresh
+cycles plus request time (15 seconds), and the journey also requires actual
+playback from the still-open editor before closing and testing reload playback.
+Both native gates again passed; this incomplete attempt is not release evidence.
