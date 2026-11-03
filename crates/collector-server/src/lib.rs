@@ -397,7 +397,7 @@ impl IntoResponse for ApiError {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 [(header::RETRY_AFTER, seconds.to_string())],
-                Json(serde_json::json!({"error":{"code":"rate_limited","message":"Too many authentication attempts. Try again later."}})),
+                Json(serde_json::json!({"error":{"code":"rate_limited","message":"Request rate or capacity limit reached. Try again later."}})),
             )
                 .into_response();
         }
@@ -488,7 +488,7 @@ impl IntoResponse for ApiError {
             Error::PreparedMediaInvalid => (
                 StatusCode::CONFLICT,
                 "prepared_media_invalid",
-                "Prepared audio is missing, unreadable, or has a different recorded length. The original is saved; ask a curator to repair this prepared track.".into(),
+                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is saved; ask a curator to repair this prepared track.".into(),
             ),
         };
         (
@@ -504,7 +504,17 @@ async fn blocking<T: Send + 'static>(
 ) -> ApiResult<T> {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|_| ApiError(Error::Unavailable("worker stopped".into())))?
+        .map_err(|error| {
+            tracing::error!(%error, "blocking request worker failed");
+            ApiError(Error::Unavailable(
+                if error.is_panic() {
+                    "Request worker failed; check the server log"
+                } else {
+                    "Request worker was cancelled"
+                }
+                .into(),
+            ))
+        })?
         .map_err(Into::into)
 }
 fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthenticatedPrincipal> {
@@ -524,10 +534,9 @@ fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<Authenticat
         state.service.authenticate(cookie)?
     } else {
         let bearer = bearer.ok_or(Error::Unauthenticated)?;
-        match state.service.authenticate_native(bearer) {
-            Ok(authenticated) => authenticated,
-            Err(_) => state.service.authenticate(bearer)?,
-        }
+        bearer_authentication(state.service.authenticate_native(bearer), || {
+            state.service.authenticate(bearer)
+        })?
     };
     // This is a precondition, never an alternative source of authentication.
     // It binds a browser command to its submitting account across cookie changes.
@@ -3000,6 +3009,44 @@ pub fn parse_range(value: &str, length: u64) -> Option<(u64, u64)> {
     }
 }
 
+#[derive(Debug)]
+enum DatBodyError {
+    TooLarge,
+    Unreadable,
+}
+impl IntoResponse for DatBodyError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Unreadable => ApiError(Error::Invalid("DAT upload body was interrupted or unreadable; no catalog upload was accepted".into())).into_response(),
+            Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE,Json(serde_json::json!({"error":{"code":"upload_too_large","message":"Upload an extracted DAT file no larger than 64 MiB."}}))).into_response(),
+        }
+    }
+}
+async fn dat_body(body: Body, maximum: usize) -> std::result::Result<Vec<u8>, DatBodyError> {
+    use futures_util::StreamExt;
+    let mut stream = body.into_data_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| DatBodyError::Unreadable)?;
+        if chunk.len() > maximum.saturating_sub(bytes.len()) {
+            return Err(DatBodyError::TooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+fn bearer_authentication(
+    native: collector_core::Result<AuthenticatedPrincipal>,
+    browser: impl FnOnce() -> collector_core::Result<AuthenticatedPrincipal>,
+) -> collector_core::Result<AuthenticatedPrincipal> {
+    match native {
+        Ok(principal) => Ok(principal),
+        Err(Error::Unauthenticated | Error::CredentialRevoked) => browser(),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod security_tests {
     use super::*;
@@ -4822,9 +4869,9 @@ async fn upload_catalog_snapshot(
         .map_err(|_| {
             Error::Unavailable("Other DAT uploads are in progress; try again shortly.".into())
         })?;
-    let bytes = match axum::body::to_bytes(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES).await {
+    let bytes = match dat_body(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES).await {
         Ok(bytes) => bytes,
-        Err(_) => return Ok((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error":{"code":"invalid","message":"Upload an extracted DAT file no larger than 64 MiB."}}))).into_response()),
+        Err(error) => return Ok(error.into_response()),
     };
     let job_id = blocking(move || {
         state
@@ -5597,5 +5644,57 @@ mod playback_read_tests {
                 .await
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod upload_failure_tests {
+    use super::*;
+    #[tokio::test]
+    async fn dat_body_limits_are_distinct_from_interruption_and_accept_exact_bounds() {
+        assert_eq!(dat_body(Body::from("1234"), 4).await.unwrap(), b"1234");
+        assert_eq!(
+            dat_body(Body::from("12345"), 4)
+                .await
+                .unwrap_err()
+                .into_response()
+                .status(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        let body = Body::from_stream(futures_util::stream::iter(vec![
+            Ok(axum::body::Bytes::from_static(b"12")),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "fixture interruption",
+            )),
+        ]));
+        let response = dat_body(body, 4).await.unwrap_err().into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("interrupted")
+        );
+    }
+}
+
+#[cfg(test)]
+mod bearer_failure_tests {
+    use super::*;
+    #[test]
+    fn operational_native_failure_cannot_be_hidden_by_browser_fallback() {
+        let result = bearer_authentication(
+            Err(Error::Storage("fixture credential query failed".into())),
+            || panic!("storage failure tried a different credential kind"),
+        );
+        assert!(matches!(result, Err(Error::Storage(_))));
+        let result =
+            bearer_authentication(Err(Error::Unauthenticated), || Err(Error::Unauthenticated));
+        assert!(matches!(result, Err(Error::Unauthenticated)));
     }
 }

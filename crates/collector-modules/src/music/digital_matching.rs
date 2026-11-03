@@ -79,9 +79,12 @@ pub fn operate(
             ));
         }
         let reader = host.package_file(access, file.id)?;
+        let mut checkpoint_error = None;
         let mut checkpoint = || {
-            host.checkpoint()
-                .map_err(|_| junk_libs_music::Error::Cancelled)
+            host.checkpoint().map_err(|error| {
+                checkpoint_error = Some(error);
+                junk_libs_music::Error::Cancelled
+            })
         };
         let audio = if file
             .display_name
@@ -97,8 +100,11 @@ pub fn operate(
             } else {
                 junk_libs_music::fingerprint::compute(source, &mut checkpoint)
             }
+        };
+        if let Some(error) = checkpoint_error {
+            return Err(error);
         }
-        .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
+        let audio = audio.map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
         tracks.push(DigitalFileFingerprint {
             file_id: file.id,
             file_index: index,

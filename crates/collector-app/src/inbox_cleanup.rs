@@ -87,9 +87,13 @@ impl CollectionService {
             .request
             .get("import_id")
             .and_then(serde_json::Value::as_str)
-            .ok_or(Error::Conflict)?
+            .ok_or(Error::Storage(
+                "Inbox cleanup Job has an invalid Import identity".into(),
+            ))?
             .parse()
-            .map_err(|_| Error::Conflict)?;
+            .map_err(|_| {
+                Error::Storage("Inbox cleanup Job has an invalid Import identity".into())
+            })?;
         let record = self.provisional_imports.import_record(id)?;
         let guard = &mut || {
             self.content_write_eligibility_for_user(claim.user_id, record.view.collection_id)?;

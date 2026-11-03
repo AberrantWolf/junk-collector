@@ -1021,7 +1021,11 @@ impl CollectionService {
     }
 
     pub(crate) fn reconcile_guided_ingest(&self, id: ImportId) -> Result<()> {
-        if let Err(error) = self.advance_guided_ingest(id)
+        let advancement = self.advance_guided_ingest(id);
+        if matches!(advancement, Err(Error::CatalogBusy)) {
+            return advancement;
+        }
+        if let Err(error) = advancement
             && let Some(mut intent) = self.provisional_imports.guided_ingest_intent(id)?
         {
             intent.enrichment_error = Some(error.to_string().chars().take(512).collect());
@@ -1816,16 +1820,6 @@ impl CollectionService {
         let artwork_image_job = jobs.iter().find(|job| job.id == artwork_image_job_id);
         let metadata_step = if intent.enrichment == IngestEnrichmentPolicy::None {
             job_step("metadata", None, true, None)
-        } else if let Some(error) = intent.enrichment_error.clone() {
-            IngestStepView {
-                step: "metadata".into(),
-                state: IngestStepState::Failed,
-                job_id: metadata_job.map(|job| job.id),
-                attempt: metadata_job.map(|job| job.attempt),
-                message: Some(error),
-                retryable: !intent.cancelled
-                    && metadata_job.is_some_and(|job| job.state == JobState::Failed),
-            }
         } else if music && metadata_job.is_some() {
             job_step("metadata", metadata_job, false, metadata_message)
         } else if music {
@@ -1866,7 +1860,7 @@ impl CollectionService {
                 "artwork",
                 artwork_image_job.or(artwork_listing_job),
                 intent.settled && artwork_image_job.is_none() && intent.enrichment_error.is_none(),
-                intent.enrichment_error.clone(),
+                None,
             )
         };
         let preparation_step = if !intent.prepare_music {
@@ -1907,7 +1901,7 @@ impl CollectionService {
             job_step("preparation", None, false, None)
         };
         let staging_step = if let Some(job) = by_kind.get("import_staging") {
-            job_step("staging", Some(job), false, intent.enrichment_error.clone())
+            job_step("staging", Some(job), false, None)
         } else {
             IngestStepView {
                 step: "staging".into(),
@@ -1923,9 +1917,7 @@ impl CollectionService {
                 },
                 job_id: by_kind.get("import_staging").map(|job| job.id),
                 attempt: by_kind.get("import_staging").map(|job| job.attempt),
-                message: (record.view.phase == ImportPhase::Staging)
-                    .then(|| intent.enrichment_error.clone())
-                    .flatten(),
+                message: None,
                 retryable: false,
             }
         };
@@ -1976,6 +1968,18 @@ impl CollectionService {
                 step
             },
         ];
+        // The legacy private enrichment_error column also retains coordination
+        // failures. Do not attribute that general barrier to a specific stage.
+        if let Some(error) = intent.enrichment_error.clone() {
+            steps.push(IngestStepView {
+                step: "workflow".into(),
+                state: IngestStepState::Failed,
+                job_id: None,
+                attempt: None,
+                message: Some(error),
+                retryable: !intent.cancelled,
+            });
+        }
         if !music {
             steps.retain(|step| {
                 step.step != "preparation" && step.step != "metadata" && step.step != "accuraterip"

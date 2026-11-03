@@ -513,10 +513,18 @@ impl Store {
             self.save_cleanup(id, claim, &record)?;
             check_directories(&record, &root)?;
             self.cleanup_effect(claim, |_| {
-                check_directories(&record,&root)?;
-                if held.try_exists().map_err(storage)? { return Err(Error::Conflict); }
-                fs::rename(&root,&held).map_err(|_|Error::Unavailable("Inbox must allow renaming/removing packages. Check its read/write mount and directory permissions; files retained.".into()))?;
-                sync_directory(parent)?; sync_directory(&wrapper)
+                check_directories(&record, &root)?;
+                if held.try_exists().map_err(storage)? {
+                    return Err(Error::Conflict);
+                }
+                fs::rename(&root, &held).map_err(|error| {
+                    Error::Unavailable(format!(
+                        "Inbox package rename failed ({:?}); files retained.",
+                        error.kind()
+                    ))
+                })?;
+                sync_directory(parent)?;
+                sync_directory(&wrapper)
             })?;
             self.publication_fault
                 .check(PublicationFaultPoint::PayloadPublished)?;
@@ -678,10 +686,11 @@ fn create_wrapper(path: &Path, id: ImportId, record: &Cleanup) -> Result<()> {
         match fs::DirBuilder::new().mode(0o700).create(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => {
-                return Err(Error::Unavailable(
-                    "Inbox cleanup requires a writable inbox mount and parent directory.".into(),
-                ));
+            Err(error) => {
+                return Err(Error::Unavailable(format!(
+                    "Inbox cleanup directory creation failed ({:?}); source files retained.",
+                    error.kind()
+                )));
             }
         }
         let metadata = fs::symlink_metadata(path).map_err(storage)?;

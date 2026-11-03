@@ -13,5 +13,5 @@ export default function AudioCheckStatus({item,onOpen}:{item:Pick<Item,'title'|'
  const label=!checks.length?'No originals':unchecked===checks.length?'Not checked':mismatch?(verified?`${verified}/${checks.length} · mismatch`:'Mismatch'):checks.length===1?labels[checks[0].status!]:verified?`${verified}/${checks.length} verified`:sameStatus?labels[checks[0].status!]:'Inconclusive';
  const description=checks.length?checks.map((check,index)=>`Original ${index+1}: ${check.status?labels[check.status]:'Not checked'}`).join('; '):'No saved originals available to check';
  const title=`${description}. Results cover these originals; album disc coverage is separate.`;
- return onOpen&&checks.length?<button className="audio-check-status" title={title} aria-label={`AccurateRip for ${item.title}: ${label}. Open audio checks`} onClick={onOpen}>{label}</button>:<span className="audio-check-status" title={title}>{label}</span>;
+ return onOpen&&checks.length?<button className="audio-check-status" title={title} aria-label={`AccurateRip for ${item.title}: ${label}. ${description}. Open audio checks`} onClick={onOpen}>{label}</button>:<span className="audio-check-status" title={title}>{label}</span>;
 }

@@ -94,7 +94,9 @@ impl MailProviderPort for ProtonMailProvider {
         revision: collector_core::Revision,
         commit: &mut dyn FnMut() -> Result<()>,
     ) -> Result<()> {
-        let profiles = self.profiles.lock().map_err(|_| Error::Conflict)?;
+        let profiles = self.profiles.lock().map_err(|_| {
+            Error::Unavailable("Mail configuration lock failed; restart required".into())
+        })?;
         if !profiles
             .iter()
             .any(|p| p.id == id && p.revision == revision)
@@ -119,7 +121,9 @@ impl MailProviderPort for ProtonMailProvider {
             .collect()
     }
     fn fetch(&self, id: &str, cursor: &str, folders: Option<&[String]>) -> Result<MailBatch> {
-        let profiles = self.profiles.lock().map_err(|_| Error::Conflict)?;
+        let profiles = self.profiles.lock().map_err(|_| {
+            Error::Unavailable("Mail configuration lock failed; restart required".into())
+        })?;
         let mut profile = profiles
             .iter()
             .find(|p| p.id == id)
@@ -129,7 +133,9 @@ impl MailProviderPort for ProtonMailProvider {
             profile.folders = folders.to_vec();
         }
         let request = serde_json::to_vec(&serde_json::json!({"profile":profile,"cursor":cursor}))
-            .map_err(|_| Error::Conflict)?;
+            .map_err(|_| {
+            Error::Unavailable("Mail adapter request could not be encoded".into())
+        })?;
         drop(profiles);
         run_mail(request, cursor, 90)
     }
@@ -144,7 +150,13 @@ fn run_mail(request: Vec<u8>, cursor: &str, timeout: u64) -> Result<MailBatch> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| Error::Unavailable("Mail adapter requires Python 3".into()))?;
+        .map_err(|error| {
+            Error::Unavailable(if error.kind() == std::io::ErrorKind::NotFound {
+                "Mail adapter requires Python 3".into()
+            } else {
+                format!("Mail adapter could not start ({:?})", error.kind())
+            })
+        })?;
     let mut stdin = child.stdin.take().ok_or(Error::Conflict)?;
     let input = std::thread::spawn(move || stdin.write_all(&request));
     let stdout = child.stdout.take().ok_or(Error::Conflict)?;

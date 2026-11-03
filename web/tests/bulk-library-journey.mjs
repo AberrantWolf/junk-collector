@@ -72,7 +72,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await unprepared.locator('.music-track').first().waitFor();
  const beforeUnprepared=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
  await unprepared.getByRole('button',{name:'Play album',exact:true}).click();
- await unprepared.getByRole('alert').getByText(/Some tracks are unavailable or unsupported/).waitFor();
+ await expect(unprepared.getByRole('alert')).toContainText(/Track \d+ is unavailable or unsupported/);
  assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),beforeUnprepared);
  await expect(unprepared.locator('.music-track').first().getByRole('button',{name:/^Play track /})).toBeDisabled();
  if(hasFlac){

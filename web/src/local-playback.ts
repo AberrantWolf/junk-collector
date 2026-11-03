@@ -41,7 +41,7 @@ async function select(){
    const winner=await Promise.any(candidates);for(const candidate of candidates)void candidate.then(connection=>{if(connection!==winner)connection.close();},()=>{});
    if(token!==epoch){winner.close();throw new Error('Playback account changed.');}
    route?.close();route=winner;playbackRoute='Direct playback';void winner.closed.finally(()=>{if(route===winner){route=undefined;refreshed=0;}}).catch(()=>{});return;
-  }catch{if(!advertised.remote_media_allowed&&!advertised.remote_media)throw new Error('No trusted local playback route is reachable. Allow Local network access for this site, then use Play to retry. Check that the server allows local UDP playback. Public media fallback is disabled.');}
+  }catch{if(!advertised.remote_media_allowed&&!advertised.remote_media)throw new Error('A trusted local playback connection could not be established. Check the local route, site network permission and server availability, then use Play to retry. Public media fallback is disabled.');}
  }
  if(advertised.remote_media){
   const base=new URL(advertised.remote_media.base_url);

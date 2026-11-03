@@ -28,7 +28,7 @@ export function setApiIdentity(value?:AuthenticationIdentity){
  identity=value?{...value}:undefined;
 }
 export function setRecentAuthenticationHandler(handler?:AuthenticationHandler){authentication?.cancel();authentication=handler?new AuthenticationCoordinator(handler):undefined;}
-export type ApiRequestInit=RequestInit&{authenticationPolicy?:'retry'|'review'};
+export type ApiRequestInit=RequestInit&{authenticationPolicy?:'retry'|'review';operation?:string};
 
 export async function api<T=unknown>(path:string,init:ApiRequestInit={}):Promise<T>{
  // Snapshot mutable request containers before any asynchronous continuation.
@@ -50,7 +50,7 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
  if(submittedIdentity&&!path.startsWith('/auth/'))headers.set('X-Collector-Actor',submittedIdentity.user_id);
  if(init.body&&typeof init.body==='string'&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
  if(needsCommandKey&&!headers.has('Idempotency-Key'))headers.set('Idempotency-Key',crypto.randomUUID());
- const {authenticationPolicy='retry',...transport}=init;
+ const {authenticationPolicy='retry',operation,...transport}=init;
  const request:RequestInit={credentials:'same-origin',...transport,headers};
  let response:Response;
  try{response=await fetch(`/api/v1${path}`,request);}catch(error){if(!needsCommandKey||init.signal?.aborted)throw error;response=await fetch(`/api/v1${path}`,request);}
@@ -69,9 +69,9 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
    if(verified.user_id!==submittedIdentity.user_id||identity?.user_id!==submittedIdentity.user_id)throw new Error('Account changed. The pending action was not submitted.');
    if(authenticationPolicy==='review')throw new ApiRequestError(409,'authentication_review_required','Authentication changed the session. Review the refreshed sessions and choose the action again.');
    if(init.body instanceof ReadableStream)throw new Error('This upload must be resubmitted after authentication.');
-   return performRequest<T>(path,{...request,authenticationPolicy},true,submittedIdentity);
+   return performRequest<T>(path,{...request,authenticationPolicy,operation},true,submittedIdentity);
   }
-  throw new ApiRequestError(response.status,code,message);
+  throw new ApiRequestError(response.status,code,operation?`${operation}: ${message}`:message);
  }
  const result=response.status===204?undefined as T:await response.json() as T;init.signal?.throwIfAborted();
  if(submittedIdentity&&identity?.user_id!==submittedIdentity.user_id)throw new Error('Account changed. Reopen this task before continuing.');

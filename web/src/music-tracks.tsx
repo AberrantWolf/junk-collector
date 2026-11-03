@@ -137,8 +137,8 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
   async function load(){
    try{
     const [nextPlan,nextBatches]=await Promise.all([
-     api<AlbumPlan>(`/items/${item.id}/music-preparation-plan`,{signal:controller.signal}),
-     api<Batch[]>(`/items/${item.id}/music-preparation-batches`,{signal:controller.signal}),
+     api<AlbumPlan>(`/items/${item.id}/music-preparation-plan`,{signal:controller.signal,operation:'Load track preparation choices'}),
+     api<Batch[]>(`/items/${item.id}/music-preparation-batches`,{signal:controller.signal,operation:'Load track preparation results'}),
     ]);if(controller.signal.aborted)return;
     setPlan(nextPlan);setBatches(nextBatches);
     setDiscSources(current=>{const next={...current};for(const disc of nextPlan.discs){const selected=disc.sources.find(source=>source.default_selected);if(selected&&!next[disc.capture_id])next[disc.capture_id]=selected.source_representation_id;}return next;});
@@ -231,14 +231,14 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
   playback.current?.abort();const controller=new AbortController();playback.current=controller;
   const signal=AbortSignal.any([controller.signal,requests.current.signal]);setPlayBusy(true);setError('');setQueueNotice('');
   try{
-   const freshPromise=api<Availability[]>(`/items/${item.id}/music-tracks`,{signal});
-   const snapshotPromise=track===undefined?api<components['schemas']['AlbumPlaybackSnapshot']>(`/items/${item.id}/client-playback${source?'?source='+encodeURIComponent(source):''}`,{signal}):Promise.resolve(undefined);
+   const freshPromise=api<Availability[]>(`/items/${item.id}/music-tracks`,{signal,operation:'Check playback tracks'});
+   const snapshotPromise=track===undefined?api<components['schemas']['AlbumPlaybackSnapshot']>(`/items/${item.id}/client-playback${source?'?source='+encodeURIComponent(source):''}`,{signal,operation:'Load album playback selection'}):Promise.resolve(undefined);
    const [fresh,snapshot]=await Promise.all([freshPromise,snapshotPromise]);signal.throwIfAborted();
    const scope=snapshot?.tracks||fresh.filter(row=>row.source_representation_id===source&&row.track_position===track).slice(0,1);
    if(!scope.length)throw new Error('No supported tracks are ready. Ask a curator to inspect the original audio.');
    const selected=scope.map(target=>{
     const row=preferredAvailable(fresh.filter(row=>row.capture_id===target.capture_id&&row.source_representation_id===target.source_representation_id&&row.track_position===target.track_position));
-    if(!row)throw new Error('Some tracks are unavailable or unsupported by this browser. Prepare CD audio explicitly or play an individual available track. Your queue is unchanged.');
+    if(!row)throw new Error(`Track ${target.track_position} is unavailable or unsupported by this browser. Open track preparation for its status. Your queue is unchanged.`);
     return queuedTrack(row);
    });
    if(!startMusicTracks(selected))throw new Error('This selection exceeds the 5,000-track queue limit. Play a smaller selection.');

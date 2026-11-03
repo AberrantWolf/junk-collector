@@ -1,7 +1,7 @@
 import {presentationLabel} from './presentation-labels';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter} from './work-progress';
-import React,{useEffect,useState,useRef,api,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useState,useRef,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import InboxPackageChooser from './inbox-package-chooser';
 import type {components} from './generated/api';
 
@@ -116,8 +116,9 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
    const choice=identity==='unidentified'?{identity:'unidentified'}:{identity:'candidate',key:identity};
    const reviewed=await request<ImportView>(`/imports/${record.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:record.revision,identity:choice,association:association(),expected_item_revision:attach?itemRevision:null})});setRecord(reviewed);setConflict('');setEditingReview(false);
   }catch(error){
-   if(isApiRequestError(error)&&error.status===409){
-    const [current,currentItem]=await Promise.all([request<ImportView>(`/imports/${record.id}`),request<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);setConflict(`This import or entry changed. Your choices are still here; review and save again.`);
+   if(isApiRequestError(error)&&error.code==='revision_conflict'){
+    setConflict('This import or entry changed. Your choices are still here; review and save again.');
+    try{const [current,currentItem]=await Promise.all([request<ImportView>(`/imports/${record.id}`),request<Item>(`/items/${item.id}`)]);setRecord(current);setItemRevision(currentItem.revision);}catch(refreshError){report(new Error(`${requestErrorMessage(error)} Refresh also failed: ${requestErrorMessage(refreshError)}`));}
    }else report(error);
   }finally{finish();}
  }
@@ -125,8 +126,8 @@ export default function ImportWorkspace({initialImportId,item,onPublished,onErro
   if(!record)return;setBusy(true);setActivity('Saving originals…');setJob(undefined);
   try{
    const accepted=await request<{job_id:string}>(`/imports/${record.id}/publish`,{method:'POST'});
-   jobsChanged();await waitForJob(accepted.job_id,setJob,lifecycle.current.signal);jobsChanged();setRecord(await request<ImportView>(`/imports/${record.id}`));onPublished(await request<Item>(`/items/${item.id}`));
-  }catch(error){report(error);try{setRecord(await request<ImportView>(`/imports/${record.id}`));}catch(refreshError){report(refreshError);}}finally{finish();}
+   jobsChanged();await waitForJob(accepted.job_id,setJob,lifecycle.current.signal);jobsChanged();try{setRecord(await request<ImportView>(`/imports/${record.id}`));onPublished(await request<Item>(`/items/${item.id}`));}catch(error){throw new Error(`Originals saved. Refresh failed: ${requestErrorMessage(error)} Reopen the entry to reload it.`);}
+  }catch(error){report(error);try{setRecord(await request<ImportView>(`/imports/${record.id}`));}catch(refreshError){report(new Error(`${requestErrorMessage(error)} Status refresh also failed: ${requestErrorMessage(refreshError)}`));}}finally{finish();}
  }
 
  const canStage=source==='browser'?files.length>0:!!label&&!!inboxPackage;

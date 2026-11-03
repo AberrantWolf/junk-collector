@@ -37,7 +37,7 @@ impl CollectionService {
         claim: &JobClaim,
         _frozen: &FrozenAcquisitionJob,
     ) -> Result<()> {
-        let mut failure = None;
+        let mut failures = Vec::new();
         for owner in self.jobs.acquisition_owners(claim)? {
             if self
                 .jobs
@@ -64,7 +64,7 @@ impl CollectionService {
                             .map_or(Revision(0), |r| r.revision)
                             != input.metadata_revision
                     {
-                        failure = Some(Error::Conflict);
+                        failures.push(Error::Conflict);
                         continue;
                     }
                     input
@@ -78,7 +78,7 @@ impl CollectionService {
                     input.acquisition.collection_binding
                 }
                 _ => {
-                    failure = Some(Error::Conflict);
+                    failures.push(Error::Conflict);
                     continue;
                 }
             };
@@ -91,14 +91,19 @@ impl CollectionService {
                     return Ok(());
                 }
                 Ok(_) => {
-                    failure = Some(Error::Conflict);
+                    failures.push(Error::Conflict);
                 }
+                Err(error @ (Error::Storage(_) | Error::CatalogBusy)) => return Err(error),
                 Err(error) => {
-                    failure = Some(error);
+                    failures.push(error);
                 }
             }
         }
-        Err(failure.unwrap_or(Error::JobCancelled))
+        Err(match failures.first() {
+            Some(first) if failures.iter().all(|error| error == first) => first.clone(),
+            Some(_) => Error::Unavailable("No current request owner remains eligible for this provider response; their eligibility failures differ".into()),
+            None => Error::JobCancelled,
+        })
     }
 }
 

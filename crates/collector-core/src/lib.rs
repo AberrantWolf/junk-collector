@@ -1501,7 +1501,7 @@ pub enum JobState {
     Cancelled,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
     Invalid(String),

@@ -22,7 +22,7 @@ async function sendChunk(path:string,body:Blob,signal:AbortSignal,progress:(load
    xhr.onabort=()=>{cleanup();reject(new DOMException('Upload stopped','AbortError'));};
    xhr.onload=()=>{
     cleanup();if(signal.aborted){reject(new DOMException('Upload stopped','AbortError'));return;}
-    let value;try{value=JSON.parse(xhr.responseText);}catch{reject(new Error('The server returned an unreadable upload response.'));return;}
+    let value;try{value=JSON.parse(xhr.responseText);}catch{reject(new ApiRequestError(xhr.status,`http_${xhr.status}`,`Upload response could not be read (HTTP ${xhr.status}). ${xhr.status>=200&&xhr.status<300?'The upload outcome is unconfirmed; resume with the same package.':'The server did not confirm the chunk.'}`));return;}
     if(xhr.status<200||xhr.status>=300){reject(new ApiRequestError(xhr.status,value.error?.code||`http_${xhr.status}`,value.error?.message||`Upload failed (${xhr.status})`));return;}
     resolve(value as ImportView);
    };

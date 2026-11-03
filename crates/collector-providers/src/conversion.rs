@@ -299,11 +299,13 @@ impl AudioConversionPort for ProcessAudioConverter {
                     )
                 });
             checkpoint(execution)?;
-            let status = status?;
             if cancelled {
                 return Err(Error::JobCancelled);
             }
+            let bytes = copy_result.map_err(conversion_io)?;
+            write_result.map_err(conversion_io)?;
             let diagnostics = diagnostics.map_err(conversion_io)?;
+            let status = status?;
             if !status.success() {
                 return Err(Error::Unavailable(format!(
                     "{} conversion failed: {}",
@@ -311,8 +313,6 @@ impl AudioConversionPort for ProcessAudioConverter {
                     safe_diagnostic(&diagnostics)
                 )));
             }
-            write_result.map_err(conversion_io)?;
-            let bytes = copy_result.map_err(conversion_io)?;
             scratch.flush().map_err(conversion_io)?;
 
             let (decoded_frames, lossless_pcm_equal, delay, padding) = match recipe.settings {
@@ -362,8 +362,10 @@ impl AudioConversionPort for ProcessAudioConverter {
                 end_padding_frames: padding,
             })
         })();
-        if result.is_err() {
-            scratch.discard_partial().map_err(conversion_io)?;
+        if result.is_err()
+            && let Err(error) = scratch.discard_partial()
+        {
+            eprintln!("failed to discard unsuccessful conversion scratch: {error}");
         }
         result
     }
@@ -972,7 +974,7 @@ mod tests {
         }
         impl ConversionScratch for BrokenScratch {
             fn discard_partial(&mut self) -> std::io::Result<()> {
-                self.0.discard_partial()
+                Err(std::io::Error::other("fixture cleanup failure"))
             }
         }
         let mut scratch = BrokenScratch(Cursor::new(Vec::new()));
@@ -989,7 +991,12 @@ mod tests {
                 checks: 0,
             },
         );
-        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("disk full"),
+            "primary error was lost: {error}"
+        );
+        assert!(!error.contains("cleanup failure"));
         assert!(started.elapsed() < Duration::from_secs(3));
     }
 

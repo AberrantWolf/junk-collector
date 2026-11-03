@@ -105,7 +105,7 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
   await saveDraft(pendingKey,submitted);setPendingPurchase(submitted);
   const accepted=await request<Accepted>('/ingests',{method:'POST',headers:{'Idempotency-Key':submitted.key},body:JSON.stringify(submitted.command)});
   await saveDraft(pendingKey,undefined);setPendingPurchase(undefined);
-  if(!accepted.imports.length)throw new Error(accepted.rejected[0]?.reason||'No package was accepted.');
+  if(!accepted.imports.length)throw new Error(accepted.rejected.map(value=>`Package ${value.position+1}: ${value.reason}`).join('; ')||'No package was accepted.');
   setPlan(undefined);
   for(let index=0;index<accepted.imports.length;index++){
    const summary=accepted.imports[index];setQueueLabel(`Package ${index+1} of ${accepted.imports.length}: ${summary.package_name}`);

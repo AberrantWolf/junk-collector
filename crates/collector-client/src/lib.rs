@@ -84,9 +84,8 @@ pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
     mut response: reqwest::Response,
     limit: usize,
 ) -> Result<T> {
-    if !response.status().is_success() {
-        return Err(Error::Forbidden);
-    }
+    let status = response.status();
+    let headers = response.headers().clone();
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
@@ -97,6 +96,9 @@ pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
             return Err(Error::Invalid("oversized response".into()));
         }
         bytes.extend_from_slice(&chunk);
+    }
+    if !status.is_success() {
+        return Err(response_error(status, &headers, &bytes));
     }
     serde_json::from_slice(&bytes).map_err(|_| Error::Invalid("invalid response".into()))
 }
@@ -349,12 +351,13 @@ fn invalid_url(error: url::ParseError) -> Error {
 }
 
 fn client_error(error: reqwest::Error) -> Error {
+    if error.is_timeout() {
+        return Error::Unavailable(
+            "Collector request timed out; retry when the connection is available.".into(),
+        );
+    }
     if error.is_connect() {
         Error::Unavailable("Could not establish an HTTPS connection to Collector. Check that the address resolves, the server is running, and its certificate is trusted. For a local self-signed certificate, obtain owner-provided trust material or install the server’s certificate in the system trust store.".into())
-    } else if error.is_timeout() {
-        Error::Unavailable(
-            "Collector did not respond in time. Check the connection and retry.".into(),
-        )
     } else if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
         Error::Unauthenticated
     } else if error.status() == Some(reqwest::StatusCode::FORBIDDEN) {
@@ -501,4 +504,127 @@ pub fn eviction_candidates(entries: &[CacheEntry], budget: u64) -> Vec<CacheKey>
         result.push(entry.key());
     }
     result
+}
+
+fn response_error(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    bytes: &[u8],
+) -> Error {
+    let value = serde_json::from_slice::<serde_json::Value>(bytes).ok();
+    let error = value.as_ref().and_then(|value| value.get("error"));
+    let code = error
+        .and_then(|error| error.get("code"))
+        .and_then(|value| value.as_str());
+    let message = error
+        .and_then(|error| error.get("message"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("Collector did not provide an error description");
+    match code {
+        Some("catalog_busy") => Error::CatalogBusy,
+        Some("revision_conflict") => Error::Conflict,
+        Some("idempotency_conflict") => Error::IdempotencyConflict,
+        Some("command_in_progress") => Error::CommandInProgress,
+        Some("cancellation_too_late") => Error::CancellationTooLate,
+        Some("prepared_media_invalid") => Error::PreparedMediaInvalid,
+        Some("recent_authentication_required") => Error::RecentAuthenticationRequired,
+        Some("revoked_credential") => Error::CredentialRevoked,
+        Some("expired_enrollment") => Error::EnrollmentExpired,
+        Some("cancelled_enrollment") => Error::EnrollmentCancelled,
+        Some("job_cancelled") => Error::JobCancelled,
+        Some("last_administrator") => Error::LastAdministrator,
+        Some("last_owner") => Error::LastOwner,
+        Some("default_reassignment_required") => Error::DefaultReassignmentRequired,
+        _ => match status {
+            reqwest::StatusCode::UNAUTHORIZED => Error::Unauthenticated,
+            reqwest::StatusCode::FORBIDDEN => Error::Forbidden,
+            reqwest::StatusCode::NOT_FOUND => Error::NotFound,
+            reqwest::StatusCode::TOO_MANY_REQUESTS => headers
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok())
+                .map(Error::RateLimited)
+                .unwrap_or_else(|| {
+                    Error::Unavailable(format!("Collector request rate limited: {message}"))
+                }),
+            reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                Error::Invalid(message.into())
+            }
+            _ => Error::Unavailable(format!(
+                "Collector request failed (HTTP {status}, {}): {message}",
+                code.unwrap_or("unknown_error")
+            )),
+        },
+    }
+}
+
+#[cfg(test)]
+mod response_cause_tests {
+    use super::*;
+    #[test]
+    fn error_codes_survive_shared_http_statuses_and_unknown_statuses_keep_the_message() {
+        let headers = reqwest::header::HeaderMap::new();
+        for (code, expected) in [
+            ("revision_conflict", Error::Conflict),
+            ("command_in_progress", Error::CommandInProgress),
+            ("idempotency_conflict", Error::IdempotencyConflict),
+            ("prepared_media_invalid", Error::PreparedMediaInvalid),
+            ("cancellation_too_late", Error::CancellationTooLate),
+        ] {
+            let body = serde_json::to_vec(
+                &serde_json::json!({"error":{"code":code,"message":"fixture cause"}}),
+            )
+            .unwrap();
+            assert_eq!(
+                response_error(reqwest::StatusCode::CONFLICT, &headers, &body),
+                expected
+            );
+        }
+        assert_eq!(
+            response_error(
+                reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                &headers,
+                br#"{"error":{"code":"catalog_busy","message":"busy"}}"#
+            ),
+            Error::CatalogBusy
+        );
+        let outage = response_error(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            &headers,
+            br#"{"error":{"code":"unavailable","message":"Archive guard stopped reads"}}"#,
+        );
+        assert!(
+            matches!(outage,Error::Unavailable(message) if message.contains("Archive guard stopped reads"))
+        );
+        assert!(matches!(
+            response_error(reqwest::StatusCode::BAD_GATEWAY, &headers, b"not JSON"),
+            Error::Unavailable(_)
+        ));
+        assert_eq!(
+            response_error(
+                reqwest::StatusCode::UNAUTHORIZED,
+                &headers,
+                br#"{"error":{"code":"revoked_credential"}}"#
+            ),
+            Error::CredentialRevoked
+        );
+        assert_eq!(
+            response_error(reqwest::StatusCode::UNAUTHORIZED, &headers, b""),
+            Error::Unauthenticated
+        );
+        assert_eq!(
+            response_error(
+                reqwest::StatusCode::GONE,
+                &headers,
+                br#"{"error":{"code":"expired_enrollment"}}"#
+            ),
+            Error::EnrollmentExpired
+        );
+        let mut headers = headers;
+        headers.insert(reqwest::header::RETRY_AFTER, "17".parse().unwrap());
+        assert_eq!(
+            response_error(reqwest::StatusCode::TOO_MANY_REQUESTS, &headers, b""),
+            Error::RateLimited(17)
+        );
+    }
 }

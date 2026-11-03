@@ -366,25 +366,7 @@ pub(crate) async fn decode_request<T: DeserializeOwned>(
         bytes.extend_from_slice(&chunk);
     }
     if !status.is_success() {
-        let message = serde_json::from_slice::<serde_json::Value>(&bytes)
-            .ok()
-            .and_then(|v| {
-                v.get("error")
-                    .and_then(|v| v.get("message"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "Collector rejected the request".into());
-        return Err(match status {
-            reqwest::StatusCode::UNAUTHORIZED => Error::Unauthenticated,
-            reqwest::StatusCode::FORBIDDEN => Error::Forbidden,
-            reqwest::StatusCode::CONFLICT => Error::Conflict,
-            reqwest::StatusCode::NOT_FOUND => Error::NotFound,
-            reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
-                Error::Invalid(message)
-            }
-            _ => Error::Unavailable("Collector request failed".into()),
-        });
+        return Err(crate::response_error(status, response.headers(), &bytes));
     }
     serde_json::from_slice(&bytes)
         .map_err(|_| Error::Unavailable("Collector response was incomplete or invalid".into()))

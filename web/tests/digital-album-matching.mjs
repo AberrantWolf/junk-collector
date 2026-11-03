@@ -273,6 +273,17 @@ try{
  assert.ok(queueTimes.length);console.log(`Metadata page requests during multi-album admission: ${queueTimes.map(n=>Math.round(n)).join(', ')} ms`);
  await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:15000});await expect(matching.getByRole('button',{name:'Cancel album matching'})).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'multi-album queue status overflows mobile');await page.screenshot({path:'/tmp/collector-metadata-queue-mobile.png',fullPage:true});
+ // Corrupt durable receipts stay visible and cannot create a fresh queue command.
+ let unexpectedAdmissions=0;const observeAdmission=request=>{if(request.method()==='POST'&&request.url().endsWith('/digital-album-matches'))unexpectedAdmissions++;};page.on('request',observeAdmission);
+ for(const damaged of ['{invalid',JSON.stringify({key:12,expected_revision:0,extended:'false'})]){
+  await page.evaluate(async ({item,damaged})=>{const actor=await(await fetch('/api/v1/me')).json();localStorage.setItem(`collector.digital-match.${actor.user_id}.${item}`,damaged);},{item:newItems[0],damaged});
+  await page.reload();
+  const unreadable=page.getByRole('alert').filter({hasText:'Saved queue receipt is unreadable'});
+  await expect(unreadable).toBeVisible();await expect(unreadable.getByRole('button',{name:'Retry queue request'})).toBeDisabled();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'unreadable receipt notice overflows mobile');await page.screenshot({path:'/tmp/collector-unreadable-receipt-mobile.png',fullPage:true});
+  await unreadable.getByRole('button',{name:'Discard unreadable receipt'}).click();await expect(unreadable).toHaveCount(0);
+ }
+ assert.equal(unexpectedAdmissions,0,'unreadable receipt triggered an admission');page.off('request',observeAdmission);
  assert.deepEqual(errors,[]);console.log('digital album matching: original WAV PCM and MP3 without configured encoders → provider discovery → reopened review → partial recognition → complete manual mapping → applied all tracks passed');
 }catch(error){if(page)await page.screenshot({path:'/tmp/collector-digital-matching-failure.png',fullPage:true}).catch(()=>{});console.error(logs);throw error;}
 finally{releaseRecognition();releaseArtwork();releaseDiscoveryResponse?.();if(browser)await browser.close();await stopProcess(server);provider.closeAllConnections();await new Promise(r=>provider.close(r));await rm(scratch,{recursive:true,force:true});}

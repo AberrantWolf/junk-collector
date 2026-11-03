@@ -191,9 +191,14 @@ impl MailSetupPort for ProtonMailProvider {
         request_key: &str,
     ) -> Result<MailProfile> {
         self.repair_with_probe(owner, id, command, request_key, |profile| {
-            let request = serde_json::to_vec(&serde_json::json!({"profile":profile,"cursor":"","operation":"authenticate"})).map_err(|_| unavailable())?;
+            let request = serde_json::to_vec(
+                &serde_json::json!({"profile":profile,"cursor":"","operation":"authenticate"}),
+            )
+            .map_err(|_| unavailable())?;
             let batch = super::run_mail(request, "", 20)?;
-            if batch.failure.is_some() { return Err(Error::Unavailable("Could not revalidate Bridge. Check its credentials and certificate. Saved configuration is unchanged.".into())); }
+            if let Some(failure) = batch.failure {
+                return Err(probe_failure(&failure));
+            }
             Ok(())
         })
     }
@@ -257,9 +262,16 @@ impl MailSetupPort for ProtonMailProvider {
         command: &ConnectBridge,
         request_key: &str,
     ) -> Result<MailProfile> {
-        self.connect_with_probe(owner,command,request_key,|profile| {
-            let request=serde_json::to_vec(&serde_json::json!({"profile":profile,"cursor":"","operation":"probe"})).map_err(|_|unavailable())?;
-            super::run_mail(request,"",20).and_then(|b| if b.failure.is_none() { Ok(()) } else { Err(unavailable()) }).map_err(|_|Error::Unavailable("Could not connect: check local IMAP credentials, folder names, Bridge login and certificate. No profile was saved.".into()))
+        self.connect_with_probe(owner, command, request_key, |profile| {
+            let request = serde_json::to_vec(
+                &serde_json::json!({"profile":profile,"cursor":"","operation":"probe"}),
+            )
+            .map_err(|_| unavailable())?;
+            let batch = super::run_mail(request, "", 20)?;
+            if let Some(failure) = batch.failure {
+                return Err(probe_failure(&failure));
+            }
+            Ok(())
         })
     }
 }
@@ -390,9 +402,13 @@ impl ProtonMailProvider {
         )
         .map_err(|_| unavailable())?;
         pending.as_file().sync_all().map_err(|_| unavailable())?;
-        pending
-            .persist_noclobber(&receipt_path)
-            .map_err(|_| Error::Conflict)?;
+        pending.persist_noclobber(&receipt_path).map_err(|error| {
+            if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+                Error::Conflict
+            } else {
+                unavailable()
+            }
+        })?;
         fs::File::open(&receipts)
             .and_then(|f| f.sync_all())
             .map_err(|_| unavailable())?;
@@ -468,9 +484,13 @@ impl ProtonMailProvider {
             tempfile::NamedTempFile::new_in(&paths.directory).map_err(|_| unavailable())?;
         serde_json::to_writer(&mut pending, &receipt).map_err(|_| unavailable())?;
         pending.as_file().sync_all().map_err(|_| unavailable())?;
-        pending
-            .persist_noclobber(&path)
-            .map_err(|_| Error::Conflict)?;
+        pending.persist_noclobber(&path).map_err(|error| {
+            if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+                Error::Conflict
+            } else {
+                unavailable()
+            }
+        })?;
         fs::File::open(&paths.directory)
             .and_then(|f| f.sync_all())
             .map_err(|_| unavailable())?;
@@ -478,6 +498,27 @@ impl ProtonMailProvider {
         profiles.push(receipt.profile);
         Ok(value)
     }
+}
+
+fn probe_failure(failure: &collector_app::MailFailure) -> Error {
+    use collector_app::MailFailureKind;
+    let message = match failure.kind {
+        MailFailureKind::Authentication => {
+            "Bridge rejected IMAP authentication; check the local IMAP credentials and Bridge login"
+        }
+        MailFailureKind::Certificate => {
+            "Bridge certificate validation failed; check its certificate pin"
+        }
+        MailFailureKind::Folder => {
+            "Bridge could not open a configured IMAP folder; check the folder names"
+        }
+        MailFailureKind::Transport => {
+            "Bridge IMAP connection failed or timed out; check its availability"
+        }
+        MailFailureKind::InvalidResponse => "Bridge returned an invalid IMAP response",
+        MailFailureKind::Adapter => "The mail adapter could not complete its probe",
+    };
+    Error::Unavailable(format!("{message}. No configuration change was accepted."))
 }
 
 #[cfg(test)]

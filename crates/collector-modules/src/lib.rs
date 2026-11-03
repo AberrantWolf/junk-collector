@@ -92,6 +92,8 @@ pub struct ModuleDescriptor {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ModuleError {
+    #[error(transparent)]
+    HostError(Error),
     #[error("unknown capability: {0}")]
     UnknownCapability(String),
     #[error("capability unavailable: {0}")]
@@ -114,6 +116,7 @@ impl From<ModuleError> for Error {
     fn from(value: ModuleError) -> Self {
         let display = value.to_string();
         match value {
+            ModuleError::HostError(error) => error,
             ModuleError::AccessDenied => Error::Forbidden,
             ModuleError::MissingPackageFile(_) => Error::NotFound,
             ModuleError::AmbiguousPackage { .. } => Error::Invalid(display),

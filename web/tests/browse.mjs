@@ -52,7 +52,7 @@ while True:
  let holdSummary=true;const pendingSummaryRoute=async route=>{const response=await route.fetch();if(!holdSummary){await route.fulfill({response});return;}const body=await response.json();await route.fulfill({response,json:{...body,summary_state:'pending',items:body.items.map(item=>({...item,summary_state:'pending',artwork:null,accuraterip:null,album_playback:null,can_edit:false}))}});};
  await page.route('**/api/v1/library?*',pendingSummaryRoute);
  // A short busy response must recover without requiring manual Retry.
- await page.route('**/api/v1/library/summary?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'catalog is busy; retry shortly'}}}),{times:1});
+ await page.route('**/api/v1/library/summary?*',route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}}),{times:1});
  await page.reload();await page.locator('.collection-row').first().waitFor();
  await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toBeVisible();
  await expect(page.locator('.collection-row').first().getByLabel('Artwork summary updating')).toBeVisible();
@@ -161,7 +161,7 @@ while True:
  await page.route('**/api/v1/library?*',route=>route.fulfill({status:403,json:{error:{code:'forbidden',message:'Library access revoked'}}}));
  await page.getByLabel('Show',{exact:true}).selectOption('wishlist');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.locator('.collection-row').count(),0,'revoked scope retained old rows');
  await page.unroute('**/api/v1/library?*');
- await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
+ await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();await expect(page.getByRole('alert')).toContainText('Temporary list failure');assert.equal(await page.getByText('Library is busy; retrying…',{exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
  // Real unfinished uploads take precedence over playback attention. The list
  // must refresh after cancellation/completion without a manual reload.
  const beginImport=()=>page.evaluate(async ({collection,item})=>{

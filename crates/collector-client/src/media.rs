@@ -99,7 +99,10 @@ impl EnrolledClient {
             return Err(Error::Forbidden);
         }
         if response.status() != StatusCode::OK {
-            return Err(Error::Unavailable("media metadata unavailable".into()));
+            return Err(Error::Unavailable(format!(
+                "Media metadata request failed (HTTP {})",
+                response.status()
+            )));
         }
         let length = response
             .headers()
@@ -191,12 +194,7 @@ impl RangeReader {
                 self.route
                     .target(&self.client, self.target.clone())
                     .await
-                    .map_err(|_| {
-                        io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            "media grant renewal denied",
-                        )
-                    })
+                    .map_err(media_control_error)
             }))?;
         Ok(())
     }
@@ -214,12 +212,7 @@ impl RangeReader {
         let request = self
             .route
             .request(&self.client, reqwest::Method::GET, self.url.clone())
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "media authorization expired",
-                )
-            })?
+            .map_err(media_control_error)?
             .header(header::RANGE, format!("bytes={}-{}", self.position, end))
             .header(header::IF_RANGE, &self.etag);
         let position = self.position;
@@ -240,6 +233,12 @@ impl RangeReader {
                         io::ErrorKind::PermissionDenied,
                         "media access revoked",
                     ));
+                }
+                if response.status() != StatusCode::PARTIAL_CONTENT {
+                    return Err(io::Error::other(format!(
+                        "Media range request failed (HTTP {})",
+                        response.status()
+                    )));
                 }
                 validate_range(
                     response.status(),
@@ -356,6 +355,17 @@ impl Seek for RangeReader {
         Ok(self.position)
     }
 }
+fn media_control_error(error: collector_core::Error) -> io::Error {
+    let kind = match error {
+        collector_core::Error::Unauthenticated
+        | collector_core::Error::Forbidden
+        | collector_core::Error::CredentialRevoked => io::ErrorKind::PermissionDenied,
+        collector_core::Error::NotFound => io::ErrorKind::NotFound,
+        _ => io::ErrorKind::Other,
+    };
+    io::Error::new(kind, format!("Media authorization request failed: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,5 +423,25 @@ mod cancellation_tests {
         );
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
         assert!(start.elapsed() < Duration::from_millis(200));
+    }
+}
+
+#[cfg(test)]
+mod control_error_tests {
+    use super::*;
+    #[test]
+    fn renewal_permission_and_operational_failures_remain_distinct() {
+        assert_eq!(
+            media_control_error(Error::Forbidden).kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let failure =
+            media_control_error(Error::Unavailable("authorization server timed out".into()));
+        assert_eq!(failure.kind(), io::ErrorKind::Other);
+        assert!(failure.to_string().contains("timed out"));
+        assert_eq!(
+            media_control_error(Error::NotFound).kind(),
+            io::ErrorKind::NotFound
+        );
     }
 }

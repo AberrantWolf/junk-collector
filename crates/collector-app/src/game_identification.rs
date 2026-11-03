@@ -258,7 +258,7 @@ impl CollectionService {
             .and_then(serde_json::Value::as_str)
             .map(str::parse)
             .transpose()
-            .map_err(|_| Error::Conflict)?;
+            .map_err(|_| Error::Storage("Game scan checkpoint has an invalid cursor".into()))?;
         if !done {
             self.report_processing_phase(claim, "identifying_existing_games")?;
             let ids = self.jobs.game_scan_page(claim, cursor)?;

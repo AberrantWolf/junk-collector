@@ -2,7 +2,7 @@ import React,{useState,useEffect,api,isApiRequestError,requestErrorMessage,useOp
 
 export default function PairDevice({onSignOut,onSessionExpired}:{onSignOut:()=>void;onSessionExpired:()=>void}){
  const [account,setAccount]=useState('');
- useEffect(()=>{const controller=new AbortController();api<{username:string}>('/me/profile',{signal:controller.signal}).then(value=>setAccount(value.username)).catch(()=>{});return()=>controller.abort();},[]);
+ useEffect(()=>{const controller=new AbortController();api<{username:string}>('/me/profile',{signal:controller.signal}).then(value=>setAccount(value.username)).catch(e=>{if(!controller.signal.aborted){if(isApiRequestError(e)&&e.code==='unauthenticated')onSessionExpired();else setError(`Could not load the account label: ${requestErrorMessage(e)}`);}});return()=>controller.abort();},[]);
  const [code,setCode]=useState(()=>new URLSearchParams(location.search).get('code')?.slice(0,64)||'');const [preview,setPreview]=useState<{requested_label:string;expires_at:string}>();const [approved,setApproved]=useState<string>();const [error,setError]=useState('');const [busy,setBusy]=useState(false);
  const command=useOperationScope('approve-native-device');
  async function inspect(){setBusy(true);setError('');await command.run(attempt=>api<{requested_label:string;expires_at:string}>('/enrollments/preview',{method:'POST',signal:attempt.signal,body:JSON.stringify({user_code:code.trim()})}),{success:setPreview,failure:value=>setError(requestErrorMessage(value)),settled:()=>setBusy(false)});}

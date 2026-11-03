@@ -82,10 +82,17 @@ pub fn analyze_files(
         let mut wav_trailing_bytes = 0;
         let mut audio = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("wav")) {
             use junk_libs_pcm::IntegerPcmReader;
-            let mut wav = junk_libs_pcm::WavReader::open(reader, &mut || {
-                host.checkpoint().map_err(std::io::Error::other)
-            })
-            .map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
+            let mut checkpoint_error = None;
+            let wav = junk_libs_pcm::WavReader::open(reader, &mut || {
+                host.checkpoint().map_err(|error| {
+                    checkpoint_error = Some(error.clone());
+                    std::io::Error::other(error)
+                })
+            });
+            if let Some(error) = checkpoint_error {
+                return Err(error);
+            }
+            let mut wav = wav.map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
             let format = wav.format();
             wav_trailing_bytes = wav.trailing_bytes();
             junk_libs_audio::FileAudioInfo {
@@ -99,17 +106,23 @@ pub fn analyze_files(
                 ..Default::default()
             }
         } else {
-            junk_libs_audio::inspect_file_audio(
+            let mut checkpoint_error = None;
+            let audio = junk_libs_audio::inspect_file_audio(
                 junk_libs_audio::ByteSource::new(
                     reader,
                     junk_libs_audio::MediaHint::new(Some(file.bytes.0), extension, None),
                 ),
                 &mut || {
-                    host.checkpoint()
-                        .map_err(|_| junk_libs_audio::AudioDecodeError::Cancelled)
+                    host.checkpoint().map_err(|error| {
+                        checkpoint_error = Some(error);
+                        junk_libs_audio::AudioDecodeError::Cancelled
+                    })
                 },
-            )
-            .map_err(|error| ModuleError::FailedOperation(error.to_string()))?
+            );
+            if let Some(error) = checkpoint_error {
+                return Err(error);
+            }
+            audio.map_err(|error| ModuleError::FailedOperation(error.to_string()))?
         };
         tag_bytes += audio
             .tags

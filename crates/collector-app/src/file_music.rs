@@ -441,13 +441,20 @@ impl CollectionService {
                 read_bytes: 0,
             };
             let info = if track.audio.codec == "wav" {
-                junk_libs_pcm::WavReader::open(reader, &mut || {
-                    checkpoint().map_err(std::io::Error::other)
-                })
-                .map_err(|e| Error::Unavailable(e.to_string()))?
-                .metadata
+                let mut checkpoint_error = None;
+                let wav = junk_libs_pcm::WavReader::open(reader, &mut || {
+                    checkpoint().map_err(|error| {
+                        checkpoint_error = Some(error.clone());
+                        std::io::Error::other(error)
+                    })
+                });
+                if let Some(error) = checkpoint_error {
+                    return Err(error);
+                }
+                wav.map_err(|e| Error::Unavailable(e.to_string()))?.metadata
             } else {
-                junk_libs_audio::inspect_file_audio_metadata(
+                let mut checkpoint_error = None;
+                let metadata = junk_libs_audio::inspect_file_audio_metadata(
                     junk_libs_audio::ByteSource::new(
                         reader,
                         junk_libs_audio::MediaHint::new(
@@ -456,9 +463,17 @@ impl CollectionService {
                             None,
                         ),
                     ),
-                    &mut || checkpoint().map_err(|_| junk_libs_audio::AudioDecodeError::Cancelled),
-                )
-                .map_err(|e| Error::Unavailable(e.to_string()))?
+                    &mut || {
+                        checkpoint().map_err(|error| {
+                            checkpoint_error = Some(error);
+                            junk_libs_audio::AudioDecodeError::Cancelled
+                        })
+                    },
+                );
+                if let Some(error) = checkpoint_error {
+                    return Err(error);
+                }
+                metadata.map_err(|e| Error::Unavailable(e.to_string()))?
             };
             checkpoint()?;
             if self.fingerprint_inventory_checked(&inventory, &mut || checkpoint())? != expected {

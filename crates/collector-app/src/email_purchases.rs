@@ -597,22 +597,25 @@ impl CollectionService {
                 administrator: false,
                 device_id: None,
             };
-            if self.mail_enabled_user(&actor).is_err() {
-                continue;
+            match self.mail_enabled_user(&actor) {
+                Ok(()) => {}
+                Err(Error::Forbidden | Error::Unauthenticated | Error::NotFound) => continue,
+                Err(error) => return Err(error),
             }
-            if self
-                .content_write_eligibility(&actor, connection.collection_id)
-                .is_err()
-            {
-                continue;
+            match self.content_write_eligibility(&actor, connection.collection_id) {
+                Ok(_) => {}
+                Err(Error::Forbidden | Error::Unauthenticated | Error::NotFound) => continue,
+                Err(error) => return Err(error),
             }
             let fetched = provider.fetch(
                 &profile.id,
                 &connection.cursor,
                 connection.folders.as_deref(),
             );
-            if self.mail_enabled_user(&actor).is_err() {
-                continue;
+            match self.mail_enabled_user(&actor) {
+                Ok(()) => {}
+                Err(Error::Forbidden | Error::Unauthenticated | Error::NotFound) => continue,
+                Err(error) => return Err(error),
             }
             let publish_failure = |failure: &MailFailure| -> Result<()> {
                 match provider.with_configuration(

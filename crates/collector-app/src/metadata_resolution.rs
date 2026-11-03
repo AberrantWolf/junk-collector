@@ -807,7 +807,9 @@ impl CollectionService {
                 generation: frozen.generation,
                 source: ItemEffectSource::Job {
                     id: claim.id,
-                    claim: claim.claim_token.parse().map_err(|_| Error::Conflict)?,
+                    claim: claim.claim_token.parse().map_err(|_| {
+                        Error::Storage("Metadata resolution claim token is malformed".into())
+                    })?,
                 },
             },
             restore_archived,

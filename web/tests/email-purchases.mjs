@@ -30,9 +30,14 @@ try{
  const submitted=[];page.on('request',r=>{if(r.url().endsWith('/api/v1/mail/setup')&&r.method()==='POST')submitted.push({key:r.headers()['idempotency-key'],body:r.postData()});});
  const connection=page.getByRole('region',{name:'Mail connection',exact:true});
  await connection.getByRole('progressbar',{name:'Bridge mailbox sync'}).waitFor();
+ await page.route('**/api/v1/mail/profiles',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Fixture profile read failure'}}}));
+ await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();
+ await expect(connection.getByRole('alert')).toContainText('Load mail profiles: Fixture profile read failure');
+ await expect(connection.getByRole('progressbar',{name:'Bridge mailbox sync'})).toBeVisible();
+ await page.unroute('**/api/v1/mail/profiles');await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await expect(connection.getByRole('alert')).toHaveCount(0);
  const setupShots=process.env.COLLECTOR_SCREENSHOTS;if(setupShots){await mkdir(setupShots,{recursive:true});await page.screenshot({path:path.join(setupShots,'mail-setup-desktop.png'),fullPage:true});}await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile mail setup overflow');if(setupShots)await page.screenshot({path:path.join(setupShots,'mail-setup-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
  await connection.getByLabel('Bridge IMAP username',{exact:true}).fill('fixture-local');await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('incorrect-private-password');
- await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('alert').filter({hasText:'Could not connect'}).waitFor();
+ await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('alert').filter({hasText:'Bridge rejected IMAP authentication'}).waitFor();
  assert.equal(await page.evaluate(async()=>{const r=await fetch('/api/v1/mail/profiles');return (await r.json()).length;}),0);
  await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('fixture-imap-password');await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('heading',{name:'My Proton Mail · Connected'}).waitFor();
  const configured=await page.evaluate(async()=>({profiles:await (await fetch('/api/v1/mail/profiles')).json(),connections:await (await fetch('/api/v1/mail/connections')).json()}));
@@ -106,7 +111,7 @@ db.commit()
  await connection.getByRole('button',{name:'Revalidate Bridge connection',exact:true}).click();
  await connection.getByLabel('Current Bridge IMAP username',{exact:true}).fill('fixture-local');await connection.getByLabel('Current Bridge IMAP password',{exact:true}).fill('wrong-rotated-password');
  await connection.getByRole('checkbox',{name:'I verified this certificate fingerprint in the private Bridge terminal.'}).check();
- await connection.getByRole('button',{name:'Save revalidated connection',exact:true}).click();await connection.getByRole('alert').filter({hasText:'Could not revalidate'}).waitFor();
+ await connection.getByRole('button',{name:'Save revalidated connection',exact:true}).click();await connection.getByRole('alert').filter({hasText:'Bridge rejected IMAP authentication'}).waitFor();
  await connection.getByLabel('Current Bridge IMAP password',{exact:true}).fill('fixture-rotated-password');
  const repairsShots=process.env.COLLECTOR_SCREENSHOTS;if(repairsShots)await page.screenshot({path:path.join(repairsShots,'mail-revalidation-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile revalidation overflow');if(repairsShots)await page.screenshot({path:path.join(repairsShots,'mail-revalidation-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
  await connection.getByRole('button',{name:'Save revalidated connection',exact:true}).click();await connection.getByRole('button',{name:'Revalidate Bridge connection',exact:true}).waitFor();

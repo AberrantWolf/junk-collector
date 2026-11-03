@@ -24,7 +24,7 @@ worker.addEventListener('fetch',event=>{
    const client=await worker.clients.get(event.clientId);if(!client)throw new Error('Open Collector to play local media.');
    const metadata=await rpc(client,url.pathname,'HEAD',undefined,undefined,undefined,request.signal);
    if(metadata.direct)return fetch(request);
-   if(metadata.status!==200)return new Response(request.method==='HEAD'?null:metadata.body,{status:metadata.status,headers:metadata.headers});
+   if(metadata.status!==200)return new Response(request.method==='HEAD'?null:metadata.body||metadata.error,{status:metadata.status,headers:metadata.headers});
    const headers=new Headers(metadata.headers);headers.set('Cache-Control','private, no-store');
    if(request.method==='HEAD')return new Response(null,{status:200,headers});
    const length=Number(headers.get('content-length'));const etag=headers.get('etag');if(!Number.isSafeInteger(length)||length<0||!etag)throw new Error('Invalid local media metadata');
@@ -46,6 +46,6 @@ worker.addEventListener('fetch',event=>{
    }catch(error){controller.abort();stream.error(error);}},cancel(){controller.abort();}}, {highWaterMark:1});
    headers.set('Content-Length',String(end-start+1));if(range)headers.set('Content-Range',`bytes ${start}-${end}/${length}`);
    return new Response(body,{status:range?206:200,headers});
-  }catch{return new Response('Local playback unavailable. Public media fallback is disabled.',{status:503,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}});}
+  }catch(error){return new Response(`Local media request failed: ${error instanceof Error?error.message:'response unavailable'}`,{status:503,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}});}
  })());
 });

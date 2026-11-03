@@ -1741,7 +1741,7 @@ struct DurableProcessingContext {
 
 struct JobHeartbeat {
     stop: Option<std::sync::mpsc::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<std::thread::JoinHandle<Result<()>>>,
 }
 
 impl JobHeartbeat {
@@ -1752,7 +1752,7 @@ impl JobHeartbeat {
         if let Some(thread) = self.thread.take() {
             thread
                 .join()
-                .map_err(|_| Error::Unavailable("job heartbeat worker panicked".into()))?;
+                .map_err(|_| Error::Unavailable("job heartbeat worker panicked".into()))??;
         }
         Ok(())
     }
@@ -1803,7 +1803,7 @@ fn processing_module_error(error: Error) -> ModuleError {
     match error {
         Error::Forbidden => ModuleError::AccessDenied,
         Error::NotFound => ModuleError::Invalid("package source is missing".into()),
-        error => ModuleError::FailedOperation(error.to_string()),
+        error => ModuleError::HostError(error),
     }
 }
 
@@ -5535,15 +5535,11 @@ impl CollectionService {
                     match heartbeat_stop.recv_timeout(std::time::Duration::from_secs(5)) {
                         Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            if heartbeat_jobs
-                                .renew_job_lease(heartbeat_id, &heartbeat_token, 30)
-                                .is_err()
-                            {
-                                break;
-                            }
+                            heartbeat_jobs.renew_job_lease(heartbeat_id, &heartbeat_token, 30)?;
                         }
                     }
                 }
+                Ok(())
             })
             .map_err(|error| Error::Unavailable(error.to_string()))?;
         let heartbeat = JobHeartbeat {
@@ -5554,14 +5550,11 @@ impl CollectionService {
             .request
             .get("import_id")
             .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.parse::<ImportId>().ok())
-            .filter(|id| {
-                self.provisional_imports
-                    .guided_ingest_intent(*id)
-                    .ok()
-                    .flatten()
-                    .is_some()
-            });
+            .and_then(|value| value.parse::<ImportId>().ok());
+        let guided_import_id = match guided_import_id {
+            Some(id) if self.provisional_imports.guided_ingest_intent(id)?.is_some() => Some(id),
+            _ => None,
+        };
         let result = match claim.kind.as_str() {
             "inbox_cleanup" => self.run_inbox_cleanup(&claim),
             "integrity_verification" => (|| {
@@ -5782,7 +5775,14 @@ impl CollectionService {
                 claim.kind
             ))),
         };
-        heartbeat.stop()?;
+        let heartbeat_result = heartbeat.stop();
+        // A lost lease/heartbeat after a successful effect must not mark that
+        // effect failed. Leave the claim recoverable; the runtime reports the
+        // heartbeat cause and a later claim resumes durable publication state.
+        // When execution failed too, retain its primary error.
+        if result.is_ok() {
+            heartbeat_result?;
+        }
         match result {
             Ok(result) => {
                 if claim.kind == "bulk_library"

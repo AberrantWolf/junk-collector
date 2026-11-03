@@ -324,13 +324,19 @@ impl CollectionService {
                         | MusicTrackAvailabilityState::Preparing
                 )
         }) {
-            let reason = selected_rows
+            let reasons = selected_rows
                 .filter_map(|row| match &row.state {
-                    MusicTrackAvailabilityState::Unavailable { reason } => Some(reason.clone()),
+                    MusicTrackAvailabilityState::Unavailable { reason } => {
+                        Some(format!("Track {}: {reason}", row.track_position))
+                    }
                     _ => None,
                 })
-                .next()
-                .unwrap_or_else(|| "The selected sources have no eligible FLAC tracks.".into());
+                .collect::<Vec<_>>();
+            let reason = if reasons.is_empty() {
+                "The selected sources have no eligible FLAC tracks.".into()
+            } else {
+                reasons.join("; ")
+            };
             return Err(Error::Unavailable(reason));
         }
         let active = item
@@ -581,7 +587,7 @@ impl CollectionService {
             .collect::<Vec<_>>();
         Ok((
             !pending,
-            (!failures.is_empty()).then(|| failures.join(" ").chars().take(512).collect()),
+            (!failures.is_empty()).then(|| format!("Preparation has {} failed or cancelled outcomes. Open track preparation results for each cause.", failures.len())),
         ))
     }
 

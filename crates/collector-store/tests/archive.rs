@@ -8606,13 +8606,9 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
     assert!(service.run_next_job("guided-publication").unwrap());
     let detail = service.ingest_detail(&actor, id).unwrap();
     assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
-    assert!(
-        detail
-            .steps
-            .iter()
-            .any(|step| step.step == "artwork"
-                && step.state == collector_app::IngestStepState::Failed)
-    );
+    assert!(detail.steps.iter().any(|step| step.step == "workflow"
+        && step.message.is_some()
+        && step.state == collector_app::IngestStepState::Failed));
     let presented = service.item_presented(&actor, target).unwrap();
     assert_eq!(presented.title, "My manual album title");
     assert_eq!(
@@ -8632,13 +8628,9 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
         )
         .unwrap();
     assert_eq!(retried.import.phase, ImportPhase::Published);
-    assert!(
-        retried
-            .steps
-            .iter()
-            .any(|step| step.step == "artwork"
-                && step.state == collector_app::IngestStepState::Failed)
-    );
+    assert!(retried.steps.iter().any(|step| step.step == "workflow"
+        && step.message.is_some()
+        && step.state == collector_app::IngestStepState::Failed));
     let capture_before = store.capture(detail.summary.capture_id).unwrap();
     let optional_job = JobId::new();
     store

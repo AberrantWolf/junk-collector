@@ -1,3 +1,16 @@
+## GitHub #9: error presentation review — source implementation, 2026-11-03
+
+The issue's 75 flagged boundaries have explicit correction/retention dispositions
+in [the audit and delivery record](validation/github-error-presentation-2026-11-03.md).
+Host callback/native API errors retain safe causes; storage/permission/capacity and
+upload-body failures avoid false diagnoses. Confirmed mutations remain distinct
+from failed refreshes, aggregates retain member results, and corrupted command
+receipts cannot silently start a fresh request. Authentication/resource privacy
+and unknown historical module data retain their protections. Workspace tests
+(633 passed, five existing ignores), strict Clippy, tooling/web checks and all 30
+browser journeys pass, with focused review follow-ups and inspected mobile notices.
+No production state or release has changed.
+
 ## GitHub #11: catalog contention during background work — 2026-11-03
 
 Typed catalog contention yields the claimed Job back to the server queue instead

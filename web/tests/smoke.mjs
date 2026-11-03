@@ -815,8 +815,10 @@ try{
  const checkedLabel=`1/${checkedAlbum.accuraterip.length} verified`;
  await cdCurator.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
- const checkShortcut=page.getByRole('button',{name:`AccurateRip for ${checkedAlbum.title}: ${checkedLabel}. Open audio checks`,exact:true});
- await checkShortcut.waitFor();await checkShortcut.click();
+ const escapedAlbumTitle=checkedAlbum.title.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ const checkShortcut=page.getByRole('button',{name:new RegExp(`^AccurateRip for ${escapedAlbumTitle}:.*Open audio checks$`)});
+ await checkShortcut.waitFor();await expect(checkShortcut).toContainText(checkedLabel);
+ const checkName=await checkShortcut.getAttribute('aria-label');assert.ok(checkName.includes('Verified')&&checkName.includes('Not checked'),'mixed per-original outcomes are missing from the accessible name');await checkShortcut.click();
  await expect(cdCurator).toBeVisible();
  await expect(cdCurator.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).first()).toBeVisible();
  await cdCurator.getByRole('button',{name:'Close curator'}).click();

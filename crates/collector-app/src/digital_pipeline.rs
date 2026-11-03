@@ -185,11 +185,16 @@ impl CollectionService {
         child: &JobRecord,
         collection: CollectionId,
     ) -> Result<SnapshotRecord> {
-        let value = child.result.as_ref().ok_or(Error::Conflict)?;
+        let value = child.result.as_ref().ok_or(Error::Storage(
+            "Completed provider child has an invalid snapshot result".into(),
+        ))?;
         let value = value.get("completion").unwrap_or(value);
-        let id: SnapshotId =
-            serde_json::from_value(value.get("snapshot_id").cloned().ok_or(Error::Conflict)?)
-                .map_err(|_| Error::Conflict)?;
+        let id: SnapshotId = serde_json::from_value(value.get("snapshot_id").cloned().ok_or(
+            Error::Storage("Completed provider child has an invalid snapshot result".into()),
+        )?)
+        .map_err(|_| {
+            Error::Storage("Completed provider child has an invalid snapshot result".into())
+        })?;
         self.processing.snapshot(SnapshotQuery {
             collection_id: collection,
             snapshot_id: id,
@@ -662,12 +667,12 @@ impl CollectionService {
 }
 fn pending_child(child: &JobRecord, waiting: &mut Vec<JobId>) -> Result<()> {
     match child.state {
-        JobState::Failed => Err(Error::Unavailable(
-            child
-                .error
-                .clone()
-                .unwrap_or_else(|| "Album identification failed".into()),
-        )),
+        JobState::Failed => Err(Error::Unavailable(format!(
+            "Album matching stopped at {} (Job {}): {}",
+            child.phase,
+            child.id,
+            child.error.as_deref().unwrap_or("child work failed")
+        ))),
         JobState::Cancelled | JobState::CancelRequested => Err(Error::JobCancelled),
         _ => {
             waiting.push(child.id);
@@ -751,12 +756,21 @@ fn rank_candidates(
     state: &Checkpoint,
     checkpoint: &mut dyn FnMut() -> Result<()>,
 ) -> Result<Vec<AlbumMatch>> {
-    let mut matches = junk_libs_music::matching::rank(
+    let mut checkpoint_error = None;
+    let ranked = junk_libs_music::matching::rank(
         &state.local.values().cloned().collect::<Vec<_>>(),
         &state.releases.values().cloned().collect::<Vec<_>>(),
-        &mut || checkpoint().map_err(|_| junk_libs_music::Error::Cancelled),
-    )
-    .map_err(|error| match error {
+        &mut || {
+            checkpoint().map_err(|error| {
+                checkpoint_error = Some(error);
+                junk_libs_music::Error::Cancelled
+            })
+        },
+    );
+    if let Some(error) = checkpoint_error {
+        return Err(error);
+    }
+    let mut matches = ranked.map_err(|error| match error {
         junk_libs_music::Error::Cancelled => Error::JobCancelled,
         other => Error::Unavailable(other.to_string()),
     })?;
@@ -847,6 +861,24 @@ mod tests {
                 .all(|r| serde_json::to_vec(r).unwrap().len() < 512 * 1024)
         );
 
+        let interrupted = Checkpoint {
+            releases: releases
+                .iter()
+                .cloned()
+                .map(|r| (r.id.clone(), r))
+                .collect(),
+            ..Default::default()
+        };
+        for original in [
+            Error::Storage("fixture checkpoint read failed".into()),
+            Error::CatalogBusy,
+            Error::Forbidden,
+        ] {
+            assert_eq!(
+                rank_candidates(&interrupted, &mut || Err(original.clone())).unwrap_err(),
+                original
+            );
+        }
         let raw_matches =
             junk_libs_music::matching::rank(&local, &releases, &mut || Ok(())).unwrap();
         let projected = bounded_digital_result(

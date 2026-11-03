@@ -354,11 +354,15 @@ impl CollectionService {
             return Err(Error::Invalid("List page size must be 1–100.".into()));
         }
         let start = if let Some(cursor) = query.cursor {
-            let (revision, offset) = cursor.split_once(':').ok_or(Error::Conflict)?;
+            let (revision, offset) = cursor
+                .split_once(':')
+                .ok_or_else(|| Error::Invalid("Malformed list page cursor".into()))?;
             if revision.parse::<u64>().ok() != Some(list.revision.0) {
                 return Err(Error::Conflict);
             }
-            offset.parse::<usize>().map_err(|_| Error::Conflict)?
+            offset
+                .parse::<usize>()
+                .map_err(|_| Error::Invalid("Malformed list page offset".into()))?
         } else {
             0
         };

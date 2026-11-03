@@ -146,6 +146,14 @@ impl Drop for ProcessLock {
     }
 }
 
+fn process_lock_error(error: std::io::Error, area: &str) -> Error {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Error::Unavailable(format!("{area} is already in use"))
+    } else {
+        Error::Storage(format!("could not acquire {area} process lock: {error}"))
+    }
+}
+
 #[cfg(test)]
 mod process_lock_tests {
     use super::*;
@@ -411,7 +419,7 @@ impl Store {
             .map_err(storage)?;
         private_lock
             .try_lock_exclusive()
-            .map_err(|_| Error::Unavailable("private state is already in use".into()))?;
+            .map_err(|error| process_lock_error(error, "private state"))?;
         let private_lock = ProcessLock(private_lock);
         archive_guard.check()?;
         let archive = archive_guard.path();
@@ -424,7 +432,7 @@ impl Store {
             .map_err(storage)?;
         archive_lock
             .try_lock_exclusive()
-            .map_err(|_| Error::Unavailable("archive already has a writer".into()))?;
+            .map_err(|error| process_lock_error(error, "archive"))?;
         let archive_lock = ProcessLock(archive_lock);
         for root in [&archive, &state] {
             ensure_restore_complete(root)?;

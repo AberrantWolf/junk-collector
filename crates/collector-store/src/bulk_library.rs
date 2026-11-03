@@ -198,7 +198,12 @@ impl BulkLibraryPort for Store {
             None
         };
         for member in &mut items {
-            if allowed(&db, user, member.item.collection_id).is_err() {
+            let denied = match allowed(&db, user, member.item.collection_id) {
+                Ok(()) => false,
+                Err(Error::Forbidden | Error::NotFound) => true,
+                Err(error) => return Err(error),
+            };
+            if denied {
                 member.view.title = "Access to this entry was revoked".into();
                 member.view.artwork_asset_id = None;
                 member.view.reason = Some(

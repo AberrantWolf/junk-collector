@@ -48,6 +48,7 @@ impl Authority {
                 401 => StatusCode::UNAUTHORIZED,
                 403 | 404 => StatusCode::FORBIDDEN,
                 429 => StatusCode::TOO_MANY_REQUESTS,
+                409 => StatusCode::CONFLICT,
                 _ => StatusCode::SERVICE_UNAVAILABLE,
             });
         }
@@ -100,16 +101,23 @@ impl FileHandle {
                 .file
                 .lock()
                 .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-            let metadata = file.metadata().map_err(|_| StatusCode::CONFLICT)?;
+            let metadata = file
+                .metadata()
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
             if metadata.len() != self.length || metadata.modified().ok() != Some(self.modified) {
                 self.invalid.store(true, Ordering::Release);
                 return Err(StatusCode::CONFLICT);
             }
             file.seek(SeekFrom::Start(position))
-                .map_err(|_| StatusCode::CONFLICT)?;
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
             let mut bytes = vec![0; count];
-            file.read_exact(&mut bytes)
-                .map_err(|_| StatusCode::CONFLICT)?;
+            file.read_exact(&mut bytes).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                }
+            })?;
             Ok(bytes)
         })
         .await
@@ -246,9 +254,14 @@ impl MediaState {
             options.read(true).custom_flags(libc::O_NONBLOCK);
             let file = root
                 .open_with(path, &options)
-                .map_err(|_| StatusCode::NOT_FOUND)?
+                .map_err(|error| match error.kind() {
+                    std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+                    _ => StatusCode::SERVICE_UNAVAILABLE,
+                })?
                 .into_std();
-            let meta = file.metadata().map_err(|_| StatusCode::CONFLICT)?;
+            let meta = file
+                .metadata()
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
             if !meta.is_file() || meta.len() != length {
                 return Err(StatusCode::CONFLICT);
             }
@@ -256,7 +269,9 @@ impl MediaState {
                 invalid: AtomicBool::new(false),
                 file: Mutex::new(file),
                 length,
-                modified: meta.modified().map_err(|_| StatusCode::CONFLICT)?,
+                modified: meta
+                    .modified()
+                    .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?,
             }))
         })
         .await
@@ -287,6 +302,12 @@ pub fn router(state: MediaState) -> Router {
         .with_state(state)
 }
 async fn limits(State(state): State<MediaState>, request: Request, next: Next) -> Response {
+    let origin = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .filter(|o| state.origins.iter().any(|x| x == o))
+        .map(str::to_owned);
     if request.uri().to_string().len() > 1024
         || request.headers().len() > 32
         || request.headers().iter().any(|(_, v)| v.len() > 4096)
@@ -297,10 +318,10 @@ async fn limits(State(state): State<MediaState>, request: Request, next: Next) -
             .get(header::CONTENT_LENGTH)
             .is_some_and(|v| v != "0")
     {
-        return StatusCode::BAD_REQUEST.into_response();
+        return media_error(StatusCode::BAD_REQUEST, origin.as_deref());
     }
     let Ok(_permit) = state.admissions.clone().try_acquire_owned() else {
-        return StatusCode::TOO_MANY_REQUESTS.into_response();
+        return media_error(StatusCode::TOO_MANY_REQUESTS, origin.as_deref());
     };
     match tokio::time::timeout(Duration::from_secs(30), next.run(request)).await {
         Ok(mut response) => {
@@ -312,9 +333,10 @@ async fn limits(State(state): State<MediaState>, request: Request, next: Next) -
                 header::X_CONTENT_TYPE_OPTIONS,
                 HeaderValue::from_static("nosniff"),
             );
+            cors(response.headers_mut(), origin.as_deref());
             response
         }
-        Err(_) => StatusCode::GATEWAY_TIMEOUT.into_response(),
+        Err(_) => media_error(StatusCode::GATEWAY_TIMEOUT, origin.as_deref()),
     }
 }
 async fn identity(State(state): State<MediaState>, headers: HeaderMap) -> Response {
@@ -434,7 +456,7 @@ async fn read(
         .map(str::to_owned);
     let mut response = match read_inner(state, method, headers, query).await {
         Ok(response) => response,
-        Err(status) => status.into_response(),
+        Err(status) => media_error(status, origin.as_deref()),
     };
     cors(response.headers_mut(), origin.as_deref());
     response
@@ -571,8 +593,13 @@ async fn read_inner(
                 if stream.position >= stream.end {
                     return Ok::<_, std::io::Error>(None);
                 }
-                if *stream.revoked.borrow() || Instant::now() > stream.deadline {
-                    return Err(std::io::Error::other("media deadline"));
+                if *stream.revoked.borrow() {
+                    return Err(std::io::Error::other(
+                        "media authorization could not be confirmed",
+                    ));
+                }
+                if Instant::now() > stream.deadline {
+                    return Err(std::io::Error::other("media read deadline expired"));
                 }
                 stream
                     .state
@@ -585,7 +612,11 @@ async fn read_inner(
                     file.clone()
                         .bytes(stream.position, count)
                         .await
-                        .map_err(|_| std::io::Error::other("media changed"))?
+                        .map_err(|_| {
+                            std::io::Error::other(
+                                "media read failed or no longer matches recorded metadata",
+                            )
+                        })?
                 } else {
                     let inline = stream
                         .ticket
@@ -722,6 +753,45 @@ fn read_only_mounts(archive: &Path, mountinfo: &str) -> anyhow::Result<()> {
         "archive filesystem is writable"
     );
     Ok(())
+}
+
+fn media_error(status: StatusCode, origin: Option<&str>) -> Response {
+    let (code, message) = match status {
+        StatusCode::TOO_MANY_REQUESTS => (
+            "media_capacity",
+            "Media capacity limit reached; retry shortly",
+        ),
+        StatusCode::SERVICE_UNAVAILABLE => (
+            "media_unavailable",
+            "Media storage or authorization service is unavailable; retry shortly",
+        ),
+        StatusCode::CONFLICT => (
+            "media_conflict",
+            "Media request conflicts with current state; reload the track and retry",
+        ),
+        StatusCode::UNAUTHORIZED => (
+            "unauthenticated",
+            "Media authorization expired; sign in again",
+        ),
+        StatusCode::FORBIDDEN => ("forbidden", "Media access is not authorized"),
+        StatusCode::NOT_FOUND => ("not_found", "Media is missing or unavailable"),
+        StatusCode::GATEWAY_TIMEOUT => ("media_timeout", "Media request timed out; retry shortly"),
+        _ => (
+            "media_request_failed",
+            "Media request could not be completed",
+        ),
+    };
+    let mut response = (
+        status,
+        axum::Json(serde_json::json!({"error":{"code":code,"message":message}})),
+    )
+        .into_response();
+    cors(response.headers_mut(), origin);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response
 }
 
 #[cfg(test)]
@@ -880,5 +950,49 @@ mod tests {
             )
             .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod error_response_tests {
+    use super::*;
+    use tower::ServiceExt;
+    #[tokio::test]
+    async fn early_capacity_failures_keep_cors_and_do_not_claim_authentication_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = "https://collector.example";
+        let state = MediaState::new(
+            root.path(),
+            &root.path().join("socket"),
+            "0".repeat(64),
+            vec![origin.into()],
+        )
+        .unwrap();
+        let _all = state
+            .admissions
+            .clone()
+            .acquire_many_owned(8)
+            .await
+            .unwrap();
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/read?capability=fixture")
+                    .header(header::ORIGIN, origin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            origin
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"]["code"], "media_capacity");
     }
 }

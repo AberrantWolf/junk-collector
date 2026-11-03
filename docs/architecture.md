@@ -1,3 +1,15 @@
+## Error boundary policy review — 2026-11-03
+
+Application services retain workflow/eligibility/summary policy; adapters diagnose
+OS, protocol and process mechanisms. Module host callbacks return the original
+core error after a shared algorithm interrupts, rather than inventing cancellation.
+Native HTTP decoding preserves API codes across shared statuses. Public messages
+retain authentication/resource/mail redaction. Confirmed mutation and subsequent
+refresh have separate outcomes; per-item ledgers remain authoritative over bounded
+headlines. The existing private advancement barrier is shown as workflow coordination,
+without changing stored data or attributing it to an arbitrary enrichment stage.
+See [the 75-boundary review](validation/github-error-presentation-2026-11-03.md).
+
 ## Incremental digital matching and independent review choices — source implementation, 2026-11-03
 
 Application-owned matching seeds from one available strong recording, fetches a

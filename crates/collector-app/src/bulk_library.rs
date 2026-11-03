@@ -193,7 +193,7 @@ impl CollectionService {
                 if item.revision!=selected_revision{return Err(Error::Conflict);}
                 let child=deterministic_job_id(actor.user_id,"library.bulk.member",&format!("{id}:{position}"));
                 let frozen=self.freeze_bulk_member(actor,&item,&command,child);
-                let (input,reason)=match frozen {Ok(input)=>(Some(input),None),Err(error)=>(None,Some(error.to_string()))};
+                let (input,reason)=match frozen {Ok(input)=>(Some(input),None),Err(error @ (Error::Storage(_) | Error::CatalogBusy))=>return Err(error),Err(error)=>(None,Some(error.to_string()))};
                 let (tracks,ready)=if let Some(FrozenJobInput::DerivativeBatch(batch))=&input {(batch.members.len() as u16,batch.members.iter().filter(|m|matches!(m,FrozenPreparationMember::AlreadyAvailable{..})).count() as u16)}else{(0,0)};
                 summary.tracks+=u32::from(tracks);summary.already_ready+=u32::from(ready);
                 if input.is_none(){summary.excluded+=1;}else{summary.pending+=1;}
@@ -567,7 +567,7 @@ impl CollectionService {
                                                 .and_then(|r| r.as_str())
                                                 .map(str::to_string);
                                             if partial.is_some() {
-                                                Some((BulkMemberState::Failed, partial))
+                                                Some((BulkMemberState::Failed, partial.map(|error| format!("Metadata lookup completed; artwork failed: {error}"))))
                                             } else {
                                                 let review = self
                                                     .metadata_review(&actor, member.view.item_id)?;

@@ -1114,16 +1114,21 @@ impl CollectionService {
         item: &Item,
     ) -> Result<Vec<collector_modules::music::MusicDiscAssignment>> {
         let authority = self.authority_or_inventory(item)?.authority;
-        Ok(authority
+        authority
             .domain_overrides
-            .and_then(|value| {
+            .filter(|data| {
+                data.module == item.domain.module
+                    && data.schema_version == 1
+                    && item.domain.schema_version == 1
+            })
+            .map(|value| {
                 value
                     .payload
                     .parse::<collector_modules::music::MusicMetadataOverrides>()
-                    .ok()
+                    .map(|value| value.disc_assignments)
             })
-            .map(|value| value.disc_assignments)
-            .unwrap_or_default())
+            .transpose()
+            .map(|value| value.unwrap_or_default())
     }
 
     pub fn metadata_review(

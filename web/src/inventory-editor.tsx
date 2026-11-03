@@ -1,4 +1,4 @@
-import React,{useState,api,isApiRequestError} from '@collector/runtime';
+import React,{useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Item=components['schemas']['PresentedItem'];
@@ -47,8 +47,8 @@ export default function InventoryEditor({item,busy,setBusy,onSaved,onError}:Prop
   setBusy(true);
   try{const saved=await api<Item>(path,init);setConflict(undefined);onSaved(saved);return true;}
   catch(error){
-   if(isApiRequestError(error)&&error.status===409){
-    try{setConflict(await api<Item>(`/items/${item.id}`));}catch(refreshError){onError(refreshError);}
+   if(isApiRequestError(error)&&error.code==='revision_conflict'){
+    try{setConflict(await api<Item>(`/items/${item.id}`));}catch(refreshError){onError(new Error(`${requestErrorMessage(error)} Refresh also failed: ${requestErrorMessage(refreshError)}`));}
    }else onError(error);
    return false;
   }finally{setBusy(false);}
