@@ -157,7 +157,7 @@ try{
 
  await expect.poll(async()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title,item),{timeout:60000}).toBe('Matched album');
  // A visible preview must become saved, effective artwork in the same adoption workflow.
- await expect.poll(async()=>page.evaluate(async id=>{const m=await(await fetch(`/api/v1/items/${id}/metadata`)).json();return m.display.artwork;},item),{timeout:60000}).not.toBeNull();
+ await expect.poll(async()=>(await metadataReview(item)).display.artwork,{timeout:60000}).not.toBeNull();
  const adopted=await metadataReview(item);
  assert.equal(adopted.authority.selected_candidate.provider_record_id,release);
  assert.equal(adopted.authority.artwork_choice,null,'provider artwork must remain automatic');
@@ -197,8 +197,8 @@ try{
  const completedArt=await page.evaluate(async({item,job})=>(await(await fetch(`/api/v1/items/${item}/metadata/resolutions`)).json()).find(value=>value.job.id===job),{item,job:pendingArt.job.id});
  await expect(page.locator('.artwork-options img')).toHaveAttribute('src',new RegExp(completedArt.result.artwork_options[0].snapshot_id));
  await page.locator('.artwork-options').getByRole('button',{name:'Front cover',exact:false}).click();
- await expect.poll(async()=>page.evaluate(async item=>{const review=await(await fetch(`/api/v1/items/${item}/metadata`)).json();return review.authority.artwork_choice;},item),{timeout:60000}).not.toBeNull();
- const artOnly=await page.evaluate(async item=>await(await fetch(`/api/v1/items/${item}/metadata`)).json(),item);
+ await expect.poll(async()=>(await metadataReview(item)).authority.artwork_choice,{timeout:60000}).not.toBeNull();
+ const artOnly=await metadataReview(item);
  assert.deepEqual(artOnly.authority.selected_candidate,sourceAfter.authority.selected_candidate);
  assert.deepEqual(artOnly.authority.domain_overrides,sourceAfter.authority.domain_overrides);
  assert.equal(artOnly.display.title.value,sourceAfter.display.title.value);

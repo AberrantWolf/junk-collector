@@ -39,3 +39,15 @@ background work. Configured providers must still acquire and settle a metadata
 Job. Originals, explicit FLAC preparation and range playback remain required.
 This failed attempt is not publication or deployment evidence; a new exact-source
 qualification is required.
+
+The second attempt, [41600690208](https://github.com/AberrantWolf/junk-collector/actions/runs/41600690208)
+at `87eb68b`, passed the repaired metadata gate on both architectures, then found
+a second obsolete cleanup error-text assertion. The real read-only mount refused
+cleanup with a `ReadOnlyFilesystem` diagnostic and zero removed bytes. The drill
+now requires a diagnostic without freezing its wording; source-byte preservation,
+archive downloads and subsequent read/write cleanup remain required.
+Earlier source Checks [41598695106](https://github.com/AberrantWolf/junk-collector/actions/runs/41598695106)
+also found a browser-test polling race: a temporary typed catalog-busy response
+was dereferenced as metadata. Saved-artwork polling now uses the existing
+status-aware metadata reader, which retries only that bounded contention and
+rejects other HTTP errors. Saved cover selection/download checks remain intact.

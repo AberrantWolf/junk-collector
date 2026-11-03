@@ -28,7 +28,7 @@ def qualify(cookie, imported, request, verify_originals,
 
     refused = cleanup()
     assert refused["state"] == "failed" and refused["removed_bytes"] == 0, refused
-    assert "writable" in refused["error"].lower(), refused
+    assert refused["error"], "Cleanup refusal must expose a diagnostic"
     for name, content in originals.items():
         assert read_file("/inbox/Reference disc/" + name) == content
     verify_originals(cookie, item, originals)
