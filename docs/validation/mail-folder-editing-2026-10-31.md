@@ -1,7 +1,9 @@
 # Connected Bridge folder editing — 2026-10-31
 
-Deployment follow-up: reviewed source `0bec4af` is installed on Fi with the existing
-Bridge profile and paused connection preserved; see [deployment evidence](fi-inbox-recovery-deployment-2026-10-31.md).
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+Deployment follow-up: reviewed source `0bec4af` is installed on application-host with the existing
+Bridge profile and paused connection preserved; see [deployment evidence](inbox-recovery-deployment-2026-10-31.md).
 The predeployment record below retains its original qualification scope.
 
 User-requested source delivery in the working tree based on `56b6618`.

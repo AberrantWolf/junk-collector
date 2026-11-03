@@ -1,10 +1,12 @@
 # Public app origin → pinned LAN WebTransport — 2026-10-22
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 **Bounded Chrome public-origin qualification passed:** permission deny/allow,
 trust/authorization controls, operator-confirmed playback and forward/backward
 scrubbing, and the CSP-denial control. This extends the successful
 [work-Mac LAN player trial](webtransport-lan-2026-10-22.md) to the actual origin
-`https://collector.awkwardexplorer.com`, with the page/control requests arriving
+`https://collector.example.com`, with the page/control requests arriving
 through Cloudflare and media remaining on the NAS LAN WebTransport listener.
 Automatic discovery and production endpoint enrollment are still unimplemented.
 No Tailscale interaction or VPN change was made.
@@ -14,7 +16,7 @@ No Tailscale interaction or VPN change was made.
 The operator explicitly approved the prepared Cloudflare route:
 
 ```text
-hostname: collector.awkwardexplorer.com
+hostname: collector.example.com
 path: ^/__collector_lan_test_20261022(/.*)?$
 service: http://127.0.0.1:19980
 priority: before the existing catch-all → http://127.0.0.1:9841
@@ -37,7 +39,7 @@ the test document's controlling worker adapts to bounded WebTransport reads.
 The same-origin fixture can run trusted JavaScript; this path is an experiment
 deployment, not an extension of the production account/enrollment contract.
 
-The test page's CSP permits only self plus `https://192.168.1.106:19979` for
+The test page's CSP permits only self plus `https://192.168.1.20:19979` for
 connections. Production retains `connect-src 'self'`: the current production app
 cannot silently acquire LAN WebTransport by changing its URL. A test-only
 `?block-wt=1` variant retains that stricter connection policy as a negative control;
@@ -53,7 +55,7 @@ trust delivery for the synthetic server, not production server pairing.
 
 ## Network classification and permissions
 
-Home split DNS resolves the public hostname to `192.168.1.106`. Loading that path
+Home split DNS resolves the public hostname to `192.168.1.20`. Loading that path
 directly from the NAS would not exercise a public-to-private network transition;
 the existing NAS proxy correctly returns 404 for the new Cloudflare-only path.
 Normal TLS curl with the hostname explicitly resolved to the publicly obtained
@@ -125,9 +127,9 @@ Save diagnostics, instead of replacing the entire summary with “saved”.
 The final saved negative control records, at 10:44:17 UTC:
 
 ```text
-WebTransportError: Refused to connect to 'https://192.168.1.106:19979/media'
+WebTransportError: Refused to connect to 'https://192.168.1.20:19979/media'
 because it violates the document's Content Security Policy
-CSP blocked connect-src: https://192.168.1.106:19979/media
+CSP blocked connect-src: https://192.168.1.20:19979/media
 ```
 
 Its Local network permission remains `granted`, secure context and Cloudflare

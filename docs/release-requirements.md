@@ -69,7 +69,7 @@ legacy adoption remain conditional; full operational backup/restore is separate.
 
 ## Digital purchases — requested 2026-10-19
 
-[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+[HL-02](remaining-work.md)
 owns complete DRM-free FLAC/MP3 purchase support: preserve exact originals,
 record digital acquisition without a physical copy, review tags/artwork and use
 normal library/search, playback, playlists and Trash Amp online/offline listening.

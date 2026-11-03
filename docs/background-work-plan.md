@@ -1,12 +1,8 @@
 # Album preparation and nonblocking background work
 
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
+> Delivery/reference record. Contract and acceptance details remain useful; checkpoint
+> ordering and old gap statements are historical. Use [current status](implementation-status.md)
+> and the sole [open-work queue](remaining-work.md).
 
 **FX-03 update (2026-09-21):** Work & history, scoped server filtering/pagination,
 workflow/attempt grouping, dismissal/restoration, selected cleanup with durable

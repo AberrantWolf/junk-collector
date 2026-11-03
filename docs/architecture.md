@@ -1,267 +1,220 @@
-## Error boundary policy review — 2026-11-03
-
-Application services retain workflow/eligibility/summary policy; adapters diagnose
-OS, protocol and process mechanisms. Module host callbacks return the original
-core error after a shared algorithm interrupts, rather than inventing cancellation.
-Native HTTP decoding preserves API codes across shared statuses. Public messages
-retain authentication/resource/mail redaction. Confirmed mutation and subsequent
-refresh have separate outcomes; per-item ledgers remain authoritative over bounded
-headlines. The existing private advancement barrier is shown as workflow coordination,
-without changing stored data or attributing it to an arbitrary enrichment stage.
-See [the 75-boundary review](validation/github-error-presentation-2026-11-03.md).
-
-## Incremental digital matching and independent review choices — source implementation, 2026-11-03
-
-Application-owned matching seeds from one available strong recording, fetches a
-promising release immediately and compares against all recognized files. Partial
-candidates direct discovery toward unexplained tracks; a complete unambiguous
-one-to-one match with scores at least 0.95 and known duration differences within
-two seconds stops further recording-membership searches. Release-group browse then
-finds alternate editions, whose track lists are compared independently. Candidate
-readiness precedes optional editions/artwork. Initial/expanded detail budgets remain
-eight/32, with 32 recording searches and four edition pages maximum. These are
-bounded identity suggestions, never catalog verification or exhaustive searches.
-Ranking reuses unchanged inputs within one worker invocation; every resumed claim
-ranks canonical checkpoint inputs independently of the bounded UI projection, with
-complete matches retained first. A pending track lookup permits the initial seed,
-then further membership searches wait until all recognition can assess it. Optional
-edition download refusals preserve the complete match and stop edition expansion.
-Shared algorithms use bounded cancellation polling; full authority/source/claim
-validation remains at execution/checkpoint boundaries. Repeated file sources
-resolve their recorded identity once per guard.
-
-Checkpoint and claimed frozen-input JSON decoding release the catalog mutex
-before parsing; frozen claim decoding also releases the dispatcher. Idle worker
-polls perform no global workflow reconciliation and reserve no SQLite writer when
-no work is eligible, including when worker slots are occupied. Cached completed downloads admit their owners as runnable
-inside the admission transaction. Workers reconcile game/provider
-continuations after state changes; cancellation releases provider ownership in its
-existing transaction. One server recovery loop reconciles interrupted workflows
-every five seconds. Artwork history exposes the frozen operation type in admission
-order; reopened panels recover the current listing, including pending/empty results,
-and fence superseded continuations. Choices remain bound to their listing Job.
-
-Metadata review supports a free-text Digital source (such as Steam) independent
-of release identity, and artwork-only listing/selection from a candidate or an
-explicit MusicBrainz release ID. Existing revision-fenced authority and provider
-publication own both effects. Source-only edits preserve other overrides; artwork
-selection preserves album identity, text and tracks. Refresh/adoption preserve manual
-source/artwork choices. Application eligibility limits new/changed sources to
-digital-only file albums; historical values remain readable/clearable. Mapping review
-uses a table and shows declared/received counts plus unmatched release tracks.
-No preserved originals, purchase facts or existing provider observations are rewritten.
-See [delivery and validation](validation/digital-matching-and-review-2026-11-03.md).
-
-## Responsive metadata and digital matching — implementation, 2026-11-02
-
-Metadata lists consume compact, revision-fenced Library projections. Application
-services own a durable per-file matching pipeline, independent of panel lifetime.
-Per-track Jobs share the existing processing budget; provider Jobs may overlap
-across services while each adapter retains its own rate and refusal controls.
-Fresh fingerprints consume digest-validated bounded adapter scratch, with one
-original-file pass and shared-library prefix decoding. Completed per-file results
-are cached by byte identity and computation coordinates. Admission and polling
-never read originals. Stage checkpoints, child ownership and publication remain
-claim/revision fenced. Candidate readiness is independent of optional artwork.
-
-Interactive catalog lock contention is a typed `CatalogBusy` outcome (`503` /
-`catalog_busy` at HTTP). The shared web request adapter retries GET/HEAD up to
-three times with short bounded delays, retaining the submitted account and abort
-signal. A revision changing during a read is the same transient outcome; submitted
-command revisions and stale pagination scopes retain their conflict semantics.
-Exhausted contention and other failures remain visible. This retry policy
-does not resubmit mutation commands.
-
-## Declared WAV segment and trailing originals — 2026-11-02
-
-The shared `junk-libs-pcm` reader owns a bounded interpretation of one complete
-RIFF/WAVE segment. The declared RIFF end must be within the actual file; every
-chunk, required pad and PCM frame must fit inside that segment. Bytes after it
-are counted without reading, parsing or interpreting them as audio or metadata.
-All existing format, size, chunk-count and cancellation checks remain in force.
-Fingerprinting, preparation and independent FLAC sample comparison share this
-reader and therefore the same declared PCM boundary.
-
-The Music module records `wav_trailing_bytes` on each affected file track and
-emits an analysis warning. Absent/zero means no recorded suffix warning, including
-older retained manifests. Application import/retained-analysis publication carries
-the warning through existing Import and processing summaries. Existing curator
-review/history displays it; listener reads do not open originals or recompute it.
-Whole-file source fingerprints and preserved/downloadable originals still cover
-all bytes. This is usable declared audio with an uninterpreted suffix, not a
-claim that the entire original is structurally clean or catalog verified.
-No originals are rewritten, existing observations converted, or failed Jobs
-retried automatically. See [investigation and validation](validation/wav-trailing-bytes-2026-11-02.md).
-
-## Grouped import copy setup — 2026-11-02
-
-Application guided intake establishes all physical copies in the accepted destination
-manifest before a child freezes its Item revision. The store supplies bounded pages
-of the same reviewed destination, including children not yet admitted. Digital-only
-packages do not create specimens. Later staging order cannot introduce a sibling
-copy revision after the first freeze; manual edits still conflict at publication.
-Originals and independent evidence revision checks retain their existing policy.
-
-## Layered library refresh and playback reads — source implementation, 2026-11-02
-
-[The layered contract](layered-library-refresh.md) uses one compact Library query
-for web and native album pages, independently queried counts, stateless revision-bound
-cursors and bounded JSON. Tracks have a separate role/language/policy/source-fenced
-projection and lightweight header. Background publication drives cache invalidation;
-HTTP reads never start scans or read/hash original audio. Live import overlays are
-batched and row authorization is checked per collection, with a final revision fence.
-Collector stores no client refresh session, progress counter or cache inventory.
-
-Web and Trash Amp own progressive results, progress, cache comparison, cancellation
-and retries. Trash Amp's separate worktree loads tracks on album open, searches
-recorded songs online without enumerating every album, and fetches artwork/list
-contents independently. Its per-album cache merges with an in-flight title refresh
-at the client commit boundary. Current source/selection guards reject late callbacks.
-
-Core HTTP, private playback, the direct media service and Trash Amp offline playback
-consume requested bytes without whole-file verification. Open/seek/length failures
-and premature EOF remain real request/read failures. Published digests describe
-recorded identity, not a fresh integrity attestation. Import/preparation, explicit
-integrity checks and download-completion validation retain their separate policies.
-[Delivery and qualification](validation/layered-library-refresh-2026-11-02.md) records
-source limits and the unmerged native worktree; no deployment is included.
-
-## Digital format-folder discovery — 2026-11-01
-
-Music module intake policy owns logical-path grouping in `music/discovery.rs`.
-It consumes names only, before upload; it does not inspect or hash audio. Exact
-case-insensitive FLAC/MP3/WAV wrapper names and numbered Disc/CD folders collapse
-to an album root in either order. Encoding remains a separate group key; named
-soundtrack sections and independently anchored raw-disc packages stay separate.
-The existing application plan, durable bulk discovery, review, visibility defaults
-and publication pipeline consume the unchanged disjoint package contract.
-
-Companions attach to the deepest discovered album root and, where applicable,
-their enclosing format branch. Common parent companions are assigned once in
-stable encoding order (unwrapped tracks first, then FLAC, MP3, WAV), independent
-of input enumeration. This preserves original paths without duplicating file
-ownership or merging alternate encodings. No archived records are regrouped.
-See [delivery and limits](validation/format-folder-discovery-2026-11-01.md).
-
-## Inbox connector recovery and review corrections — 2026-10-31
-
-Application mail services own review authorization, typed intake health, older-source
-linking, explicit restore/reopen, and credential revalidation policy. The provider
-owns bounded MIME construction/read-only IMAP, source locators and credential probes.
-Malformed candidate content becomes an unparsed suggestion; transport/incomplete
-responses do not advance the cursor. No raw email is retained. Private source
-coordinates can refresh without replacing receipt facts; per-folder progress is an
-observed Bridge high-water snapshot, not proof of an exhaustive mailbox search.
-
-Provider configuration guards serialize admitted batches/errors with credential
-replacement. A probed active profile is atomically replaced; runtime fencing advances
-immediately post-rename. Secret-free prepared/activated receipts prove which request
-applied, settle an earlier active repair before replacement, reject stale ownership,
-and recover uncertain responses. Operator overrides retain their profile IDs.
-
-Store owns transactional review generations, cursor/progress/error state and the
-existing archive journal. Explicit accepted-purchase reopening removes one current
-order row, returns all linked sources to review and retains earlier archive revisions.
-Private generations reserve new review ownership before publication; interrupted
-attempts may require refresh but cannot revive old forms. All review mutations bind
-the submitted revision; accepted corrections additionally fence the Item revision.
-No inventory, manual metadata or files are removed. The frontend presents explicit
-user decisions and calls application commands rather than composing a second pipeline.
-
-Full selected checks and 30 browser journeys pass. Independent clean-context review
-and its verified corrections have no remaining actionable findings; see
-[delivery evidence](validation/inbox-recovery-2026-10-31.md). Signed source `0bec4af` is now installed
-on Fi; [deployment evidence](validation/fi-inbox-recovery-deployment-2026-10-31.md) records retained state.
-
-## Connected Bridge folder editing — 2026-10-31
-
-The requested delivery adds owner-scoped folder editing to Purchase inbox through
-`mail.configure`, retaining the connection's selected collection, enabled state
-and existing history. Optional folder overrides live in private SQLite beside the
-connection revision, never in collection records or immutable credential files.
-Absent overrides retain provisioned folders, including existing installations.
-Application policy validates 1–16 bounded exact folder names and requires collection
-write eligibility for edits. The provider receives the frozen folder override with
-each read-only batch; the existing transactional revision/cursor fence rejects
-pre-edit batches and failures. New folders begin at UID 1; retained folder cursors
-and accepted/dismissed suggestions survive changes. Removing a folder stops future
-reads without deleting suggestions or its saved cursor. Folder access errors remain
-visible on the next enabled scan; save itself does not claim an IMAP access probe.
-
-The owner can edit before enabling and while enabled or paused. Browser drafts
-freeze revision/enablement, survive status polling, support cancel and use an
-input-bound retry receipt. Stale saves require reopening the editor. Read DTOs expose
-folder names only to the profile owner and never return local credentials. Existing
-curation listener composition protects the command and backing reads. Acceptance
-covers save/reload/restart, cancelled drafts, mobile layout, owner denial, stale
-saves, replay, retained history and late batch refusal. Workspace tests, strict
-Clippy and all 30 browser journeys pass; see the [delivery evidence](validation/mail-folder-editing-2026-10-31.md).
-This source change has not been deployed.
-
-## Bridge setup and sync status — 2026-10-31
-
-Application mail services own administrator-only Bridge setup/status authorization
-and user ownership. A narrow provider setup port accepts local IMAP credentials,
-validates pinned TLS/read-only folder access and atomically publishes a private
-profile with its input-bound command receipt. Credentials never enter collection
-records, logs or read DTOs. Existing operator profiles remain supported without
-conversion; managed profiles live under private state and reload after restart.
-
-The Bridge container owns its official CLI process and reduces the pinned 3.18.0
-sync events to a bounded atomic status snapshot. It exports the local public
-certificate fingerprint through that snapshot; account names, message identifiers,
-passwords, raw logs and exported private keys never cross the status boundary.
-Collector reads only the status snapshot, with freshness and typed unavailable
-states. An absent/old/partial event cannot imply sync completion. Bridge's full
-mailbox sync and Collector's receipt-history cursor remain distinct workflows.
-The web setup card is visible before any profile exists; credentials are submitted
-only through authenticated management composition. Polling aborts on detach or
-account changes. Terminal status uses the same sanitized snapshot without stopping
-Bridge. Acceptance includes real UI setup, refresh/reopen, denied access, stale
-status, failed TLS/login, input-bound retries and reporter shutdown/restart.
-
-## Email account-disable review correction — 2026-10-31
-
-Mail sync now rechecks its owner's enabled state after fetching. Batch admission
-also loads that state and evaluates application security policy inside the same
-immediate SQLite transaction that writes suggestions and the cursor. A disabled
-owner's in-flight batch is discarded; re-enabling resumes from the retained
-cursor. The deterministic regression covers both the blocking-fetch race and
-independent commit refusal. See the [review follow-up](validation/email-purchases-2026-10-30.md#account-disable-review-follow-up--2026-10-31).
-
-## Email purchase intake — branch implementation, 2026-10-30
-
-The requested branch `codex/email-purchases` adds optional user-owned Proton
-Bridge intake, transport-independent retailer receipt parsers and an explicit
-purchase review inbox. Application policy owns review/authorization; provider
-adapters own bounded read-only IMAP/MIME work; Store owns private connection,
-source-key/cursor persistence and portable accepted Item order records. No mail
-credentials or raw messages enter the archive, API or browser. Existing metadata,
-physical inventory and archived files retain their meaning. Gmail and dynamic
-provider installation are not implemented. See [behavior and boundaries](email-purchases.md)
-and [setup/qualification limits](../deploy/proton-bridge/README.md).
-
-This is a separate, unpublished branch. Actual account authentication and NAS
-container restart/IMAP qualification remain local setup steps; no production
-update or migration is included. Source and browser checks pass; validation results are recorded in the
-[branch delivery record](validation/email-purchases-2026-10-30.md).
-
-# Remote archive guard — 2026-10-30
-
-The store adapter owns archive identity, local-state binding and filesystem checks.
-Normal executable startup opens an enrolled installation only; setup initializes
-fresh storage explicitly with an identity-bound durable bootstrap intent, and stopped-server enrollment adopts existing archives.
-Every catalog/writer lock checks the bound archive before exposing or changing
-state. Availability failures latch the process closed until restart. Linux store
-paths are anchored to an open directory descriptor, so replacing/unmounting the
-configured pathname cannot redirect writes into its underlying directory.
-Remote mode requires the configured NFS source and rejects remote private state.
-The isolated media service retains its directory capability and read-only mount.
-One operational writer is enforced by deployment fencing; filesystem locks are
-additional same-host protection, not a distributed leader-election protocol.
-See [split deployment and recovery](../deploy/container/remote-archive.md).
-
 # Architecture
+
+Current reference, reviewed against source `7f4a56c` on 2026-11-03.
+[Documentation authority](index.md) separates current contracts from dated evidence.
+[Implementation status](implementation-status.md) records availability; [remaining work](remaining-work.md)
+is the only open-work queue. Earlier checkpoint narratives are retained in the
+[earlier architecture in Git](https://github.com/AberrantWolf/junk-collector/blob/7f4a56c8d6b38724a371549d09b978bbcb8e5cb1/docs/architecture.md).
+
+## Layers and ownership
+
+| Owner | Responsibility | Boundary |
+| --- | --- | --- |
+| `collector-core` | Typed identities, portable records and errors | No HTTP, filesystem, database, GUI or device dependencies |
+| `collector-api-types` | Shared serializable read DTOs | Core and serialization/schema dependencies; no services |
+| `collector-modules` | Game/music schemas, interpretation, eligibility and result validation | Authorized opaque readers; no provider requests or scheduler |
+| `collector-app` | Use cases, authorization, metadata authority and workflow policy | Mechanism ports; frontends call these services |
+| `collector-store` | Archive publication, SQLite projections/private state and recovery | Implements ports; commits validated effects transactionally |
+| `collector-providers` | Bounded HTTP, catalogs, mail and encoder processes | Application ports and module DTOs; no Store or GUI dependency |
+| `collector-server` | Listener/router composition, HTTP, workers and embedded web assets | Blocking storage/CPU work stays outside async workers |
+| `collector-media` | Isolated audio delivery over local authority sockets | Read-only archive; no application/store/provider dependency |
+| `collector-client` | Enrolled transport, endpoint trust and offline cache | No server storage dependency |
+| `collector-cd-identity` | Standalone capture-naming identity utility | Descriptive identity; no verification claim |
+| Narrow `junk-libs` crates | Parsing, decoding, normalization and audio algorithms | No imported application orchestration |
+
+`junk-libs-pcm` is currently a local workspace crate. Other shared dependencies
+use exact Git revisions in `Cargo.toml` and `Cargo.lock`; sibling checkouts are not
+required to build. Shared extractions require checking affected independent consumers.
+The architecture checker enforces permitted dependency directions and rejects direct
+HTTP access to Store. It does not prove every behavioral boundary.
+
+## Collection authority and preservation
+
+Collections own inventory and module bindings. Work, edition, item, specimen,
+component, carrier, capture, representation, file, asset and evidence identities
+are distinct. A capture can remain unattached. Inventory ownership, possession,
+wishlist state and catalog identity are independent; digital files do not invent
+physical specimens. Guided physical imports may establish explicitly reviewed copies.
+
+Manual metadata/artwork authority survives provider refresh. Candidates and recorded
+observations are descriptive until accepted under their owning policy. Unknown module
+fields and unsupported historical schemas remain readable under authorization and
+round-trip without loss; write eligibility is a separate decision. Missing modules
+must not hide independently authorized historical evidence or media.
+
+Preserve exact originals, meaningful inventory/evidence and sources supporting
+accepted metadata/artwork. Repeated equivalent lookups need not create permanent
+duplicate payloads. Existing history may only be compacted under explicit reference,
+replay and recovery rules. See [retention policy](retention-audit.md) and
+[the stopped-server conversion](snapshot-duplicate-conversion.md).
+
+Integrity hashing, structural inspection, MusicBrainz identity, AccurateRip and
+game catalog matches are distinct claims. Evidence records actual source/reference
+bytes, algorithm/version, coordinates and coverage. Partial or ambiguous work cannot
+establish complete-disc/package verification. Snapshot bytes must agree with their
+recorded length/digest before new results are attributed to them.
+
+## Storage, commands and recovery
+
+The archive contains portable manifests, immutable revisions, originals, Assets,
+processing records and evidence. SQLite catalog data is derived; accounts, grants,
+credentials, durable Jobs, receipts and pending uploads are private operational state.
+SQLite stays local even when the complete archive uses supported remote storage.
+Current schema constants live in `collector-store`, not in a prose migration inventory.
+
+One archive writer owns staging, journals, publication and projection recovery.
+Immutable revision rename is the archive commit point. Recovery settles committed
+work before new writes; reindex rebuilds projections rather than replacing transaction
+recovery. Unknown staging is retained. Archive identity/local-state binding and remote
+mount guards fail closed. Cross-host single-writer fencing remains an operator duty.
+
+Commands bind idempotency receipts to submitted inputs before resolving mutable
+configuration. Expected revisions reject stale edits. Job claims, generations,
+source identities, authorization and cancellation fence publication. Shared child work
+has durable requester references; last-owner cancellation and parent-fenced admission
+are transactional. Upstream outcomes commit before downstream advancement. Periodic
+recovery visits all unfinished workflow pages, including after restart.
+
+Processing defaults to four workers (range 1–8), with a separate inbox copy cap.
+Provider acquisition permits four concurrent Jobs overall and at most one active Job
+per provider. Waiting workflows release processing capacity. Application policy owns
+fairness; the Store enforces budgets during claim admission. See [configuration](configuration.md).
+
+Full recovery preserves archive, private state and configuration together. Portable
+export deliberately excludes operational identity and grants; fresh setup and explicit
+Owner recovery are required. Never start two restored copies of one identity.
+See [server operations](server-operations.md) and [container recovery](../deploy/container/recovery.md).
+
+## Reads, media and user interfaces
+
+Library reads use compact, revision-bound projections with independent counts,
+byte-bounded pages and lazy track headers/pages. Queries, admission and polling do
+not read/hash full original payloads or start providers/encoders. Clients own refresh
+progress, cancellation and caches; the server owns shared projections and authorization.
+Typed `catalog_busy` reads have bounded client retries; mutations are not resubmitted
+by that read policy. See [layered reads](layered-library-refresh.md).
+
+Playback consumes requested bytes without a whole-file verification preflight.
+Open/seek/length/EOF errors remain visible. Recorded digests are identities, not fresh
+integrity attestations. Background source validation, explicit integrity checks and
+completed-download validation retain their own rules. See [private playback](automatic-private-playback.md)
+and [direct HTTPS media](../deploy/container/media.md).
+
+Public/private authority comes from listener/router composition, never source IP,
+DNS or forwarded headers. Both pages and backing APIs honor exposure settings.
+Exposure grants no collection role; server administration grants no implicit collection
+access. Trust precedes credentials; browser certificate trust is separate from native
+enrollment. See [security](decisions/security.md) and [configuration](configuration.md).
+
+Web and native clients present application-owned workflows. UI lifetimes do not own
+durable Jobs. Input-bound completion receipts survive reopen; obsolete asynchronous
+continuations cannot publish into a replacement view. Detached media elements release
+playback immediately. Artwork belongs beside text in browsing, search and offline views.
+See [player metadata/artwork reads](album-metadata-consumers.md).
+
+## Subsystem references
+
+- [Games and supported catalog interpretations](game-identification.md)
+- [Digital audio, matching and metadata review](digital-purchases.md)
+- [Audio support and qualification](audio-preparation.md)
+- [Game-disc audio](game-disc-audio.md)
+- [Email intake and review](email-purchases.md)
+- [Optional source cleanup](inbox-cleanup.md)
+- [Scope and preservation decisions](decisions/home-lab-scope.md)
+- [Pre-release evolution](decisions/pre-release-evolution.md)
+
+Detailed review cases remain in the dated ledgers as evidence. Historical pseudocode,
+reserved schemas and old assignments are not additional implementation requirements.
+
+## Current publication and workflow constraints
+
+### Matching, metadata review and contention
+
+The matching pipeline is application-owned and durable per file. Track Jobs share
+processing capacity; separate provider acquisitions may overlap under their budgets.
+Fresh fingerprints stage and validate one selected original once, then decode at
+most 120 seconds. Cache identity includes source bytes and computation coordinates;
+admission and polling do not reopen originals. Candidate readiness precedes optional
+artwork. Resumed claims rank canonical frozen inputs independently of bounded UI
+projections, retaining complete matches first. Pending recognition may seed discovery
+but must assess a candidate before further membership searches continue.
+
+A complete unambiguous one-to-one mapping with scores at least 0.95 and known duration
+differences within two seconds stops membership searches. Alternate editions are
+compared independently; provider refusal stops optional expansion without discarding
+a complete match. Initial/expanded detail demand is eight/32, recording searches are
+bounded to 32 and edition browsing to four pages. See [matching and review](digital-purchases.md#matching-albums-with-missing-tags).
+
+Digital source is an independent manual fact on digital-only file albums. Historical
+values remain readable/clearable. Source-only edits preserve other overrides;
+artwork-only selection preserves identity/text/tracks. Choices bind to the listing Job
+and input/authority revision. Reopened panels recover current pending or empty listings
+and fence superseded asynchronous continuations. Provider refresh/adoption cannot
+replace manual source/artwork authority.
+
+Checkpoint/frozen-input decoding releases the catalog mutex; frozen claim decoding
+also releases the dispatcher. Idle polls do not reconcile global workflows or reserve
+a SQLite writer when no Job is eligible. Cached child completion makes its owner
+runnable in the admission transaction. State changes and one periodic recovery loop
+advance continuations. Typed read contention retries GET/HEAD at most three times,
+retaining account/abort context; stale submitted command revisions and pagination
+scopes remain conflicts. Exhaustion stays visible and never resubmits mutations.
+
+### Declared WAV segments and grouped imports
+
+The shared PCM reader requires every chunk, required pad and PCM frame to fit inside
+one complete declared RIFF segment. A suffix is counted without interpreting it as
+audio/metadata; truncation and invalid internal boundaries still fail. Fingerprinting,
+preparation and lossless PCM comparison consume that same segment. Music records
+`wav_trailing_bytes` and carries its warning through retained analysis/import results.
+Absent/zero does not assert a new full-file structural check. Original fingerprints
+and downloads cover all bytes; originals are never rewritten or failed Jobs retried
+automatically. See [WAV policy evidence](validation/wav-trailing-bytes-2026-11-02.md).
+
+Guided intake establishes all reviewed physical copies in a destination manifest
+before freezing the first child's Item revision, including later manifest pages.
+Digital-only packages create no specimens. Sibling staging cannot manufacture a
+copy-setup revision conflict, while manual inventory edits still conflict.
+
+### Purchase inbox recovery and folder edits
+
+Application services own review authorization, source linking, explicit reopen and
+credential revalidation. Providers own bounded MIME/read-only IMAP and probes.
+Malformed content becomes an unparsed suggestion; transport/incomplete responses
+cannot advance the cursor. No raw mail is retained. Source coordinates may refresh
+without rewriting receipt facts; folder progress is an observed high-water snapshot,
+not exhaustive mailbox coverage.
+
+Configuration guards serialize admitted batches/errors with credential replacement.
+A probed profile is atomically replaced; input-bound prepared/activated receipts
+recover uncertain responses and fence superseded repairs. Operator profile IDs remain
+stable. Reopening an accepted purchase removes only its current order row, returns
+linked sources to review and retains prior archive revisions. All review mutations
+bind review revisions; accepted corrections also fence the Item revision. Old forms
+cannot regain ownership after interruption.
+
+Folder overrides live in private SQLite alongside the connection revision. They
+accept 1–16 bounded exact names and require current write eligibility. New folders
+start at UID 1; removed folders stop reads while retaining cursors/suggestions.
+Provider batches freeze folder choices and cannot commit after a stale configuration.
+Save does not itself probe folder access. Disabling an account fences both post-fetch
+and transactional admission. See [email intake](email-purchases.md).
+
+### Error boundaries
+
+Module host callbacks preserve the original core error when a shared algorithm
+interrupts; they cannot invent cancellation. Adapters diagnose mechanism errors while
+application services retain eligibility/workflow policy. Native decoding preserves
+API codes across shared HTTP statuses. Authentication/resource/mail redaction remains
+in force. Confirmed mutations and failed subsequent refreshes have separate outcomes;
+per-item results take precedence over bounded summary headlines. A coordination
+barrier must not attribute failure to an enrichment Job that never started.
+
+## Detailed subsystem contracts
+
+The following contracts remain applicable except where explicitly labeled planned or
+deferred. Source implementation and current availability are recorded in the status
+matrix; old checkpoint names do not assign work.
 
 ## Digital album matching, 2026-10-29
 
@@ -379,7 +332,6 @@ Current music results select the greatest full recorded timestamp (then ID) acro
 all pages with the current source fingerprint. Coarse history-index timestamps
 and deterministic IDs cannot establish which rapid recheck is current. Resolution
 reads observation metadata only; archive evidence and index formats stay intact.
-
 
 ## Original cover acquisition — 2026-10-26
 
@@ -545,76 +497,7 @@ its cellular declaration is user-supplied, not network attestation. Actual iPhon
 Safari, public ACME/renewal, router and NAS acceptance remain separate from local
 source tests. No live infrastructure is changed by source implementation.
 
-## Existing private playback and dated LAN design
-
-The accepted home-listening **stopgap** uses a dedicated manual LAN HTTPS hostname,
-`collector-lan.awkwardexplorer.com`, resolving to the reserved NAS address even
-through public DNS. It serves the same public/client listener and account store;
-the exact browser origin is allowlisted without changing the configured passkey
-authentication origin. It introduces no application transport or helper subsystem.
-See the [current LAN delivery](lan-playback-first.md#current-delivery-explicit-lan-hostname--2026-10-22)
-for operator-confirmed work-Mac browser and Trash Amp playback/seek with
-GlobalProtect connected. Unattended certificate renewal remains outstanding.
-
-The real solution remains automatic detection of and connection to a reachable,
-trusted local Collector in **both the browser and Trash Amp**, with authorized
-remote access when LAN is unavailable. It is unimplemented and tracked in HL-12;
-the manual hostname does not complete it. Browser HTTPS/origin/authentication and
-local-network permission handling require a bounded design/feasibility step.
-Native transport selection follows the Iroh trial independently; native-only
-success cannot stand in for browser automatic selection. Preserve account/content
-identity and validate server/endpoint authority before sending credentials. This
-tracking clarification selects no browser transport mechanism or new subsystem.
-
-The expanded [route and browser design](https-relay-and-lan-switching.md#route-policy-trust-reachability-and-transfer-cost)
-first filters authorized, media-eligible endpoints, then prefers direct LAN
-reachability; the unresolved Cloudflare media route is not an automatic fallback.
-Endpoint/path cost remains unknown when unobservable. There is no Tailscale
-integration or provider-specific discovery; already configured private HTTPS
-routes use the normal OS stack. Application services own endpoint authority,
-media eligibility and scoped read-grant policy; HTTP/browser adapters own probes,
-TLS/CORS/CSP, media-element and permission mechanisms. Browser feasibility retains
-the normal app/login origin and tests encrypted direct local media with scoped
-authorization. The earlier ordinary-HTTPS media-lease baseline is a control for
-the private transport alternatives below. It does not widen login cookies or trust
-unauthenticated discovery.
-These are planned boundaries, not implemented automatic playback or budget controls.
-
-The user clarified that private playback should approach install/sign-in-or-pair/use
-without manual internal certificate, DNS or router setup. Public server operators
-retain responsibility for their chosen HTTPS/tunnel/ingress; Collector must not
-require a particular provider, vendor certificate service or relay product.
-Evaluate automatically retained native trust, browser WebTransport certificate
-hashes and authenticated WebRTC data channels alongside operator-provided HTTPS.
-Browser pinning here is specific to WebTransport; it does not make ordinary
-fetch/audio requests accept a self-signed certificate. Peer/signaling authorization,
-HTTP/range adaptation, certificate lifecycle and browser playback remain application
-and adapter work, not solved by an encrypted echo test. Loopback-only experiments
-belong under `scripts/experiments/direct-transports`, outside production crates.
-
-The next bounded LAN experiment keeps a separate disposable Collector account,
-archive and listeners on the NAS. An experiment-only browser adapter bridges the
-unchanged `MusicPlayer` media requests through a service worker and page-owned
-WebTransport session. The HTTP/3 sidecar forwards only bounded media reads to that
-Collector's public router, retaining its session and collection authorization on
-every read. The test HTTPS origin uses the already installed operator certificate;
-the distinct WebTransport endpoint uses a generated short-lived pinned identity.
-This tests playback mechanics and authorization across devices, not automatic
-discovery, production endpoint enrollment or a new production subsystem.
-
-The public-origin follow-up mounts this same disposable fixture only beneath an
-exact test path at the existing public hostname. Test assets/control/cookies and
-the service-worker registration stay path-scoped; the worker controls test-page
-clients, never production pages. Its separate CSP names the pinned LAN endpoint.
-The LAN handshake and ephemeral media grant are bound to the initiating exact
-origin. Public tunnel routing is limited to that test path and loopback-only
-fixture HTTP listener; neither production APIs nor private management are proxied
-by the fixture. Verify the page uses the public route: split DNS resolving the
-hostname to the NAS cannot qualify public-to-private browser permission behavior.
-
-## Planned HTTPS relay and native route selection — 2026-10-22
-
-### Automatic private playback — 2026-10-22 source delivery
+## Automatic private playback — 2026-10-22 source delivery
 
 The user now authorizes implementing automatic local playback for web and Trash
 Amp together, with remote/Cloudflare media fallback disabled. The normal saved
@@ -649,148 +532,10 @@ needed solely to wrap those dependencies. See the [implemented contract](automat
 [dated acceptance](validation/automatic-private-playback-2026-10-22.md). Source
 implementation and deployed-device qualification remain distinct.
 
-**Earlier design record, superseded for private playback by the implementation above:**
-the requested [relay and LAN-switching plan](https-relay-and-lan-switching.md)
-is design only. The later [LAN-first plan](lan-playback-first.md) selects local
-DNS for the existing HTTPS origin and a trusted home proxy to `public_bind`,
-enabling browser and system-HTTPS Trash Amp home listening before the Iroh trial.
-It changes network destination without changing browser origin or enrollment;
-it is not active-stream failover. Subsequent authorized setup installed and assigned
-a production certificate to the NAS public-listener proxy, reserved the NAS address
-and enabled the scoped home DNS override. Direct local HTTPS passes normal CA,
-hostname and ServerId checks; public AAAA/HTTPS/SVCB answers are suppressed locally.
-Unattended renewal and acceptance of this earlier same-origin route remain pending; see
-[partial setup](validation/lan-https-2026-10-22.md).
-The required work-machine VPN may override DNS or deny direct LAN access; both
-must be tested independently before this topology is qualified for that client.
-A normal remote HTTPS frontend forwards through an authenticated outbound
-home connector to the existing public/client listener; it must never expose the
-private management listener. Browsers keep same-origin HTTPS. Native transport
-selection follows a bounded Iroh integration trial before implementing a general
-HTTPS route/resume manager. Reusable trust/stream/range mechanisms belong in a narrow
-planned `junk-libs-net` infrastructure crate; Collector retains enrollment,
-endpoint authority, account/collection policy and receipts, and Trash Amp retains
-Keychain, playback and presentation. Per-endpoint trust must precede credential
-use, and resumed reads must retain immutable byte identity. No relay deployment,
-shared-crate extraction, automatic discovery or live failover is implemented by
-this plan. HL-12 tracks the requested delivery without replacing the active queue
-assignment or adding a universal release gate.
-
-Catalog startup replaces obsolete projection databases before replaying archive records.
-It also detects beta.1's incorrectly stamped music-search table. Old catalog files
-are retained for diagnosis; private state and archive records are separate.
-This rebuild does not hash media payloads. See [beta correction](validation/container-beta2-publication-2026-10-21.md).
-
-Container packaging (2026-10-19) lives in `deploy/container` and the Dockerfile,
-outside domain/application services. A root one-shot initializer prepares only
-the selected mount roots and initial config; the server/CLI run as UID 10001.
-Linux host networking preserves loopback HTTP and explicit private TLS listener
-composition. Deployment configuration/credentials persist independently of image
-replacement. The process adapter accepts both SIGINT and SIGTERM through the
-existing stop path; this is not a new active-job drain guarantee.
-The fresh-install proxy-config transport (HL-05A, 2026-10-20) refuses existing
-archive/private state and empty input before atomic replacement. Setup/doctor own
-configuration validation and provider-contact readiness. The optional inbox Compose
-override supplies the same default read-only bind and supplemental group to server and CLI;
-filesystem ACLs remain a host mechanism. Actual Synology update/resume/restore and
-remote-browser checks are recorded in [NAS operations acceptance](validation/nas-operations-2026-10-20.md).
-HL-05B uses an operator stopped-server Btrfs point over those roots; standard
-GNU tar exports to other storage are optional. The deployment adapter binds the tar working
-cutoff to snapshot time; application backup/storage formats and domain services are
-unchanged. See [qualified recovery and limits](validation/snapshot-recovery-2026-10-20.md).
-The [2026-10-20 backup-scope clarification](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
-keeps local rollback practical and external media copies optional. `${COLLECTOR_DATA}/backups`
-is the packaged local area; full backup remains explicit and includes media. No
-scheduler or lightweight catalog-only mode is implemented. The post-alpha.3
-optional backup-age reminder below reads bounded completion receipts.
-
-Build-once publication (2026-10-22, after beta.4; native validation and reuse qualified): validation builds
-one labelled OCI export per native architecture, imports that exact runtime image
-for smoke acceptance, merges/verifies exports and retains immutable GitHub Actions
-artifacts. Publication is a separate consumer: a successful same-repository,
-exact-source workflow run and artifact digest bind the validated image bytes,
-version, platforms and smoke/check outcomes. It performs no source compilation
-or image rebuild. Missing/expired/mismatched evidence fails closed and requires
-explicit fresh validation. `scripts/container_validation.py` owns CI artifact/OCI
-mechanisms; existing release policy, anonymous verification, channel safeguards
-and bundle assembly stay in `scripts/container_release.py`. These are deployment
-adapters, with no application/domain changes. The completed beta.4 tag and image
-are immutable. A nonpublishing reuse rehearsal qualifies this boundary without
-publishing another release or changing `preview`; see [dated acceptance](validation/container-promotion-2026-10-22.md).
-
-Release planning/OCI verification/bundle assembly (HL-07D, 2026-10-20)
-live in `scripts/container_release.py` and the existing workflow, outside application
-and domain services. Public version verification precedes `preview`/stable `latest`
-promotion; bundles pin the verified manifest digest. Local OCI verification is
-separate from actual registry/pull deployment acceptance. Public alpha.2 and its
-isolated Portainer/NAS/browser recovery acceptance are now [qualified](validation/container-publication-2026-10-20.md).
-Release builds now use native AMD64/ARM64 runners with architecture-scoped caches
-and real native container smoke checks, then assemble their digest-addressed outputs.
-The source revision is frozen before checks/builds. A manual retry may select an
-existing published release tag; it fetches that release and checks out its exact
-`refs/tags/…` source. Empty-input manual runs remain nonpublishing OCI exports.
-The exported native indexes are merged with content digest checks; public version
-verification still precedes channel promotion and installation asset publication.
-The disposable `scripts/portainer_qualification.py` lifecycle adapter reuses the
-container recovery journey without application changes. It renders the shipped
-Compose service, initializes a separate loopback Portainer database using a temporary
-password file, pulls through its Docker gateway and checks asynchronous deployment
-results. Service-targeted updates retain an unchanged networkless companion; a
-Collector-only stack separately exercises forced re-pull/redeploy. Only generated
-fixture resources are cleaned up; the operator Portainer is not accessed.
-
-NAS preparation-failure qualification (HL-05C) reuses the same generated Compose
-journey. A fixture-only encoder wrapper controls real subprocess blocking or
-failure after output; Chrome uses ordinary cancellation/retry controls. No production
-API or conversion policy is added. Application Job ownership/claim fencing and
-adapter process termination/publication remain responsible for actual recovery;
-see [actual-host acceptance](validation/nas-preparation-recovery-2026-10-20.md).
-
-Archive permission qualification uses the same generated installation and a separate
-`scripts/storage_permission_qualification.py` adapter. It saves exact archive modes,
-removes write permissions only within that fixture, exercises an actual browser
-metadata save/read/playback, restores the modes and retries. Application metadata
-publication and storage recovery own the outcome; no HTTP result or successful
-publication is mocked. This is permission loss, not disk-full or power-loss injection.
-
-Bounded capacity qualification adds a dedicated external Docker volume backed by a
-96 MiB tmpfs, mounted only as the generated fixture archive. A networkless sleeper
-keeps that mount alive across CLI/server stops. The fixture verifies the filesystem
-type and exact capacity before a bounded fill reaches real ENOSPC; it never fills
-the host's Btrfs storage. Removing only the filler and performing normal startup
-settles interrupted application journals before browser retry. Restore selects a
-second empty private volume; cleanup removes both volume/keeper pairs. Shared
-metadata assertions live in `scripts/storage_failure_qualification.py`; the capacity
-and permission adapters supply real filesystem mechanisms without mocking results.
-
-Bounded authentication qualification reuses that fresh Compose installation and
-performs actual HTTP connections with Linux loopback source addresses. It isolates
-account, direct-peer and global login thresholds by varying real peers/accounts;
-forged forwarding headers cannot select a bucket. Normal fixture restarts reset
-transient state between finite cases, and original-session continuity plus the
-ordinary browser/backup/restore journey remain required. This exercises the TCP
-adapter; no application outcome or peer identity is injected into a router.
-
-Real-tool audio qualification (HL-06A) adds a separate fixture oracle adapter,
-`scripts/audio_oracle_qualification.py`, to that generated Compose journey. It
-compares actual FLAC output against independently generated PCM and actual Opus
-output against CLI decoder/frame/channel oracles; Chrome prepares and plays the
-three configured Opus profiles without FLAC masking. Private test handoffs publish
-complete files atomically. Production conversion/domain responsibilities are
-unchanged; see the [audio matrix](audio-preparation.md) and
-[bounded evidence](validation/audio-oracles-2026-10-20.md).
-
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
-
-Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
-
-Junk Collector preserves evidence and owned collection history independently of how content is consumed. The server is a modular monolith: one process composes independent domain, application, storage, authentication, HTTP, and job capabilities. It is not a set of microservices.
+General relay/failover and cost accounting remain conditional under the open-work
+queue. Private reachability is not physical-path attestation. Existing valid
+[transport design constraints](https-relay-and-lan-switching.md) remain reference
+material, not an assignment to replace implemented private playback.
 
 ## Digital purchases — HL-02, 2026-10-19
 
@@ -1090,7 +835,6 @@ locked comparison of the hydrated Item and authority revision to fence independe
 Capture, Asset and metadata changes. Archive history and payloads remain intact.
 Cleanup waits for the original workflow to settle so it cannot race its own jobs.
 
-
 Folder discovery is a read-only application command over validated logical names
 and sizes. Each collection module proposes disjoint package memberships; the
 application checks their indices and builds ordinary signed ingest plans. Native
@@ -1099,7 +843,6 @@ through the shared resumable chunk transport; durable server intents own all
 subsequent publication, identification, metadata and preparation. Name-level
 redumper/CUE boundaries are provisional, not structural validation. Unassigned
 files are listed explicitly and never silently uploaded.
-
 
 The accepted [local-alpha plan](local-alpha-plan.md) schedules complete ingestion,
 enrichment and listening journeys before native/public deployment work. LA1 is
@@ -1422,7 +1165,7 @@ Authenticated collection-type discovery returns only registry-validated module d
 
 Mutations cross bounded application commands. Item input contains editable inventory/module fields only; Capture representations, Assets, Evidence, metadata observations, revisions, deletion state, timestamps, and storage locators cannot be deserialized into it. Work/Edition commands preserve migration provenance and server-owned revision state, and Capture commands can change associations while preserving representations; legacy locations exist only in store adapter records/projections. Content, import, administration, authentication, enrollment, and access adapters receive validated identities/effects rather than Principal or Role. Media returns an opaque synchronous read/seek capability so neither application code nor HTTP sees an archive path; HTTP streams it on blocking workers with range semantics. The server source is checked against direct `state.store` calls. Authentication freshness, authority guards, passkey CAS, recovery, and native enrollment are application policies backed by transactional Store mechanisms.
 
-Module wire payloads use a lossless raw-JSON envelope. Known current schemas are parsed into module-owned views without replacing the raw body. Supported older schemas migrate one adjacent version at a time. Additive checks are the default; a version-specific transformation may rename or convert fields only through an explicit policy with a rationale. Every exact input/intermediate envelope is returned as provenance and must be retained by the committing host. Unknown fields remain preserved in those envelopes. Capability ownership is indexed and validated at registration, never inferred by splitting a capability string at dispatch. Each registered operation declares collection-domain or shared-media scope, and every successful output passes its owner's required result validator before publication. Module descriptors expose only bounded labels and typed scalar/read-only field descriptions. Owner-mediated patches distinguish omission from explicit null and preserve untouched raw values; clients do not replace arbitrary module envelopes. Newer, gapped, unavailable, and invalid schemas remain distinct outcomes; unavailable data survives but is not described as executable. Generic presentation is an additive, post-redaction read model and does not expose operation commands before A04. Raw provider JSON is source evidence, not the common field model. Runtime plugins will adapt the same capability boundaries; a native ABI is deliberately not promised.
+Module wire payloads use a lossless raw-JSON envelope. Known current schemas are parsed into module-owned views without replacing the raw body. Supported older schemas migrate one adjacent version at a time. Additive checks are the default; a version-specific transformation may rename or convert fields only through an explicit policy with a rationale. Every exact input/intermediate envelope is returned as provenance and must be retained by the committing host. Unknown fields remain preserved in those envelopes. Capability ownership is indexed and validated at registration, never inferred by splitting a capability string at dispatch. Each registered operation declares collection-domain or shared-media scope, and every successful output passes its owner's required result validator before publication. Module descriptors expose only bounded labels and typed scalar/read-only field descriptions. Owner-mediated patches distinguish omission from explicit null and preserve untouched raw values; clients do not replace arbitrary module envelopes. Newer, gapped, unavailable, and invalid schemas remain distinct outcomes; unavailable data survives but is not described as executable. Generic presentation is an additive, post-redaction read model; operation commands require their owning application authorization. Raw provider JSON is source evidence, not the common field model. Runtime plugins will adapt the same capability boundaries; a native ABI is deliberately not promised.
 
 ## Identity and ownership
 
@@ -1540,7 +1283,7 @@ Durable publication journals contain transaction/entity identities, expected/tar
 
 Collection creation writes an immutable collection manifest and a private recovery intent for the owner grant before archive mutation. Startup completes the intended grant when the collection commit exists or removes the abandoned intent when it does not. Copying only the archive never reconstructs a grant.
 
-SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v15 and `private.sqlite` is schema v21. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections and v13 song-search projections; v14 binds song-search rows and cursors to optional source representations for game audio; v15 indexes all viable album options per entry for ambiguity-aware grouping. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Private v19 permits native enrollment requests awaiting account approval; v20 adds shared acquisition ownership, specific pending dependencies and requester snapshot/generation bindings; v21 adds durable opt-in inbox source cleanup claims, frozen filesystem observations and deletion progress. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
+SQLite state must be local to the server. The current rebuildable `catalog.sqlite` is schema v15 and `private.sqlite` is schema v22. Catalog v4 adds portable processing, snapshot, metadata-authority, and recipe projections to the v3 projections; catalog v5 adds the snapshot creation-time index used for stable pagination. Private v10 adds frozen processing Job inputs and provisional Import observations to the v9 authentication, access, Import, Job, command, and recovery state. Private v11 adds collection/provider active-catalog selection; exact snapshot bytes and observations remain portable archive records, while this replaceable selection is local policy. Private v12 was an unused planning reservation. Private v13 adds guided-ingest intent and restartable staging-cleanup records; source bytes and published archive records remain outside that private workflow state. Catalog v8 adds rebuildable substantive-result groups and occurrence membership; catalog v9 adds typed entity ownership/references and the archive filesystem observation/checkpoint tables; private v14 adds requester-scoped scan admission keys and durable direct/parent ownership references. Existing frozen jobs acquire admission keys on startup without changing their original input timestamps. Private v15 adds requester-private history visibility and durable clear intents, with pending-intent and import-job indexes. Catalog v10 introduces metadata-health/language display; v11 adds indexed album-peer and preparation readiness; v12 adds portable collection-list projections and v13 song-search projections; v14 binds song-search rows and cursors to optional source representations for game audio; v15 indexes all viable album options per entry for ambiguity-aware grouping. Private v16 stores metadata language, v17 stores intake sessions/discovery and v18 stores frozen bulk work. Private v19 permits native enrollment requests awaiting account approval; v20 adds shared acquisition ownership, specific pending dependencies and requester snapshot/generation bindings; v21 adds durable opt-in inbox source cleanup claims, frozen filesystem observations and deletion progress. Grouped merge revisions use portable immutable publication-group manifests and archive lineage; readers expose members only after the complete committed metadata graph validates. These are additive pre-release migrations: older on-disk user data is converted in place and is never reset automatically; no permanent reverse-compatibility layer is promised solely for earlier Wave checkpoints. Client connection storage is independently versioned: C01 starts at client schema v1 and S04 reserves client schema v2 for rotation state. Future version assignments follow actual persisted state and the pre-release policy; W4.0 reservations are advisory. Reindex validates the collection graph and processing envelopes and replaces all catalog projections in one transaction. Browser sessions and native credentials are distinct types and tables; migrated sessions are non-fresh and never become native credentials. Transaction-based migrations select the former first-row account once; later account or `multi_user` changes do not change it. A missing or disabled default is an actionable configuration error. Back up both the archive and private state. Copying only the archive restores records but no access. SQLite databases must be backed up through SQLite's backup mechanism or while stopped, not by copying active WAL files independently.
 
 P06 reuses the incrementally maintained catalog at startup when a checkpoint matches the canonical archive path, projection epoch and complete filesystem observation inventory. Observations cover metadata revisions, snapshot files and migration checkpoints using file size, modification time, and on Unix inode/device/change time; payload trees are pruned. This is a change hint, not byte integrity or catalog verification. Warm startup still walks metadata names/stats and runs SQLite quick_check; it does not parse archive records, revisit completed migration records, or hash snapshot/media bytes.
 
@@ -1693,7 +1436,6 @@ Web and Trash Amp consume the normal track/media/list contracts. New game audio
 remains outside advertised release coverage until synthetic and owned-disc, actual
 UI/native/recovery acceptance is recorded.
 
-
 Album-disc coverage is an application read projection over the chosen descriptive
 MusicBrainz release, each active preservation-master Capture, and current
 source-fingerprint-bound CD structure/AccurateRip observations. It never opens or
@@ -1788,7 +1530,6 @@ recovery revokes sessions/apps/enrollments/codes and issues a fresh session, whi
 local recovery additionally revokes passkeys. Private-state conversion preserves
 bound enrollment rows and credentials. Native legacy credential conversion verifies
 `/me` before committing account-keyed storage; no identity is guessed from edits.
-
 
 Stopped-server account lookup and recovery share an existing-state opener and the
 same exclusive private lock as the server. They do not open the archive. The CLI
@@ -1906,12 +1647,11 @@ panel and Work history render unmeasured work without a false zero-percent meter
 Development builds optimize the shared disc/AccurateRip mechanisms; algorithm,
 reference identity, offset coverage and validation rules are unchanged.
 
-
 ### Configurable dispatch — 2026-10-21
 
 Startup `[jobs]` settings expose 1–8 processing workers
 (default four), with an independent inbox-copy cap (default one, no larger than
-the processing limit). Provider concurrency remains one. Application policy owns
+the processing limit). Provider concurrency is four overall, with one active acquisition per provider. Application policy owns
 validated limits and a bounded preference for ready Import analysis/publication;
 Store enforces capacity, copy caps, fairness and existing claim fences atomically.
 Server execution-loop count reads the same settings through the application port.
@@ -1948,8 +1688,8 @@ work. Item generations and metadata preferences belong to requesters. MusicBrain
 cache bypass is operational and does not split equivalent active work.
 
 The execution loops share one process-instance identity and existing fenced
-leases. Configured processing capacity (default four, range 1–8) plus one provider
-slot determine both loop count and transactional admission. Inbox staging has a
+leases. Configured processing capacity (default four, range 1–8) plus four provider
+slots, with one active acquisition per provider, determine both loop count and transactional admission. Inbox staging has a
 separate cap (default one), including the older combined inbox-import command.
 Bounded ready-disc priority and capacity reservation keep copying and processing
 moving; inactive capacity is available to processing while copying remains capped.
@@ -1985,7 +1725,6 @@ checksummed payload-reference sidecars preserve immutable envelopes and evidence
 IDs. The private conversion journal makes publish-reference/remove-payload/reindex
 steps resumable. See [the conversion runbook](snapshot-duplicate-conversion.md).
 This is a provider-owned policy, not a general retention/workflow engine.
-
 
 ### Bounded provider retention — 2026-10-17
 
@@ -2088,3 +1827,25 @@ uses ordinary cancellable processing, metadata/artwork and source validation.
 The Import remains Published and its preservation Capture/Representation identities
 are unchanged. Retry, lifecycle, grant, collection-binding and Job claim fences
 continue to apply. No data migration or production retry is performed automatically.
+
+## Bridge setup and sync status — 2026-10-31
+
+Application mail services own administrator-only Bridge setup/status authorization
+and user ownership. A narrow provider setup port accepts local IMAP credentials,
+validates pinned TLS/read-only folder access and atomically publishes a private
+profile with its input-bound command receipt. Credentials never enter collection
+records, logs or read DTOs. Existing operator profiles remain supported without
+conversion; managed profiles live under private state and reload after restart.
+
+The Bridge container owns its official CLI process and reduces the pinned 3.18.0
+sync events to a bounded atomic status snapshot. It exports the local public
+certificate fingerprint through that snapshot; account names, message identifiers,
+passwords, raw logs and exported private keys never cross the status boundary.
+Collector reads only the status snapshot, with freshness and typed unavailable
+states. An absent/old/partial event cannot imply sync completion. Bridge's full
+mailbox sync and Collector's receipt-history cursor remain distinct workflows.
+The web setup card is visible before any profile exists; credentials are submitted
+only through authenticated management composition. Polling aborts on detach or
+account changes. Terminal status uses the same sanitized snapshot without stopping
+Bridge. Acceptance includes real UI setup, refresh/reopen, denied access, stale
+status, failed TLS/login, input-bound retries and reporter shutdown/restart.

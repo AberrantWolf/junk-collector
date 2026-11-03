@@ -13,9 +13,9 @@ with the implementation refinements incorporated.
 The user selected Cloudflare for login/authentication/control and direct public
 HTTPS for music delivery. This document defines one complete web/Trash Amp
 delivery; it does not authorize DNS, firewall, certificate, NAS or release changes.
-[HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation)
+[HL-12](remaining-work.md)
 owns the work, with actual deployment acceptance under
-[HL-05](remaining-work.md#hl-05--linux-nas-and-optional-public-internet-deployment).
+[HL-05](remaining-work.md).
 Those entries remain the only queue. This selection supersedes relay/Iroh-first
 ordering for this remote-listening outcome, not the existing private playback.
 **Isolation refinement, 2026-10-23:** the user's follow-up selects a separate
@@ -228,7 +228,7 @@ non-active, correctly typed and nosniff in either deployment mode.
 | Existing private media | Existing HTTPS/WebTransport private listeners | Existing private playback; its generated trust and permissions remain separate |
 | Private management | Existing explicit private listeners | Existing administration/curation with authentication and role checks; never a public-media upstream |
 
-Use a provisional hostname such as `collector-media.awkwardexplorer.com`;
+Use a provisional hostname such as `media.collector.example.com`;
 confirm the exact name and unused ports during deployment preparation. Keep the
 existing control hostname, authentication origin, tunnel destination and browser
 session unchanged. Do not add a shared cookie Domain or a direct route to login.

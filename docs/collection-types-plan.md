@@ -1,12 +1,8 @@
 # Module-owned collection types: implementation handoff
 
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
+> Delivery/reference record. Contract and acceptance details remain useful; checkpoint
+> ordering and old gap statements are historical. Use [current status](implementation-status.md)
+> and the sole [open-work queue](remaining-work.md).
 
 Status: **CT.1–CT.4 reviewed and corrected; resume Wave 4 at D04.1**. This is a prerequisite
 inserted after reviewed W4.2, not a redo of W4.0–W4.2. Target executor: Sol at medium
@@ -46,7 +42,7 @@ administration and personal activity retain their independent authorization rule
 Reindex/export and post-commit recovery must not require an installed module.
 Do not expose raw private payloads in a generic viewer or execute plugin code.
 
-## Current seams to inspect
+## Pre-delivery seams assessed
 
 - Core `src/lib.rs`: Collection has no module; Item has `domain: ModuleData`;
   Work/Edition and CollectionGraph carry shared identity relationships.

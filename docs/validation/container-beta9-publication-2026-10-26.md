@@ -1,7 +1,9 @@
 # Beta.9 publication and NAS update — 2026-10-26 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user authorized pushing/building a new beta and updating the NAS once it was
-packaged. Beta.9 is published on `preview` and installed on `fatchocobo`. The
+packaged. Beta.9 is published on `preview` and installed on `archive-host`. The
 uncommitted raw-CD helper follow-up and its tests were preserved in the original
 checkout and excluded from the isolated release candidate.
 

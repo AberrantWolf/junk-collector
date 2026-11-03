@@ -95,8 +95,9 @@ Relevant owners: `collector-app/src/library.rs`, `disc_audio.rs`, `music_search.
 `collector-client/src/library.rs`, `media.rs`; `web/src/app.tsx`.
 Sibling changes belong in Trash Amp's `amp-collector` adapter, `amp-app` catalog
 model/source notifications and `amp-ui` album/track loading and playback handling.
-The native implementation is isolated in `/private/tmp/trash-amp-layered-refresh`;
-its source and local dependency override are recorded in the delivery evidence.
+Native source and dependency qualification are recorded in the linked delivery
+evidence; use the client repository's current dependency pin rather than a temporary
+implementation checkout.
 
 ## Boundaries and projections
 

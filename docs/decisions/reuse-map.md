@@ -1,5 +1,9 @@
 # Reuse, extraction, and fixture map (D01)
 
+> Dated dependency assessment. Inspected revisions, qualification gaps and checkpoint
+> assignments describe their recorded dates. Use current manifests for dependencies,
+> architecture for contracts and remaining work for assignments.
+
 **Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
 and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
 history requirements below need reassessment. Preserve actual data/recovery and

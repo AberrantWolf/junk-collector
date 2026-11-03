@@ -90,7 +90,7 @@ fixtures, restart/ownership/publication tests and real browser acceptance. New
 normalization/format algorithms, arbitrary systems/conventions, game artwork
 providers and provenance compaction remain outside this delivery.
 
-Collector pins the published `junk-libs` Git revision
-`83177af57ca36a5b284298020fea9d5e8fb0c415`; no local Cargo patches are required.
+The workspace manifest and lockfile record the exact published `junk-libs` revisions;
+no sibling checkout or local Cargo patches are required.
 Retro Junk's affected DAT constructors and facade were updated and checked against
 these shared changes. The shared revision is pushed to the `junk-libs` repository.

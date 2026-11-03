@@ -1,5 +1,7 @@
 # Layered library refresh — 2026-11-02
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Source implementation for the requested web/Trash Amp workflow.
 [Publication review](layered-library-refresh-review-2026-11-02.md) records the
 subsequent isolated source review and main-publication checks. This is not a
@@ -127,7 +129,7 @@ binary after the Rust workspace compilation; its Rust code is unchanged.
 
 ## Native worktree and integration
 
-- Original checkout: `/Users/scott/Programming/rust/trash-amp`, retained on main.
+- Original checkout: `/home/operator/Programming/rust/trash-amp`, retained on main.
 - Worktree: `/private/tmp/trash-amp-layered-refresh`.
 - Branch: `codex/layered-library-refresh`, based on `61f105f`.
 - `local-collector.toml` is an explicit development-only Cargo patch configuration

@@ -10,6 +10,10 @@ The examples below use the built binary; place `--config /absolute/path/collecto
 |---|---|
 | `setup [--username NAME]` | Initialize storage, TLS, the default account, and local browser configuration. Run while stopped. |
 | `serve` | Run listeners and background workers. Stop with Ctrl-C or SIGTERM on Unix. |
+| `enroll-archive` | Bind an existing archive/private-state pair while every writer is stopped; see [archive admission](configuration.md#remote-archive-admission). |
+| `inspect-collection-type --collection-id ID` | Inspect legacy collection binding eligibility without modifying it. Run while stopped. |
+| `assign-collection-type --collection-id ID --expected-revision N --module MODULE` | Explicit stopped-server legacy assignment after inspection; retains unknown data. |
+| `inspect-snapshot-duplicates` / `apply-snapshot-duplicates --plan PATH --backup PATH` | Review and apply the [backup-fenced duplicate conversion](snapshot-duplicate-conversion.md). |
 | `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
 | `reindex` | Rebuild the catalog from archive records. Stop the server first. |
 | `backup --destination PATH` | Lock the stopped installation, settle journals/checkpoint SQLite and write a verified complete backup to a new directory. |

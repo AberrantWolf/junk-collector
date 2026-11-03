@@ -20,9 +20,9 @@ LAN URL, second account or route-change re-enrollment. Existing queues, saved
 connections and downloaded/offline files keep their identities. Native streaming
 and explicit downloads share the same range reader and route policy.
 
-The personal `https://collector-lan.awkwardexplorer.com/` address remains the
-**deployed manual stopgap** until the new server and clients are installed. It is
-not detection and does not become the normal endpoint for other users.
+Private selection is automatic on supported clients; manually configured HTTPS
+endpoints remain available where needed. Installation/device acceptance is separate
+from source support.
 
 ## Server setup
 
@@ -66,7 +66,7 @@ through the control connection.
 Only explicitly composed direct listeners permit ordinary same-origin media.
 Public listener media is refused while `remote_media_allowed` is false, including
 when DNS or forwarded headers claim a local path. Enabling that operator policy
-would permit public fallback; leave it false while Cloudflare media is unresolved.
+would permit public fallback; keep it false when using a separate direct media endpoint.
 Public login, pairing, library metadata and permission checks remain available.
 
 ## Trust and transfer policy
@@ -83,9 +83,9 @@ A same-origin service worker adapts HTML media HEAD/GET/range requests to a brok
 in the owning authenticated document. Logical responses stream through bounded
 256 KiB chunks; the app does not create whole-track Blobs or replace its decoder.
 Streams, requests, grants and retained open readers are bounded. Cancellation
-stops superseded network reads and interrupts derivative validation. HEAD never
-hashes media. A prepared derivative is validated once for a retained open handle,
-not once per range. Permission checks still run before every range, including
+stops superseded network reads. HEAD and playback GET do not hash whole media
+payloads. Readers check requested ranges, lengths and read failures; completed
+downloads and explicit integrity operations retain their separate validation. Permission checks still run before every range, including
 when that handle is reused.
 
 Connection failure refreshes authenticated routes and retries the same immutable
@@ -112,5 +112,5 @@ No provider SDK, CLI, API, peer enumeration, configuration or path telemetry is 
 Direct physical LAN playback avoids media leaving through the public tunnel.
 Upload budgets, billing counters, physical-path classification, remote relay/Iroh
 work and browser support beyond the qualified matrix remain separate work in
-[the consolidated queue](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation).
+[the consolidated queue](remaining-work.md).
 See [source acceptance](validation/automatic-private-playback-2026-10-22.md).

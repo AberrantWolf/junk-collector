@@ -92,25 +92,12 @@ The baseline is archive schema 1 written by commit `98e9187`: `collection.toml`,
 | Evidence is copied into each revision and SQLite ignores duplicate IDs | Append-only archive evidence with strict identity/content validation and rebuildable projection | P01 |
 | Startup reindex is relied on after a revision rename; `.staging` is only ignored | Durable transaction recovery precedes writes; replay remains projection repair | P01 |
 
-## Capability inventory
+## Implementation availability
 
-| Accepted capability | Current foundation | Missing owner |
-|---|---|---|
-| Collection inventory, browse/search and artwork rows | Basic Item aggregate, FTS projection and cover assets exist | A02, A04, U03, U04 |
-| Work/edition/specimen/component relationships and lifecycle | Specimen basics exist; Work/Edition records and Components do not | A02, U03 |
-| Unidentified preservation and resumable upload/inbox | Item-bound uploads retain sources and stable representation IDs | A02, P01–P04 |
-| Append-only provenance and independent verification | Typed evidence exists; only integrity checks run and evidence is accumulated in snapshots | P01, D01–D06 |
-| Compiled module schemas, migrations, operations and presentation | Registration and validation descriptors exist | A03 |
-| Authorized commands, generated contracts, pagination/idempotency/events | Partial service boundary and hand-written DTOs exist | A04, P02, C06 |
-| Durable jobs and archive recovery/export/reindex | Persisted job status and full startup reindex exist | P01, P02, P05, P06 |
-| Provider metadata/manual resolution and assets | Candidate resolution and cover pipeline exist | D06, U04 |
-| Media readers, derivatives, playback and offline cache | Trust/cache policy primitives and ranged original reads exist | D03, D07, C03–C07 |
-| Accounts, grants, recovery, enrollment and rotation | Passwords, grants, sessions and WebAuthn basics exist | U02, S01–S04 |
-| Listener exposure, local setup and browser guidance | Separate routers/listeners and setup/doctor exist | U01, R01, R03 |
-| Discovery, health checks and route failover | Endpoint preference policy only | C01, C02 |
-| Legacy import, deployment and performance evidence | Not implemented | P05, R01–R03 |
-
-No new backlog ticket is required by this decision: the foundation gaps are bounded by A02, A03, A04 and P01, with downstream capability work retaining its existing ticket ownership.
+The [current capability matrix](../implementation-status.md) describes availability.
+The earlier foundation-gap inventory is superseded; it does not allocate new work.
+Entity relationships and preservation/recovery constraints in this decision remain
+applicable under current scope and pre-release evolution.
 
 ## Wave 1 review corrections
 

@@ -1,5 +1,7 @@
 # Remote archive safety review and integration — 2026-10-30
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Reviewed the remote archive preparation against current `main` (`62fec3b`),
 including the outstanding digital matching/retry fixes. The preparation is
 preserved as `4e446dd`; main was integrated into its review branch before testing.
@@ -36,7 +38,7 @@ server identity, queued Job/timestamp, retained import source and opaque archive
 bytes. After later account/archive writes and Job completion, restoring both old
 members into fresh roots resumes the original Job. The complete newer pair remains
 intact and independently reopenable for roll-forward. No duplicate live identity is
-served. This is a local isolated recovery test, not a Fi/NAS snapshot qualification.
+served. This is a local isolated recovery test, not a application-host/NAS snapshot qualification.
 
 Repeated review traced mount admission, Linux descriptor lifetime, publication
 rename/receipt gaps, journal abort/reconciliation, identity durability, setup
@@ -87,6 +89,6 @@ closed after preserving its commits. No unrelated work is discarded.
 The [migration runbook](../../deploy/container/remote-archive.md) still requires
 actual Linux/NFS stable-write/disconnect/server-restart qualification, effective
 container/systemd boot fences, local SSD capacity and numeric access, one writer,
-and a coordinated Fi/NAS restore before approving migration. Hard NFS calls can
+and a coordinated application-host/NAS restore before approving migration. Hard NFS calls can
 still block until service returns. No migration, release or deployment is approved
 or performed by this merge.

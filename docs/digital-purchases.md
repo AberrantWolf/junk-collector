@@ -1,6 +1,6 @@
 # FLAC and MP3 purchases — HL-02
 
-Implementation record, 2026-10-19. [Remaining work](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+Implementation record, 2026-10-19. [Remaining work](remaining-work.md)
 is the sole queue; [dated qualification](validation/digital-purchases-2026-10-19.md)
 records independent vectors, real Chrome and actual Trash Amp GUI acceptance,
 including streaming, seeking, downloads and server-stopped offline reopen. HL-02
@@ -14,7 +14,7 @@ for configuration and limits.
 
 ## WAV addition and completion — 2026-11-01
 
-Published in beta.15 and installed on Fi; see
+Published in beta.15; see
 [publication/deployment evidence](validation/container-beta15-publication-2026-11-01.md).
 
 Digital ingestion also accepts integer PCM WAV originals: 16/24-bit mono/stereo,
@@ -102,7 +102,7 @@ prepared outputs keep their existing identities and 44.1-kHz timeline.
 Browser file/folder selection and configured inboxes use the existing signed
 plan, resumable staging, guided/bulk intents and ordinary publication pipeline.
 Discovery groups disc subfolders and keeps independent nested packages disjoint.
-The format-folder behavior below is published in beta.16 and installed on Fi; see
+The format-folder behavior below is published in beta.16; see
 [publication/deployment evidence](validation/container-beta16-publication-2026-11-01.md).
 Exact case-insensitive `FLAC`, `MP3` and `WAV` folders use the parent album name,
 including `Album/FLAC/Disc 1` and `Album/Disc 1/FLAC`. Sibling encodings remain
@@ -185,8 +185,7 @@ manual authority and immutable playlist targets through existing mechanisms.
 Account/grant recovery remains explicit for archive-only recovery.
 
 The authorized coordinated publication replaces local Cargo patches with exact
-Git revisions. Collector pins junk-libs revision `2c8eaf8fd5a7f3e5f4873d3463b8008039e9af98`; Trash Amp pins the
-published Collector and same junk-libs revisions. Cargo manifests and lockfiles
+Git revisions. Collector and independent clients declare their own exact dependency identities. Cargo manifests and lockfiles
 record the resolved dependency identities. No sibling checkout is required.
 Publication and dependency verification do not alter a live installation.
 
@@ -197,9 +196,11 @@ both provider settings described in [configuration](configuration.md) first.
 Review any alternate-file selection and file visibility before starting. Restricted
 files are not disclosed; a queued background job validates recorded source bytes,
 decodes the selected audio and sends fingerprints/durations to AcoustID. MusicBrainz
-then supplies linked release candidates. The search is bounded (32 recording IDs,
-32 full releases, 100 release links per recording; eight cover previews), and a
-budget-limited result is explicitly incomplete.
+then supplies linked release candidates. Initial release detail demand is eight, with explicit expansion to 32. Recording
+searches are bounded to 32 and alternate-edition browsing to four pages. A complete
+unambiguous mapping with scores at least 0.95 and known duration differences within
+two seconds stops further recording-membership searches. Optional editions/artwork
+do not delay usable candidates. These are bounded suggestions, not exhaustive results.
 
 Reopen the panel to resume polling. Cancel or retry through the persisted job.
 Coverage and track mapping remain visible beside artwork; applying requires every

@@ -1,16 +1,18 @@
-# Fi inbox recovery deployment — 2026-10-31 JST
+# application-host inbox recovery deployment — 2026-10-31 JST
 
-The user authorized deploying the reviewed inbox connector changes to Fi while
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+The user authorized deploying the reviewed inbox connector changes to application-host while
 preserving the existing Bridge connection and receipt history. Signed source
 `0bec4afed811ad91e26d8ff16f3329f8ab59f042` was explicitly approved for GitHub
-`origin/main` and pushed. This is a Fi-only exact-source update; no release tag,
+`origin/main` and pushed. This is an application-host-only exact-source update; no release tag,
 registry release, or channel change was published.
 
 ## Exact installed artifact
 
 The Git archive SHA-256 is
 `70d61909c917d3ed1a3af85ce1b2c9dfebac1c5fdc2861bbba25947b629912f6`.
-Fi verified that archive and built the deployment image once with the source
+application-host verified that archive and built the deployment image once with the source
 revision label. The existing Dockerfile built optimized Collector/media executables;
 no standalone release build or Bridge image rebuild was performed.
 
@@ -22,7 +24,7 @@ The retained environment pins the new image for core/media. Compose, systemd,
 Bridge configuration/image/home, proxy/tunnel settings, listeners and mount sources
 remain unchanged. The reviewed host mail-helper guidance was updated. Source/build,
 qualification logs and operation scripts are retained privately under
-`/home/link/collector-inbox-0bec4af` on Fi.
+`/home/operator/collector-inbox-0bec4af` on application-host.
 
 ## Qualification before activation
 
@@ -60,14 +62,14 @@ stack services. Core, media, Bridge and Caddy exited 0; tunnel shutdown was acce
 under its established normal-stop policy. All container PIDs were zero before sync
 and snapshots. Both read-only snapshots succeeded before the pair was sealed:
 
-- Fi: `/var/backups/collector-fi-pairs/before-inbox-recovery-20261031-0bec4af/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-inbox-recovery-20261031-0bec4af`.
+- application-host: `/var/backups/collector-recovery-pairs/before-inbox-recovery-20261031-0bec4af/application-data`.
+- archive-host: `/volume1/collector-recovery/before-inbox-recovery-20261031-0bec4af`.
 - NAS snapshot UUID: `ac167c0c-9644-4e4c-83f6-7af96ead7943`.
 
-The Fi snapshot covers all local private state/WAL, profiles, Bridge vault/cache,
+The application-host snapshot covers all local private state/WAL, profiles, Bridge vault/cache,
 configuration, TLS, imports and scratch. The NAS point covers the entire archive's
 parent subvolume. Snapshot database quick checks passed; neither source had excluded
-nested subvolumes. The private Fi pair directory also retains the old Compose/
+nested subvolumes. The private application-host pair directory also retains the old Compose/
 environment/systemd/fstab/helper files, service authority key, image identities,
 cutoff/acceptance facts and the complete-pair record. Recovery must use both members
 of this pair; a single database or archive-only rollback is insufficient.

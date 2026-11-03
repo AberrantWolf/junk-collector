@@ -1,7 +1,9 @@
-# Beta.18 qualification and Fi update — 2026-11-02 JST
+# Beta.18 qualification and application-host update — 2026-11-02 JST
 
-The user authorized GitHub failure repair, a clean beta release, Fi update and
-subsequent cleanup of obsolete Fi experiments/versions. Beta.17 is the release
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+The user authorized GitHub failure repair, a clean beta release, application-host update and
+subsequent cleanup of obsolete application-host experiments/versions. Beta.17 is the release
 baseline; the entire candidate selects workspace tests/Clippy, tooling/contracts,
 web models and all 30 browser journeys plus both native release-image gates.
 
@@ -48,20 +50,20 @@ linux/amd64: sha256:85eef4360c8869205d89559917e0c0cc8fdb3e2b81143492e15a14c29b35
 linux/arm64: sha256:0f4ee46e0500f202d8bbf746842ce591036b5822df44858c4896f7d11d849e75
 ```
 
-## Fi recovery point and live acceptance
+## application-host recovery point and live acceptance
 
-Fi anonymously pulled the immutable index before downtime and checked its exact
-source/version/architecture. The source archive SHA-256 matches on Mac and Fi:
+application-host anonymously pulled the immutable index before downtime and checked its exact
+source/version/architecture. The source archive SHA-256 matches on Mac and application-host:
 `51a852b652cbb799d140b65013b54c2c943609b89c3783890384cb0cd9691fed`.
 No local image build occurred. With no unfinished Jobs, all five stack services
 stopped and all actual PIDs reached zero. Full read-only snapshots and database
 quick checks succeeded before sealing the matching pair:
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta18-20261102-4fecd6f/fi-data`.
+- application-host: `/var/backups/collector-recovery-pairs/before-beta18-20261102-4fecd6f/application-data`.
 - NAS: `/volume1/collector-recovery/before-beta18-20261102-4fecd6f`.
 - NAS snapshot UUID: `f16268e0-71ce-c04c-bc6c-d1060eb61d43`.
 
-Fi covers all local private state/WAL, imports/scratch, configuration/TLS, Bridge
+application-host covers all local private state/WAL, imports/scratch, configuration/TLS, Bridge
 home/cache and profiles; NAS covers the entire archive parent subvolume. Neither
 has excluded nested subvolumes. Private recovery metadata retains old stack/env/
 systemd/fstab, image identities and the authority service key with numeric ownership.
@@ -88,7 +90,7 @@ Installed Trash Amp and its retained development worktree are unchanged.
 
 ## Cleanup after acceptance
 
-Removed the three stopped `junk-collector-fi-qualification` containers, their two
+Removed the three stopped `junk-collector-qualification` containers, their two
 named volumes and the unused local fixture tree. Removed obsolete committed-source
 checkouts, extracted source directories and source tar bundles from prior beta/mail
 experiments. One Collector image unreferenced by containers or any retained recovery
@@ -100,6 +102,6 @@ Docker reports **7.154 GB + 10.58 GB** reclaimed from unused build cache (about
 Post-cleanup container identities/unrelated service start times and public/LAN
 HTTPS/assets pass again. Current deployment configuration remains under its existing
 `/opt/junk-collector-beta14` path because the live service still uses those files.
-Private operation evidence remains in `/home/link/collector-beta18-4fecd6f` on Fi
+Private operation evidence remains in `/home/operator/collector-beta18-4fecd6f` on application-host
 and `/tmp/collector-beta18` locally. Hardware/phone/cellular acceptance remains
 outside this release's claims.

@@ -1,17 +1,10 @@
 # Email purchase suggestions
 
-Branch delivery, 2026-10-30. Optional email intake proposes collection changes;
-it does not automatically alter inventory or infer possession from a receipt.
-Published in beta.15 and installed on Fi on 2026-11-01; see
-[release/deployment evidence](validation/container-beta15-publication-2026-11-01.md).
-The initial installation was on 2026-10-31; see [local account setup](../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31)
-and [deployment evidence](validation/fi-email-deployment-2026-10-31.md).
-
-Folder editing and inbox recovery are installed on Fi from signed source `0bec4af`;
-the existing profile and paused connection were preserved. See
-[deployment](validation/fi-inbox-recovery-deployment-2026-10-31.md),
-[folder editing](validation/mail-folder-editing-2026-10-31.md) and
-[recovery validation](validation/inbox-recovery-2026-10-31.md).
+Optional email intake proposes collection changes; it does not automatically alter
+inventory or infer possession from a receipt. Use the [Bridge setup guide](../deploy/proton-bridge/README.md)
+for installation and [dated acceptance](validation/inbox-recovery-2026-10-31.md)
+for tested recovery limits. Published releases containing the feature describe it
+in their notes; this guide does not describe a particular installation.
 
 ## Boundaries
 
@@ -133,10 +126,9 @@ part of local setup, without uploading messages to chat.
 ## Proton Bridge deployment
 
 See [the Portainer and authentication runbook](../deploy/proton-bridge/README.md).
-Fi is the AMD64 Linux application host; FatChocobo supplies the NFS archive.
-Proton offers CLI mode and the Linux `pass` keychain; container packaging is
-self-managed. Official Linux packages are used
-unchanged; no Proton protocol reimplementation or public IMAP proxy is included.
+Keep Bridge home and Collector private state on local private storage. The archive
+may use the supported separate remote-storage layout. Official Linux packages run unchanged with CLI mode and the Linux `pass`
+keychain; there is no Proton protocol reimplementation or public IMAP proxy.
 
 ## Bridge status and web connection
 
@@ -155,12 +147,9 @@ The container supervisor runs the pinned official CLI, reduces its sync events t
 one bounded atomic status file, and keeps raw output/account names/message IDs
 out of that file. Only a public certificate fingerprint crosses the shared
 read-only status bind. Certificate export stays inside Bridge's protected home,
-including its private key. The terminal query uses the same snapshot without
-opening another Bridge process or interrupting sync:
-
-```sh
-ssh fi-home /home/link/bin/collector-mail status
-```
+including its private key. Operators can inspect the same sanitized snapshot at
+`${PROTON_BRIDGE_STATUS}/status.json` on the Docker host without opening another
+Bridge process or interrupting sync. An absent or stale file is not sync completion.
 
 `POST /api/v1/mail/setup` binds the profile owner to the authenticated enabled
 administrator and accepts only local IMAP credentials and folder names. A pinned

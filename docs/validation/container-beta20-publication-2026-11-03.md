@@ -1,7 +1,9 @@
-# Beta.20 release and Fi update — 2026-11-03 JST
+# Beta.20 release and application-host update — 2026-11-03 JST
+
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
 
 The user authorized a new release, monitoring/repair of qualification failures,
-and Fi installation after every required gate passes. This is the current operation
+and application-host installation after every required gate passes. This is the current operation
 record; candidate preparation does not assert publication or installation success.
 
 ## Candidate scope
@@ -20,8 +22,8 @@ anonymous pull checks and preview promotion. Publication must reuse those exact
 validated bytes. Stable `latest` must remain unchanged. No extra standalone release
 build is required for this container-only delivery.
 
-Fi installation will first inspect the live installation and pending work, then
-retain a matched stopped-writer Fi/private-state and NAS/archive recovery pair.
+application-host installation will first inspect the live installation and pending work, then
+retain a matched stopped-writer application-host/private-state and NAS/archive recovery pair.
 Only the qualified core/media image may be updated. Existing identity, configuration,
 credentials, Bridge/Caddy/tunnel topology, unrelated services and meaningful history
 remain protected. Actual-host acceptance and recovery paths will be recorded after

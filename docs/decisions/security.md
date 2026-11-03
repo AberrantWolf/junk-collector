@@ -61,10 +61,12 @@ consumption are transactions: replacement invalidates the prior batch atomically
 compare-and-swap consumption makes concurrent replay yield at most one success.
 Successful online recovery atomically replaces the password, invalidates the
 active batch, revokes existing browser sessions, and issues one fresh browser
-session. Native credentials and collection grants are unchanged.
+session. Native credentials and pending enrollments are revoked; passkeys and
+collection grants are retained. Generating replacement codes alone does not revoke
+apps. This follows the current `CredentialChange::RecoverPassword` application policy.
 
 Local recovery is a server-stopped, exclusive CLI operation against explicitly
-selected private state and an explicit `UserId`. It resets credentials, revokes all
+selected private state and an explicit sign-in username (`recover-account --username NAME`). It resets credentials, revokes all
 sessions, paired native credentials, and passkeys for that account, and records the
 event. It never reconstructs or changes collection grants. Online APIs refuse to
 remove or demote the last enabled administrator and refuse to remove or demote the
@@ -123,8 +125,7 @@ lookup in the native-credential table selects native authentication. Public/priv
 routes remain separately composed, forwarded headers do not infer trust, cookies
 are Secure/HttpOnly/SameSite=Strict, and upload/image/range bounds remain enforced.
 
-The rate buckets are intentionally process-local and reset on restart. A production
-native secure-storage implementation, real password-manager/hardware passkey runs,
+The rate buckets are intentionally process-local and reset on restart. Native secure-storage adapters exist. Additional real password-manager/hardware passkey runs,
 browser-trusted remote HTTPS, independent security/protocol review, authenticated
 TLS identity rotation, and deployment/load qualification remain external or later
 ticket gates. These are not implied by virtual-authenticator or loopback tests.

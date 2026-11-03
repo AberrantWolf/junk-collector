@@ -1,6 +1,6 @@
 # Recover a previous container installation
 
-For a local-state/NFS-archive split, use the [Fi remote archive runbook](remote-archive.md).
+For a local-state/NFS-archive split, use the [remote archive runbook](remote-archive.md).
 Its paired recovery point replaces the single-root snapshot assumption.
 
 For Btrfs local points or GNU tar increments, use the separate

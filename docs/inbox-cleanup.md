@@ -4,7 +4,7 @@ Delivered for HL-09 in public **alpha.3**, 2026-10-21. Imports continue to keep
 their source files by default. See the [source acceptance](validation/inbox-cleanup-2026-10-21.md)
 and [native images/isolated Portainer qualification](validation/container-publication-2026-10-21.md).
 
-Open **Work & history**, select your completed inbox import, and expand its details.
+Open **Activity**, select your completed inbox import, and expand its details.
 Under **Inbox source files**, confirm that copying and editing the source package
 have finished, then choose **Remove imported inbox files**. The action is separate
 from import acceptance, never selected automatically, and applies to this package.

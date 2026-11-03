@@ -64,25 +64,10 @@ may report a typed unavailable reason when that is real supported behavior. Test
 may use explicit fakes; those are not production implementations. Design-only
 contracts must be labeled planned and must not inflate implementation status.
 
-## Remaining wave checkpoints
+## Future changes
 
-Wave 4: D04/D05 review the operation/result validation contract and bounded snapshot
-access before extraction; D06 reviews metadata authority and artwork selection;
-D07 reviews immutable recipe/representation/media availability. P05 restores the
-current archive/private format and any explicitly supported conversion, not every
-historical wave. C01 defines the connection-keyed secret/transport and shared read
-DTO boundary; S04/C02 extend the same trust/route model without obsolete adapters.
-
-Wave 5: before C03–C07 integration, review a single typed client-service contract
-for browse/artwork, media manifests, queues, download profiles, offline metadata,
-cache identity and personal activity. Slint and Trash Amp consume these services;
-neither gets a parallel policy model. Implement each complete workflow and update
-all callers when the contract improves. P06 measures real queries and can reshape
-projections/APIs with corresponding client changes.
-
-Wave 6: R01 retains real Retro Junk import compatibility and original-source
-preservation. R02/R03 document supported deployment/backup formats and run the
-current release acceptance suite. Completion of these waves does not automatically
-freeze the backend. Declare a supported baseline explicitly when sustained external
-use/release readiness warrants it; record versions, upgrade support, backup/restore
-rules and unsupported-format behavior at that point, then enforce that promise.
+Checkpoint names do not allocate work or freeze contracts. Use the open-work queue
+and current subsystem contracts. Review producers, consumers, durable data, failure
+recovery and affected independent clients before changing a boundary. Declare a
+supported baseline explicitly when warranted, including upgrade/conversion and
+backup/restore commitments; until then the preservation rules above still apply.

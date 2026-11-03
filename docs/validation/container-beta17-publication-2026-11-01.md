@@ -1,7 +1,9 @@
-# Beta.17 publication and Fi update — 2026-11-01 JST
+# Beta.17 publication and application-host update — 2026-11-01 JST
+
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
 
 [Beta.17](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.17)
-is published on `preview` and installed on Fi. It includes the three purchased-
+is published on `preview` and installed on application-host. It includes the three purchased-
 audio compatibility fixes, preserved-identification retry and the previously
 local inbox selector/review popup. Originals remain byte-identical. See
 [release notes](../releases/v0.1.0-beta.17.md),
@@ -58,7 +60,7 @@ linux/amd64: sha256:45acb9472baa320147544954fcaf85b316d3885064dc5cd10cfaead31621
 linux/arm64: sha256:5406ecd2155e5a48eda93acc9e0eeb49bc77f16da4ef90982595b700204f33e1
 ```
 
-Fi pulled anonymously by immutable index before downtime. Image architecture,
+application-host pulled anonymously by immutable index before downtime. Image architecture,
 version/source labels and RepoDigest match the release record. Core/media pin
 those same immutable bytes. No local deployment build occurred.
 
@@ -69,11 +71,11 @@ services; all actual PIDs reached zero and all five exit codes were zero.
 After writeback completed, both read-only snapshots succeeded without excluded
 nested subvolumes:
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta17-20261101-fe7b95c/fi-data`.
+- application-host: `/var/backups/collector-recovery-pairs/before-beta17-20261101-fe7b95c/application-data`.
 - NAS: `/volume1/collector-recovery/before-beta17-20261101-fe7b95c`.
 - NAS snapshot UUID: `32bf3679-e677-2e46-a8a7-932aab4a18be`.
 
-The matching pair was sealed before activation. Fi covers all local private
+The matching pair was sealed before activation. application-host covers all local private
 state/WAL, imports/uploads/scratch, config/TLS, Bridge home/cache and profiles;
 NAS covers the complete archive parent subvolume. Snapshot database quick checks
 pass. Private recovery metadata retains Compose/environment/systemd/fstab/helper
@@ -109,5 +111,5 @@ production accounts/Items were created and no failed production import was
 silently retried. Failed identification can now be explicitly retried from
 **Review import → Retry this step**. Installed Trash Amp is unchanged.
 
-Private operation evidence is retained in `/home/link/collector-beta17-fe7b95c`
-on Fi and `/tmp/collector-beta17` locally.
+Private operation evidence is retained in `/home/operator/collector-beta17-fe7b95c`
+on application-host and `/tmp/collector-beta17` locally.

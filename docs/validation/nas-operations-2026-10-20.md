@@ -1,9 +1,11 @@
 # HL-05A — actual-host NAS operations, 2026-10-20
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 ## Outcome and boundaries
 
 The shipped install/update/restore path is accepted on isolated data on the actual
-Synology DS1522+ (`fatchocobo.local`, x86-64 Linux, Btrfs `/volume1`). Python 3.8.15
+Synology DS1522+ (`archive-host.local`, x86-64 Linux, Btrfs `/volume1`). Python 3.8.15
 and Compose v2.20.1-6047-g6817716 ran the checked-in qualification script. No live
 archive/config/state, account, Portainer service, tunnel or share ACL was changed.
 The existing production container remained running with its original start time

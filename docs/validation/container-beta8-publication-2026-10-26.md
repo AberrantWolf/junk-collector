@@ -1,8 +1,10 @@
 # Beta.8 publication and NAS update — 2026-10-26 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user authorized committing the MusicBrainz fixes, publishing a new release
 and deploying it to the NAS. Beta.8 is published on `preview` and installed on
-`fatchocobo`. Unrelated raw-CD helper and beta.6 documentation edits remain
+`archive-host`. Unrelated raw-CD helper and beta.6 documentation edits remain
 uncommitted and were excluded from this release.
 
 ## Source and publication

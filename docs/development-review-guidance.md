@@ -1,0 +1,30 @@
+# Development review guidance
+
+Current cross-cutting failure and recovery criteria. Apply the relevant cases when
+changing their subsystem; these are not a second work queue or a requirement to
+repeat unaffected acceptance. See [architecture](architecture.md),
+[testing](testing.md) and [documentation maintenance](index.md).
+
+- Keep browsing, availability polling, and album admission free of full-payload hashing. Resolve recorded observations with committed source fingerprints; validate actual bytes in cancellable background processing before encoding/publication. Reusing a helper must not accidentally turn a catalog query into a disc-sized integrity scan per poll or per track.
+
+- External download forms are not stable APIs. Validate advertised field values, not just names; stop the batch on refusal and do not retry a blocked provider. Bound expanded archives and validate cache digests before reuse. Use offline fixtures for repairs.
+
+- Shared background work needs durable request ownership, not a frozen “owned” boolean. Commit references with admission, fence child admission with the parent claim in the same transaction, retain the first immutable Job timestamp on convergent requests, and test later direct requests plus last-owner cancellation with an advancing clock.
+
+- Recover all pages of unfinished workflows periodically, not only the first page at startup. Commit the upstream Job outcome before advancing downstream work; preservation is not the end of enrichment. Persist terminal/cancelled state, fence generic Job retry as well as specialized commands, and keep UI polling until the whole requested workflow settles.
+
+- Bind command receipts to submitted inputs before resolving mutable server configuration. Share the actual effect implementation rather than nesting independently committed commands.
+- Keep provider workflow policy in application services; a frontend should not compose publication and enrichment into a second domain pipeline. Persist completion receipt inputs across panel reopen, fence every asynchronous continuation, and give sibling panels distinct stable React keys.
+- Release media elements when their refs detach, not only in passive-effect cleanup; fence superseded play promises. Test the detached element’s paused/source state and real playback before close or revocation, rather than checking only DOM removal.
+- Send typed availability/permission fields to clients; do not infer behavior from display or error text. Cancel obsolete UI requests and pollers, resume pending-job refresh after reopening, keep failures visible, and verify styles are included in served assets.
+
+- Test repeated provider commands with advancing timestamps and enrichment of already-observed candidates. Include every resolved field/ranking/artwork input in immutable candidate versions, and keep current automatic candidates distinct from selectable history. Bound test-server teardown so a failed assertion cannot hide behind an unused HTTP fixture.
+- Bind materialized metadata to the inventory revision it resolves. Later manual inventory edits must survive refresh; stable candidate and observation IDs cannot silently acquire different content. Test these conflicts before publication and again through reindex.
+- Keep one provider acquisition registry and publication pipeline; adapt small responses to its streaming port. Share module-owned provider DTOs between producers and consumers instead of maintaining matching private structs.
+- Keep parsing, byte decoding, normalization and reader traversal in shared libraries even when their inputs are authorized package handles. Collector modules map identities and apply domain policy; accepting readers rather than paths does not make a duplicated mechanism domain logic.
+- Make evidence claims no broader than the work performed. Record coverage per algorithm/version; a candidate search is not an exhaustive search, and one matching file/track is not a complete package/disc match. Missing coverage stays inconclusive. Verify consumed snapshot bytes against their recorded length and digest before attributing new results to that snapshot. Retain actual computation coordinates even for partial or ambiguous results, and cross-check reported matches against frozen inputs. Test inconsistent result envelopes as well as valid outputs.
+- Fail closed on malformed structural input instead of skipping entries, inventing lengths, padding missing bytes or ignoring unsupported directives. Test truncation, aliases, internal boundaries and the smallest supported inputs, not just ordinary complete fixtures.
+- Enforce resource bounds and cancellation inside long reads, parsing and CPU loops. For subprocess work, check cancellation during validation and final hashing too; monitor I/O worker failures, terminate/reap the process group, and test failure after encoding rather than only cancellation before startup. A limit checked only after allocation or a cancellation check only after completion does not meet that contract. Test interrupted work and ensure it cannot publish success.
+- Separate read authorization from write eligibility. Missing modules or unsupported schemas must not hide authorized historical evidence. Retain role-based redaction and cross-collection denial.
+- Test claims with independent vectors and cases that defeat shortcuts (for example, v2-only matches without a v1 anchor). A green legacy test is not proof its expected behavior is correct; explain changes to expectations. Exercise new user workflows through their real UI, including setup and immediate refresh after mutations.
+- Follow `docs/decisions/pre-release-evolution.md`: do not add compatibility wrappers or migrations merely for checkpoint stability. Preserve actual data and recovery guarantees. When completing work, update the owning current contract and capability status, remove completed open work, and record validation once. Retain existing dated evidence; use Git for superseded prose rather than creating snapshots.

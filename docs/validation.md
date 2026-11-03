@@ -1,3 +1,34 @@
+# Validation evidence
+
+Dated evidence records what ran against a particular source, artifact and environment.
+It is not a current feature list, execution queue or authorization to repeat an operation.
+Use [implementation status](implementation-status.md) for availability and
+[testing](testing.md) to select new checks.
+
+## Finding evidence
+
+| Topic | Entry point |
+| --- | --- |
+| Latest completed publication | [Beta.19 qualification/publication](validation/metadata-performance-2026-11-02.md) |
+| Current candidate | [Beta.20 attempts](validation/container-beta20-publication-2026-11-03.md) |
+| Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
+| Library and media | [Layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
+| Security and recovery | [Security review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
+| Audio and game support | [Audio matrix](audio-preparation.md), [game matrix](game-identification.md) |
+| Testing and packaging | [Change-based delivery](validation/testing-and-packaging-2026-10-26.md) |
+| Earlier checkpoints | [Foundation and subsequent records](#foundation-and-subsequent-qualification-records) |
+
+Individual records remain under `docs/validation/`; release-specific behavior is
+under `docs/releases/`. Preserve dates, source identities, failures, omitted checks
+and qualification limits. Host identifiers in these records are anonymized labels,
+not deployment defaults. A previous environment's acceptance is not acceptance of
+a different installation. See [documentation maintenance](index.md).
+
+## Foundation and subsequent qualification records
+
+The following dated results retain their original acceptance scope. They are not
+current assignments or a present-day supported-feature matrix.
+
 # Validation recorded for the foundation
 
 ## Digital purchases — 2026-10-19
@@ -266,7 +297,6 @@ virtual WebAuthn registration/login, unavailable-module restart and mobile layou
 Strict workspace Clippy passed with warnings denied. This delivery is locally
 accepted; FX-07 and external device/deployment qualifications remain separate.
 
-
 ## FX-06 review fixes — 2026-09-26
 
 The three review findings are corrected using the existing grant, authentication
@@ -468,7 +498,6 @@ doctests; one owned-corpus oracle intentionally ignored),
 web assets changed. All browser runs use temporary server roots, profiles and
 fixtures; the user's archive was untouched. This is local validation and does not
 qualify LA3's second LAN device or general large-scale indexing.
-
 
 ## Persistent bottom music player — 2026-09-22
 
@@ -678,7 +707,6 @@ Large DAT corpus/index performance and owned real-dump qualification remain
 external. Parsing regenerates a bounded in-memory row view per job, not a persistent
 indexed lookup. No scale qualification is claimed.
 
-
 ## D04.2–D04.3 local implementation — 2026-09-13
 
 - Added `collector-providers` at the reserved infrastructure boundary. Its local
@@ -863,7 +891,6 @@ distributable immutable pins. Unrelated Retro sync scripts were excluded.
   domain authority during owner-aware conversion; no collection assignment is
   performed by this correction.
 
-
 - Final checks passed: all 181 locked workspace tests, all-target Clippy with
   warnings denied, architecture/link/fixture checks, formatting, diff checks,
   TypeScript and generated API checks, web build and rebuilt server. No browser
@@ -935,7 +962,6 @@ distributable immutable pins. Unrelated Retro sync scripts were excluded.
   unlocks at the last shared handle's drop rather than relying on descriptor close.
   A deterministic duplicate-descriptor regression verifies release while preserving
   exclusion until the final owner drops. This also covers early-open failures.
-
 
 - Final gates passed: all 173 locked workspace tests, final lock regression,
   architecture/link/fixture checks, formatting, diff checks, warning-free all-target
@@ -3374,7 +3400,6 @@ The broader P04 bulk/history cleanup and application-wide U05 audit remain plann
 LA2, P05, native clients and a new online game provider were not started. No commit
 was made.
 
-
 ## LA1 independent review — 2026-09-16
 
 Review fixes cover durable receipt ordering, paginated periodic recovery, terminal
@@ -3580,7 +3605,7 @@ Google Chrome 153.0.8010.37.
 
 Owned-corpus results:
 
-- Five explicit package directories were copied from `/Users/scott/dumps` into
+- Five explicit package directories were copied from `/home/operator/dumps` into
   `/private/tmp/junk-collector-la3-owned.YFRhnq/inbox`. Final `diff -rq` checks for
   all five source/copy pairs returned no differences. The package set comprised 17
   nested mixed-mode game files (1,090,422,259 bytes), a flat 13-file two-track CD
@@ -3709,7 +3734,7 @@ export/change bundles. No commit was made.
 ## LA3 owned local-DAT qualification and bounded cache — 2026-09-19
 
 LA3 remains partially qualified and unaccepted. The source corpus at
-`/Users/scott/dumps` was not read for mutation or changed. Provider artifacts were
+`/home/operator/dumps` was not read for mutation or changed. Provider artifacts were
 stored only under
 `/private/tmp/junk-collector-la3-owned.YFRhnq/catalogs`, and only the restored
 qualification identity ran during catalog work.
@@ -3788,7 +3813,6 @@ The intended second physical LAN browser with trusted HTTPS remains absent, so i
 Viewer playback, denied curation, grant revocation and active-session revocation are
 still the blocking LA3 acceptance evidence. The DAT-o-MATIC refusal and incomplete
 additional cache coverage remain documented limitations. No commit was made.
-
 
 ## Independent LA3 review — 2026-09-20
 
@@ -3874,7 +3898,6 @@ Final checks: `COLLECTOR_TEST_FLAC=1 cargo test --workspace` passed 302 tests,
 zero failed, one separately configured owned-oracle test ignored; doc-tests passed.
 The sequential `LOCAL_SETUP=1 npm --prefix web run test:smoke` also passed,
 including the same real playback and regression checks over localhost HTTP.
-
 
 ### Cover Art Archive chooser correction — 2026-09-20
 
@@ -4189,7 +4212,6 @@ streaming, downloading, editing and offline retention. Its five Collector
 manifest dependencies were changed only in the temporary copy. The real checkout
 was not modified. The CI-only follow-up does not change that tested Rust source.
 
-
 ## Compact album format availability — 2026-10-09
 
 User-requested presentation change in the shared album browse/preparation component.
@@ -4211,7 +4233,6 @@ mobile (390×844) track-row screenshots were inspected with real fixture rows an
 unavailable Opus profiles. Test-only screenshot instrumentation is removed after
 review; no substitute production responses or permanent icon assets were added.
 
-
 ### Entry-panel edge repair — 2026-10-09
 
 The desktop selected-entry panel now occupies the rightmost 360px from the top
@@ -4232,7 +4253,6 @@ screenshots were inspected; mobile has no horizontal overflow. The album smoke
 also checks top/middle/bottom panel scroll positions and library-page scrolling.
 Navigation and album smoke workflows passed. All geometry/screenshot
 instrumentation is temporary and removed after review.
-
 
 ### Compact track-led album browsing — 2026-10-09
 
@@ -4260,7 +4280,6 @@ review. Browse and FX-05 journeys exercise artwork retry, late/failed evidence,
 retained-original playback, replacement, removal and restoration through menus.
 Their stale upload/completion wording selectors now use the actual current controls;
 no production success behavior was changed to satisfy those old expectations.
-
 
 Acceptance passed: TypeScript/web build and embedded-server rebuild, architecture/
 document checks, Rust formatting, full browser smoke, browse and FX-05 journeys.
@@ -4299,7 +4318,6 @@ see the [nested-work navigation regression](validation/library-work-return-2026-
 
 Live owned-disc AccurateRip qualification remains unperformed; this delivery does
 not broaden the verifier's existing evidence or coverage claims.
-
 
 ## Concurrent processing and provider response reuse — 2026-10-10
 
