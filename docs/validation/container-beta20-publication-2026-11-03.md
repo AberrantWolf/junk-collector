@@ -51,3 +51,13 @@ also found a browser-test polling race: a temporary typed catalog-busy response
 was dereferenced as metadata. Saved-artwork polling now uses the existing
 status-aware metadata reader, which retries only that bounded contention and
 rejects other HTTP errors. Saved cover selection/download checks remain intact.
+
+The third source run [41601248769](https://github.com/AberrantWolf/junk-collector/actions/runs/41601248769)
+passed workspace tests, strict Clippy and the initial browser journeys, then
+failed the local-playback fixture's publication polling on a typed `catalog_busy`
+503. Both native runtime gates and AMD64 release-image smoke had passed in
+[41601266319](https://github.com/AberrantWolf/junk-collector/actions/runs/41601266319).
+The fixture reader now retries only GET + 503 + `catalog_busy`, for at most five
+seconds; mutation and other failures remain fatal. A one-shot injected contention
+response exercises that path before the actual QUIC playback/seek/revocation
+journey. A fresh exact-source run remains required.
