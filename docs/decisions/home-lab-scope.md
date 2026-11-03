@@ -1,5 +1,9 @@
 # Home-lab scope and meaningful provenance
 
+Architectural rules: [ADR 0008](0008-meaningful-provenance-and-bounded-lookup-history.md), [ADR 0016](0016-coordinated-pre-release-evolution.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Accepted user direction, 2026-10-09. This revises scope, prioritization and future
 contract/retention expectations. It does not claim implementation or authorize
 pruning current user data. [The consolidated backlog](../remaining-work.md) is

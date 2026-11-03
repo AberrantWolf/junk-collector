@@ -1,5 +1,9 @@
 # Architecture
 
+Accepted cross-cutting rules are indexed in the [ADRs](decisions/README.md).
+Detailed subsystem requirements below remain applicable; lower-confidence choices
+remain [proposals](decisions/proposals.md), not implementation assignments.
+
 Current reference, reviewed against source `7f4a56c` on 2026-11-03.
 [Documentation authority](index.md) separates current contracts from dated evidence.
 [Implementation status](implementation-status.md) records availability; [remaining work](remaining-work.md)

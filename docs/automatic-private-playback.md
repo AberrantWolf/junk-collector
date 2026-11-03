@@ -1,5 +1,9 @@
 # Automatic private playback
 
+Architectural rules: [ADR 0010](decisions/0010-trust-before-credentials-and-native-enrollment.md), [ADR 0014](decisions/0014-playback-delivery-separate-from-integrity.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Source delivery, 2026-10-22. Web and Trash Amp keep their normal authenticated
 control connection and prefer a reachable, cryptographically trusted private
 media listener. Public/Cloudflare media fallback defaults to **disabled**. This

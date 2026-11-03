@@ -1,5 +1,9 @@
 # Build once, publish validated images
 
+Architectural rules: [ADR 0017](decisions/0017-publish-qualified-artifact-bytes.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 This changes future releases after beta.4. Installed clients and Portainer keep
 their existing update process and `preview` channel. It does not republish beta.4.
 

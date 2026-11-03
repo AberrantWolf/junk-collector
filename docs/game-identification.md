@@ -1,5 +1,9 @@
 # Automatic standard-game identification — 2026-10-10
 
+Architectural rules: [ADR 0005](decisions/0005-lossless-module-data-and-write-eligibility.md), [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Upload standard DAT files or ZIPs in Administration → Game catalogs, review the
 detected documents, import them and activate the saved catalogs. Activation queues
 existing preserved games. New guided imports use the same identification service;

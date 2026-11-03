@@ -9,11 +9,17 @@
 | Current boundaries and detailed contracts | [Architecture](architecture.md) and its subsystem references |
 | Implemented capabilities and limits | [Implementation status](implementation-status.md) |
 | Open assignments and conditional work | [Remaining work](remaining-work.md), the only execution queue |
+| Accepted architectural rules | [ADR index](decisions/README.md) |
+| Architectural proposals | [Unaccepted choices](decisions/proposals.md); not assignments |
 | Active product/security decisions | [Scope](decisions/home-lab-scope.md), [security](decisions/security.md), [evolution](decisions/pre-release-evolution.md) |
 | Validation and release qualification | [Evidence index](validation.md), [testing](testing.md) |
 | Review criteria for implementation | [Development guidance](development-review-guidance.md) |
 
 ## Authority and history
+
+Accepted ADR decision sections state normative rules using must, shall and must not.
+Rationale, code observations and dated evidence must remain distinguishable from rules.
+Detailed valid subsystem requirements remain applicable.
 
 Current guides describe supported behavior for readers with different installations.
 A source implementation, a published artifact and acceptance on a particular platform

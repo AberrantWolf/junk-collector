@@ -1,5 +1,9 @@
 # Security, recovery, and enrollment contract (S01)
 
+Architectural rules: [ADR 0009](0009-exposure-composition-and-independent-authorization.md), [ADR 0010](0010-trust-before-credentials-and-native-enrollment.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 **Current scheduling (updated 2026-10-19):** [remaining work](../remaining-work.md)
 separates necessary public-server controls/qualification (HL-05) from advanced
 rotation/routing and exhaustive assurance (HL-12/14). Preserve implemented defenses;

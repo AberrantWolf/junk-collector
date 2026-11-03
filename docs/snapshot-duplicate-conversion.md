@@ -1,5 +1,9 @@
 # Stopped-server snapshot payload conversion
 
+Architectural rules: [ADR 0008](decisions/0008-meaningful-provenance-and-bounded-lookup-history.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 AccurateRip, MusicBrainz and Cover Art Archive refreshes retain one snapshot for equivalent bytes,
 inputs and parsed outcomes. Older redundant payloads require an explicit conversion;
 normal serving never compacts existing snapshots. Historical IDs, JSON envelopes,

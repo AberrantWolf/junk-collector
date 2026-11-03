@@ -1,5 +1,9 @@
 # FLAC and MP3 purchases — HL-02
 
+Architectural rules: [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md), [ADR 0007](decisions/0007-manual-metadata-authority.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Implementation record, 2026-10-19. [Remaining work](remaining-work.md)
 is the sole queue; [dated qualification](validation/digital-purchases-2026-10-19.md)
 records independent vectors, real Chrome and actual Trash Amp GUI acceptance,

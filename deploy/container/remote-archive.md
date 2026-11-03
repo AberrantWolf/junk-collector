@@ -1,5 +1,9 @@
 # Local private state with a remote NFS archive
 
+Architectural rules: [ADR 0003](../../docs/decisions/0003-portable-and-private-authority.md), [ADR 0004](../../docs/decisions/0004-single-writer-publication-and-recovery.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Use this layout for a Linux application host with local private state and a separate
 NFS archive host. Substitute the paths, mount sources and listener addresses for
 the intended installation. Existing-installation enrollment and matched recovery

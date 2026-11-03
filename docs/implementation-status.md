@@ -2,7 +2,8 @@
 
 Current source reference: `7f4a56c`, reviewed 2026-11-03. Source implementation,
 published release and installation acceptance are separate states. This document
-makes no claim about any reader's installed version. See [documentation authority](index.md).
+makes no claim about any reader's installed version. The [ADRs](decisions/README.md)
+define architectural rules rather than implementation or qualification status. See [documentation authority](index.md).
 
 The latest completed publication evidence in this checkout is
 [beta.19](validation/metadata-performance-2026-11-02.md). The source version is

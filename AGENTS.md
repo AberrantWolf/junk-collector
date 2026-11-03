@@ -1,5 +1,9 @@
 # Junk Collector development
 
+Follow the accepted [architecture decision records](docs/decisions/README.md).
+Rules must use normative language; supporting observations must remain separate.
+Proposals are not accepted requirements. Preserve detailed valid contracts and dated evidence.
+
 Read [architecture](docs/architecture.md) before changing a subsystem. Use
 [implementation status](docs/implementation-status.md) for capabilities and
 [remaining work](docs/remaining-work.md) as the only open-work queue. Read

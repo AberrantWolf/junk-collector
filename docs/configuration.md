@@ -1,5 +1,9 @@
 # Configuration and access
 
+Architectural rules: [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0010](decisions/0010-trust-before-credentials-and-native-enrollment.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 [← README](../README.md) · [First setup](getting-started.md) · [Operations](server-operations.md)
 
 ## Configuration reference

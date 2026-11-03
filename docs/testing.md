@@ -1,5 +1,9 @@
 # Testing and packaging
 
+Architectural rules: [ADR 0017](decisions/0017-publish-qualified-artifact-bytes.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Choose checks from the complete change. Text-only changes do not require unit
 tests. The selector records what ran and why; release images are always optimized
 release builds. Current policy is `change-checks-v1`.

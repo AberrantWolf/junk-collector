@@ -1,5 +1,9 @@
 # Server operations
 
+Architectural rules: [ADR 0003](decisions/0003-portable-and-private-authority.md), [ADR 0004](decisions/0004-single-writer-publication-and-recovery.md), [ADR 0011](decisions/0011-input-bound-command-receipts.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 [← README](../README.md) · [Docker updates](../deploy/container/README.md#update) · [Configuration](configuration.md)
 
 ## Operations and backups

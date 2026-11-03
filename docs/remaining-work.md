@@ -75,3 +75,7 @@ For each selected delivery, record owner, scope, dependencies and acceptance her
 On completion, remove its open entry, update the capability status and owning current
 contract, and link one dated result. Keep failures and unrun checks visible in that
 result rather than copying delivery prose into several documents.
+
+Architectural boundaries are recorded in the [accepted ADRs](decisions/README.md).
+The [lower-confidence proposals](decisions/proposals.md) retain questions for future
+decision; they create no new assignment or prerequisite for this queue.

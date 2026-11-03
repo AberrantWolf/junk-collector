@@ -1,5 +1,9 @@
 # Email purchase suggestions
 
+Architectural rules: [ADR 0007](decisions/0007-manual-metadata-authority.md), [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0011](decisions/0011-input-bound-command-receipts.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Optional email intake proposes collection changes; it does not automatically alter
 inventory or infer possession from a receipt. Use the [Bridge setup guide](../deploy/proton-bridge/README.md)
 for installation and [dated acceptance](validation/inbox-recovery-2026-10-31.md)

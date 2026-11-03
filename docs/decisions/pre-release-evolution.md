@@ -1,5 +1,9 @@
 # Pre-release contract and storage evolution
 
+Architectural rules: [ADR 0016](0016-coordinated-pre-release-evolution.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 **Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
 and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
 history requirements below need reassessment. Preserve actual data/recovery and

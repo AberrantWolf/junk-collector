@@ -1,5 +1,9 @@
 # Recover a previous container installation
 
+Architectural rules: [ADR 0003](../../docs/decisions/0003-portable-and-private-authority.md), [ADR 0004](../../docs/decisions/0004-single-writer-publication-and-recovery.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 For a local-state/NFS-archive split, use the [remote archive runbook](remote-archive.md).
 Its paired recovery point replaces the single-root snapshot assumption.
 

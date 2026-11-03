@@ -1,5 +1,9 @@
 # Foundation contracts
 
+Architectural rules: [ADR 0002](0002-independent-collection-identities.md), [ADR 0003](0003-portable-and-private-authority.md), [ADR 0004](0004-single-writer-publication-and-recovery.md), [ADR 0005](0005-lossless-module-data-and-write-eligibility.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 **Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
 and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
 history requirements below need reassessment. Preserve actual data/recovery and

@@ -5,32 +5,37 @@ Accepted user direction, 2026-10-27. This applies the
 accepted preservation tradeoff, not a new ripping subsystem or a claim that
 incomplete captures are perfect disc archives.
 
+Status: Accepted (original direction 2026-10-27; normative wording formalized
+2026-11-03). See [ADR 0006](0006-source-bound-evidence-and-coverage.md) for claim
+coverage and [ADR 0008](0008-meaningful-provenance-and-bounded-lookup-history.md)
+for preservation. The specialized rules below apply to ordinary music-CD capture.
+
 ## Decision
 
-- Preserve the complete captured redumper package, including raw masters,
-  SUBCODE, STATE, TOC and other sidecars/logs. Keep unresolved Q errors visible
-  in the retained evidence; do not discard or synthesize subchannels to make the
-  capture appear complete.
-- Keep `scripts/rip-cd.sh` refinement conditional on initial SCSI/C2 errors.
-  Q-only errors do not trigger automatic refinement. Further Q recovery is an
-  optional manual operator action, not a normal capture/import/listening gate
-  or a requirement to buy another drive.
-- Use Collector's existing AccurateRip check to assess audio samples against
-  independent reference results. Interpret each outcome using its actual source,
-  reference, algorithm/version, track and offset-search coverage. A whole-disc
-  claim requires the existing complete expected-track and justified-offset
-  conditions; one matching track is not enough.
-- An AccurateRip match supports audio accuracy within that coverage. Missing
-  reference data, partial coverage, ambiguous results or a mismatch do not by
-  themselves prove damaged audio; retain the result and investigate as needed.
-  Neither AccurateRip nor a clean SCSI/C2 summary establishes complete/correct
-  subchannels, all index/control information or every sample outside coverage.
-- Do not reopen Q-only recovery as mandatory remaining work solely because a
-  small count persists. Reassess when there is concrete conflicting evidence:
-  unresolved audio-read errors, suspicious track/index boundaries or control
-  flags, audible problems, or a disc whose required content uses subchannels
-  (for example CD+G). Existing structural validation and unsupported-format
-  restrictions still apply.
+- The complete captured redumper package must be preserved, including raw masters,
+  SUBCODE, STATE, TOC and other sidecars/logs. Unresolved Q errors must remain
+  visible; subchannels must not be discarded or synthesized to imply completeness.
+- Automatic refinement in `scripts/rip-cd.sh` must remain conditional on initial
+  SCSI/C2 errors.
+  Q-only errors must not trigger normal automatic refinement. Additional Q recovery
+  may be an explicit operator action, but must not become an ordinary capture,
+  import or listening gate or a requirement to buy another drive.
+- Independent audio assessment under this tradeoff must use Collector's existing
+  AccurateRip workflow. Results must be interpreted within their actual source, reference,
+  algorithm/version, track and offset-search coverage. Whole-disc claims must meet
+  complete expected-track and justified-offset conditions; one matching track
+  must not establish a whole-disc claim.
+- An audio match must not be presented as proof of complete/correct subchannels,
+  all index/control information or samples outside coverage. Missing references,
+  partial coverage, ambiguity or a mismatch must not alone be presented as proof
+  of damaged audio. Results must remain available for investigation. A clean
+  SCSI/C2 summary must not be presented as proof of complete subchannels, all
+  index/control information or samples outside the reported coverage.
+- Persistent Q-only counts must not by themselves reopen mandatory recovery work.
+  Concrete conflicting evidence must prompt reassessment: unresolved audio-read
+  errors, suspicious track/index boundaries or control flags, audible problems,
+  or required subchannel content such as CD+G. Existing structural validation and
+  unsupported-format restrictions must still apply.
 
 ## Why this tradeoff is acceptable
 
