@@ -26,3 +26,16 @@ Only the qualified core/media image may be updated. Existing identity, configura
 credentials, Bridge/Caddy/tunnel topology, unrelated services and meaningful history
 remain protected. Actual-host acceptance and recovery paths will be recorded after
 execution; no production work is cancelled merely to make an update convenient.
+
+## First qualification failure and repair
+
+Candidate `f2677c6` validation run [41599166464](https://github.com/AberrantWolf/junk-collector/actions/runs/41599166464)
+built both native images, then failed both runtime gates at the same obsolete
+optional-metadata assertion. With providers unconfigured, the repaired application
+reports a failed workflow coordination step rather than attributing an unstarted
+Job to metadata. The smoke gate now accepts that truthful projection only with a
+visible diagnostic, failed overall outcome, no metadata Job and no remaining
+background work. Configured providers must still acquire and settle a metadata
+Job. Originals, explicit FLAC preparation and range playback remain required.
+This failed attempt is not publication or deployment evidence; a new exact-source
+qualification is required.

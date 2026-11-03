@@ -431,15 +431,22 @@ def main():
                 while time.monotonic() < deadline:
                     optional = request(f"/ingests/{imported}", cookie=cookie)
                     metadata = next(step for step in optional["steps"] if step["step"] == "metadata")
-                    if metadata["state"] in ("succeeded", "failed"):
+                    workflow = next((step for step in optional["steps"] if step["step"] == "workflow"), None)
+                    outcome = workflow if workflow and workflow["state"] == "failed" else metadata
+                    if outcome["state"] in ("succeeded", "failed") and not optional["summary"]["work"]:
                         break
                     time.sleep(0.5)
-                assert metadata["state"] in ("succeeded", "failed"), "Optional metadata did not settle"
+                assert not optional["summary"]["work"], "Optional workflow left background work unfinished"
+                assert outcome["state"] in ("succeeded", "failed"), "Optional metadata workflow did not settle"
                 if not user_agent:
-                    assert metadata["state"] == "failed" and metadata["message"], "Unconfigured metadata must stay visibly unavailable"
+                    # No provider Job was admitted: the coordination failure must
+                    # stay visible without pretending metadata execution failed.
+                    assert workflow and workflow["state"] == "failed" and workflow["message"], "Unconfigured provider must stay visibly unavailable"
+                    assert optional["summary"]["outcome"] == "failed"
+                    assert not metadata["job_id"], "Unconfigured metadata unexpectedly acquired a provider request"
                 else:
-                    assert metadata["job_id"], "Configured metadata never acquired its provider request"
-                print(f"Optional metadata outcome: {metadata['state']} (originals and explicit FLAC remain usable)", flush=True)
+                    assert metadata["state"] in ("succeeded", "failed") and metadata["job_id"], "Configured metadata never settled its provider request"
+                print(f"Optional metadata workflow outcome: {outcome['state']} (originals and explicit FLAC remain usable)", flush=True)
                 row = available[0]
                 status, headers, content = request(f"/items/{album_id}/representations/{row['state']['representation_id']}/{row['state']['file_index']}", cookie=cookie, raw=True, headers={"Range": "bytes=4-15"})
                 assert status == 206 and len(content) == 12 and headers["accept-ranges"] == "bytes"
