@@ -23,8 +23,24 @@ try{
  // localhost is a secure context; no certificate-error bypass or security flags.
  const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ let injectedReadContention=false;
+ await page.route('**/api/v1/items/*',route=>{
+  if(route.request().method()==='GET'&&!injectedReadContention){injectedReadContention=true;return route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}});}
+  return route.continue();
+ });
  const fixture=await page.evaluate(async()=>{
-  const call=async(method,path,value)=>{const response=await fetch('/api/v1'+path,{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},...(value===undefined?{}:{body:JSON.stringify(value)})});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.status===204?null:response.json();};
+  const call=async(method,path,value)=>{
+   const until=Date.now()+5000;
+   for(;;){
+    const response=await fetch('/api/v1'+path,{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},...(value===undefined?{}:{body:JSON.stringify(value)})});
+    if(response.ok)return response.status===204?null:response.json();
+    const text=await response.text();let error;try{error=JSON.parse(text).error;}catch{}
+    // Publication can briefly hold the catalog. Retry only safe reads with
+    // the typed contention response; mutation and other failures stay fatal.
+    if(method==='GET'&&response.status===503&&error?.code==='catalog_busy'&&Date.now()<until){await new Promise(r=>setTimeout(r,100));continue;}
+    throw new Error(`${path}: ${response.status} ${text}`);
+   }
+  };
   const me=await call('GET','/me');const collection=await call('POST','/admin/collections',{name:'Local playback fixture',module:'org.junk.music'});const id=crypto.randomUUID();
   const item=await call('PUT','/items/'+id,{expected_revision:0,command:{collection_id:collection.id,title:'Private route audio',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.music',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false}});
   const length=44100*2*2*45;const wav=new Uint8Array(44+length);const view=new DataView(wav.buffer);const text=(offset,value)=>{for(let i=0;i<value.length;i++)wav[offset+i]=value.charCodeAt(i);};text(0,'RIFF');view.setUint32(4,length+36,true);text(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,2,true);view.setUint32(24,44100,true);view.setUint32(28,176400,true);view.setUint16(32,4,true);view.setUint16(34,16,true);text(36,'data');view.setUint32(40,length,true);
@@ -34,6 +50,7 @@ try{
   await call('POST',`/uploads/${upload.id}/commit`);
   for(let n=0;n<100;n++){const current=await call('GET','/items/'+id);const rep=current.captures.flatMap(c=>c.representations)[0];if(rep){const track={id:crypto.randomUUID(),itemId:id,collectionId:collection.id,album:'Local fixture',title:'Private route audio',position:1,representationId:rep.id,fileIndex:0,mediaType:'audio/wav'};localStorage.setItem('collector.music-queue.v1.'+me.user_id,JSON.stringify({tracks:[track],current:track.id}));return {track,user:me.user_id,path:`/api/v1/items/${id}/representations/${rep.id}/0`};}await new Promise(r=>setTimeout(r,100));}throw new Error('fixture publication timed out');
  });
+ await page.unroute('**/api/v1/items/*');assert.equal(injectedReadContention,true,'fixture must exercise publication-read contention');
  await page.reload();const player=page.getByRole('region',{name:'Music player'});await player.waitFor();
  // Browsing never initiates QUIC or prompts; Play starts trusted discovery.
  assert.equal(await page.locator('audio').getAttribute('src'),null);

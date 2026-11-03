@@ -1,18 +1,20 @@
 # Remaining work
 
-Reviewed against source `7f4a56c`, 2026-11-03. This is the only open-work queue.
+Reviewed against source `71eaf64`, 2026-11-03. This is the only open-work queue.
 [Status](implementation-status.md) owns implemented capabilities; [dated evidence](validation.md)
 owns outcomes. The [earlier queue in Git](https://github.com/AberrantWolf/junk-collector/blob/7f4a56c8d6b38724a371549d09b978bbcb8e5cb1/docs/remaining-work.md) is historical
 and must not supply assignments. Existing citations into it explain earlier scope.
 No production deployment is authorized by this document.
 
-## Current release operation
+## Release and source state
 
-Beta.20 qualification is in progress in the [operation record](validation/container-beta20-publication-2026-11-03.md).
-Failed attempts require fresh exact-source qualification. Publication must consume
-the same validated image bytes; a subsequent installation needs its own consistent
-recovery point and acceptance. This documentation branch does not claim those steps
-passed or take over a separate release operation.
+[Beta.20 publication and acceptance](validation/container-beta20-publication-2026-11-03.md)
+are complete. The later [cancelled-publication cleanup repair](validation/cancelled-publication-2026-11-03.md)
+is source-qualified but not released or installed by that operation. No release or
+deployment of the repair is assigned here. Any future release must qualify its exact
+candidate and promote those same bytes; installation requires its own consistent
+recovery point and acceptance. The completed cleanup repair must not be reassigned
+as unimplemented work.
 
 ## Concrete follow-ups
 

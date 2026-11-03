@@ -218,8 +218,14 @@ try{
  await expect(prepareLater.getByLabel('Include this original',{exact:true})).toBeChecked();
  await prepareLater.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-tracks`)).json())[0]?.state.status,laterItem),{timeout:45000}).toBe('available');
- await expect(editor.getByRole('button',{name:'Play track 1: 03.wav',exact:true})).toBeEnabled();
+ // Cached track availability may need two five-second refresh cycles after
+ // the worker publishes; backend availability alone does not refresh the UI.
+ const preparedPlay=editor.getByRole('button',{name:'Play track 1: 03.wav',exact:true});
+ await expect(preparedPlay).toBeEnabled({timeout:15000});
+ await preparedPlay.click();
+ await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02;}return false;});
  await editor.getByRole('button',{name:'Close curator'}).click();
+ await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  await page.reload();await tracks.getByRole('button',{name:'Play album',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02;}return false;});
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);

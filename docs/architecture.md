@@ -4,7 +4,7 @@ Accepted cross-cutting rules are indexed in the [ADRs](decisions/README.md).
 Detailed subsystem requirements below remain applicable; lower-confidence choices
 remain [proposals](decisions/proposals.md), not implementation assignments.
 
-Current reference, reviewed against source `7f4a56c` on 2026-11-03.
+Current reference, reviewed against source `71eaf64` on 2026-11-03.
 [Documentation authority](index.md) separates current contracts from dated evidence.
 [Implementation status](implementation-status.md) records availability; [remaining work](remaining-work.md)
 is the only open-work queue. Earlier checkpoint narratives are retained in the
@@ -1292,6 +1292,15 @@ SQLite state must be local to the server. The current rebuildable `catalog.sqlit
 P06 reuses the incrementally maintained catalog at startup when a checkpoint matches the canonical archive path, projection epoch and complete filesystem observation inventory. Observations cover metadata revisions, snapshot files and migration checkpoints using file size, modification time, and on Unix inode/device/change time; payload trees are pruned. This is a change hint, not byte integrity or catalog verification. Warm startup still walks metadata names/stats and runs SQLite quick_check; it does not parse archive records, revisit completed migration records, or hash snapshot/media bytes.
 
 The archive rename remains the commit point. After projection commit, a separate SQLite transaction updates observations for only the publication's artifacts and seals its projection epoch, before removing the durable journal. Projection-table/FTS/ownership/reference changes invalidate that epoch. A pending or incomplete journal, absent/incompatible checkpoint, different archive path or changed filesystem observation forces an atomic complete rebuild; external changes are not selectively replayed. Full rebuild validates archive records/snapshots and refreshes the checkpoint in the same catalog transaction. Missing/corrupt/incomplete catalogs rebuild; damaged catalog files are retained under unique diagnostic names while private state remains untouched. A restored archive is authoritative, never a stale local projection. Pre-release schema changes must advance the checkpoint format or catalog version whenever projection semantics change. The measured fixtures and recovery evidence are recorded in [P06 validation](validation/p06-indexing.md). Payloads are never read merely to browse. Writes are single-server; independent clones must not reuse operational identity. Replication requires additional protocol work, although IDs, revisions, immutable payloads and tombstones do not assume a server location.
+
+V4 publication cleans its own uncommitted journal/staging when an attempt is
+cancelled, loses its claim or yields typed catalog contention, before releasing
+the archive writer. A later Job can then publish the same observation identity
+without leaving an earlier journal pointed at its different revision bytes.
+Cleanup still refuses an existing committed revision; post-commit work remains
+recoverable. Other failures retain their existing recovery policy, and startup
+still rejects malformed or conflicting committed artifacts. Existing-observation
+lookup errors propagate; only an explicit missing record permits new publication.
 
 ## Ingest and assets
 

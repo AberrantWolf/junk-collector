@@ -1,14 +1,16 @@
 # Implementation status
 
-Current source reference: `7f4a56c`, reviewed 2026-11-03. Source implementation,
+Current source reference: `71eaf64`, reviewed 2026-11-03. Source implementation,
 published release and installation acceptance are separate states. This document
 makes no claim about any reader's installed version. The [ADRs](decisions/README.md)
 define architectural rules rather than implementation or qualification status. See [documentation authority](index.md).
 
 The latest completed publication evidence in this checkout is
-[beta.19](validation/metadata-performance-2026-11-02.md). The source version is
-beta.20; its [qualification record](validation/container-beta20-publication-2026-11-03.md)
-contains failed attempts and does not yet establish successful publication.
+[beta.20](validation/container-beta20-publication-2026-11-03.md), which retains
+failed qualification attempts, the inspected recovery incident and final acceptance.
+The later [cancelled-publication cleanup repair](validation/cancelled-publication-2026-11-03.md)
+is implemented and qualified in source; it is not included in that published image.
+Publication and installation must not be inferred for this newer source change.
 
 | Capability | Implemented behavior | Limits / evidence |
 | --- | --- | --- |
@@ -26,6 +28,7 @@ contains failed attempts and does not yet establish successful publication.
 | Purchase inbox | Optional Proton Bridge, explicit receipt review, folder editing, credential repair and cursor recovery | [Email guide](email-purchases.md); no Gmail adapter |
 | Backup/export | Stopped-server full backup/restore, portable full export/import, optional backup-age reminder | [Operations](server-operations.md); no scheduled backup or database-only recovery mode |
 | Packaging | Native AMD64/ARM64 images, exact-byte validation/promotion, pinned install bundles | [Release pipeline](container-release-pipeline.md); candidate success is not publication |
+| Withdrawn publication cleanup | Cancellation, lost-claim and typed-contention exits settle their own uncommitted V4 journal/staging while holding the writer; non-missing observation lookup errors propagate | [Repair/recovery evidence](validation/cancelled-publication-2026-11-03.md); committed revisions and uncertain-failure recovery remain protected |
 | Contention/error handling | Typed contention yields/retries and differentiated mutation/refresh outcomes | [Contention review](validation/github-background-contention-2026-11-03.md), [error review](validation/github-error-presentation-2026-11-03.md) |
 
 Trash Amp has separate source, packaging and device acceptance. Collector changes
