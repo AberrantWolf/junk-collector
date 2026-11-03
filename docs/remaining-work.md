@@ -1,10 +1,13 @@
-## Beta.20 candidate and requested Fi update — 2026-11-03
+## Beta.20 published and installed on Fi — 2026-11-03
 
-The user requested release qualification/failure repair, publication, and Fi
-installation after the gates pass. The candidate packages the latest digital
-matching/review and GitHub issue repairs. [The operation record](validation/container-beta20-publication-2026-11-03.md)
-tracks exact-source validation, publication and matched-pair recovery/installation.
-Candidate preparation alone does not claim any of those steps passed.
+Signed source `253e37e` is published as beta.20 and installed on Fi. Full exact-source
+checks, all 30 browser journeys, both native image/runtime gates, release-image
+browser smoke, sealed-image publication, anonymous pulls and live HTTPS/assets pass.
+The update safely recovered a pre-existing cancelled publication conflict, retaining
+both staged and published evidence and matched Fi/NAS snapshots. All 123 Items,
+5,199 Jobs, accounts/grants, profiles and paused mail configuration are preserved;
+core is healthy and Bridge is synced. See [qualification, recovery and live
+acceptance](validation/container-beta20-publication-2026-11-03.md).
 
 ## GitHub #9: error presentation review — source implementation, 2026-11-03
 
@@ -17,7 +20,7 @@ receipts cannot silently start a fresh request. Authentication/resource privacy
 and unknown historical module data retain their protections. Workspace tests
 (633 passed, five existing ignores), strict Clippy, tooling/web checks and all 30
 browser journeys pass, with focused review follow-ups and inspected mobile notices.
-No production state or release has changed.
+This source checkpoint preceded beta.20 publication; see the release record above.
 
 ## GitHub #11: catalog contention during background work — 2026-11-03
 
