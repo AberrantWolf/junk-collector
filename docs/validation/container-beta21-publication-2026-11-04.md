@@ -105,3 +105,48 @@ sharing, publication and playback. The cancelled qualification's fallback source
 step never executed. The complete integration/import/resume journey also passes (142.01 seconds),
 including real initial, resumed and guided directory selection, before the
 repaired candidate is pushed.
+
+## Hosted directory investigation after the readiness repair
+
+The readiness repair at `2dbf773` passed locally but source Checks
+[41787962138](https://github.com/AberrantWolf/junk-collector/actions/runs/41787962138)
+failed at the same directory assignment through the real chooser. The click was
+successful; waiting for enabled state did not resolve the hosted failure. No
+container qualification was dispatched for that failed source candidate.
+
+An isolated diagnostic branch uses a read-only manual workflow, with no publication
+or release steps. Its first run
+[41791762293](https://github.com/AberrantWolf/junk-collector/actions/runs/41791762293)
+failed before the browser while restoring the Rust cache: runner annotations report
+`No space left on device`, including failure to write its own worker log. The cache
+was about 5.7 GB compressed. Before another diagnostic, unused Android, .NET, GHC
+and CodeQL installations were removed on the disposable runner, with filesystem
+headroom recorded before/after restoration. This correction is also prepared for
+the main source-check workflow; it does not remove required build or browser tools.
+
+The corrected diagnostic
+[41793373137](https://github.com/AberrantWolf/junk-collector/actions/runs/41793373137)
+restored a 29 GB target directory with 77 GB free. All minimal real directory
+selections passed in Chrome 157.0.8103.38 and Chromium 153.0.8010.12, including
+nested folders and relative paths. The complete purchase journey still failed:
+the chooser control stayed enabled and connected, but received neither files nor
+input/change events. Thus neither disk pressure nor a general Chrome directory
+failure explains that remaining result. Further session/context diagnostics are
+in progress; this diagnostic failure is not release acceptance. No failed release
+workflow has been blindly rerun, and Fi is unchanged.
+
+The expanded diagnostic
+[41794430747](https://github.com/AberrantWolf/junk-collector/actions/runs/41794430747)
+localizes the remaining failure to the existing long-lived page. After the failure,
+a plain directory input substituted into that page still times out. A new page in
+the **same signed-in browser context** immediately selects the exact same five
+files and relative paths. New contexts over HTTP/HTTPS and a new browser also work.
+The source directory exists, has normal ownership/permissions and all expected
+entries; deleting the earlier download does not repair the old page. This is not
+an Imports handler failure or a missing test fixture. The independent Steam-format
+import scenario now opens a fresh page in that same authenticated context. Every
+folder-discovery, sharing, publication and immediate Library refresh assertion is
+retained, along with the preceding playback/export/analysis assertions. The precise
+long-lived-page/CDP sequence remains an unresolved browser-automation limitation;
+these diagnostics do not establish that an ordinary native file picker fails.
+Final source qualification of the isolated journey is still required.

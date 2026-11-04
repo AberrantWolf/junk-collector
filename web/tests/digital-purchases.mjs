@@ -267,6 +267,11 @@ try{
  assert.deepEqual(afterAnalysis.captures,beforeAnalysis.captures);assert.equal(afterAnalysis.primary_artwork,beforeAnalysis.primary_artwork);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:path.join(scratch,'wav-metadata-mobile.png'),fullPage:true});
+ // Keep this independent import journey on a fresh page in the same signed-in
+ // context. Hosted Chrome can stop delivering directory input events on the
+ // previous long-lived export/playback page, including for a plain file input.
+ await page.close();page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
+ const steamImports=page.getByRole('region',{name:'Imports workspace'});
  // Steam-style format wrappers: real folder discovery, review and publication.
  const steam=path.join(scratch,'Steam soundtracks');
  for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3','Game Name OST/Booklet','Other Album/WAV'])await mkdir(path.join(steam,folder),{recursive:true});
@@ -276,9 +281,9 @@ try{
  await copyFile(path.join(fixture,'cover.png'),path.join(steam,'Game Name OST/cover.png'));
  await writeFile(path.join(steam,'Game Name OST/Booklet/booklet.txt'),'PRIVATE STEAM BOOKLET');
  await page.goto(`${origin}/imports?collection=${collection}`);
- await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),steam);
- await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
- const packageRows=imports.locator('.intake-review-row');await expect(packageRows).toHaveCount(3);
+ await chooseFolder(page,steamImports.getByLabel('Choose folders',{exact:true}),steam);
+ await steamImports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ const packageRows=steamImports.locator('.intake-review-row');await expect(packageRows).toHaveCount(3);
  const flacRow=packageRows.filter({has:page.getByText('Game Name OST (FLAC)',{exact:true})});
  const mp3Row=packageRows.filter({has:page.getByText('Game Name OST (MP3)',{exact:true})});
  const otherRow=packageRows.filter({has:page.getByText('Other Album',{exact:true})});
@@ -289,7 +294,7 @@ try{
  await expect(mp3Row.getByText(/cover.png/)).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:path.join(scratch,'format-discovery-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
- await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
+ await steamImports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
  const steamIntake=new URL(page.url()).searchParams.get('item');
  let steamMembers;
  await expect.poll(async()=>{steamMembers=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,steamIntake);return steamMembers.filter(m=>m.import?.outcome==='succeeded').length;},{timeout:45000}).toBe(3);
@@ -305,6 +310,6 @@ try{
  assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');
  // Immediate Library refresh exposes the newly imported version and its track.
  await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
- await tracks.getByText('1. FLAC original',{exact:true}).waitFor();
+ await page.getByRole('region',{name:'Album tracks'}).getByText('1. FLAC original',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery with disjoint encodings/parent companions and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}

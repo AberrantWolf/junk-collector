@@ -98,12 +98,24 @@ jobs:
         with:
           toolchain: 1.99.1
           components: rustfmt, clippy
+      - name: Reserve disk space for source checks
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
         if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
         with:
           shared-key: source-checks
           cache-workspace-crates: true
           cache-on-failure: true
+      - name: Check restored cache headroom
+        if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
+        run: |
+          df -h /
+          du -sh target 2>/dev/null || true
+          python3 -c "import shutil; free=shutil.disk_usage('.').free; print('free bytes', free); assert free >= 8*1024**3, 'Insufficient disk headroom after restoring Rust outputs'"
       - uses: actions/setup-node@v4
         if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
         with:
