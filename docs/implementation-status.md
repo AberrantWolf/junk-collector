@@ -1,12 +1,13 @@
-## Beta.21 reviewed release candidate — 2026-11-04
+## Beta.21 published and installed on Fi — 2026-11-04
 
-The requested review fixes remote-profile fresh-volume admission while retaining
-normal authenticated audio by default. Beta.21 also includes the unreleased
-cancelled-publication cleanup. Qualification, publication and Fi installation are
-in progress; [the operation record](validation/container-beta21-publication-2026-11-04.md)
-tracks exact-source gates, failure diagnoses and the required paired recovery point.
-Fi currently remains on beta.20 with normal audio configured. Do not treat a
-source check or running build as a successful publication or deployment.
+Signed source `280b04f` is published as beta.21 and installed on Fi. Full exact-source
+checks (636 Rust tests and all 30 browser journeys), strict Clippy, both native
+image/runtime gates, release-image browser acceptance and sealed-image publication
+pass. Fi uses normal authenticated audio; the persistent admin toggle can select
+its retained separate endpoint. Core is healthy and Bridge is synced. All 123 Items,
+6,811 Jobs, accounts/grants, mail profiles and paused connection are preserved.
+A matched stopped-writer Fi/NAS recovery pair is retained. See [qualification,
+failure diagnoses and live acceptance](validation/container-beta21-publication-2026-11-04.md).
 
 ## Normal authenticated audio by default — 2026-11-04
 
@@ -15,9 +16,9 @@ A persistent administrator toggle can require private/separate audio; config
 supplies the default, with no provider detection. Alternate endpoints can remain
 provisioned while unused. Authentication, collection permissions and exposure
 composition retain authority. See [delivery and validation](validation/audio-connection-policy-2026-11-04.md).
-Fi now uses normal audio on its existing beta.20 release, with the original
-separate config retained for testing. The new admin toggle is source-only until
-a future release installation; no new image was deployed.
+Fi now runs beta.21 with normal audio selected and its original separate endpoint
+provisioned for optional admin toggling. The initial beta.20 configuration change
+remains dated history in the delivery record.
 Rust coverage with corrected fixture reruns, strict Clippy, web/contract/tooling
 checks and all 30 browser journeys pass; existing ignored/skipped cases and live
 playback limits are recorded in the delivery evidence.
@@ -34,7 +35,7 @@ restart/reindex and unchanged originals. Workspace tests (634 passed, five exist
 ignores), strict Clippy, web/tooling checks and all 30 browser journeys pass; a
 test-only transient-read defect found during validation was repaired and covered.
 See [cause, review and validation](validation/cancelled-publication-2026-11-03.md).
-This source change is not released or installed on Fi; beta.20 remains deployed.
+This cleanup is released and installed on Fi in beta.21; see the current record above.
 
 ## Beta.20 published and installed on Fi — 2026-11-03
 

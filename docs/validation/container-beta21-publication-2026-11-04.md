@@ -17,8 +17,8 @@ preflight: this remote-archive profile always starts media, whose first startup
 requires its service key. The repaired guard requires the provisioned authority
 while permitting normal audio. Core HTTP readiness follows authority startup.
 Offline coverage checks normal mode, missing authority and incorrect sockets.
-Fi will regain its retained endpoint configuration during the stopped update,
-with normal audio still selected, enabling future admin-only switching.
+Fi regained its retained endpoint configuration during the stopped update,
+with normal audio still selected, enabling admin-only switching.
 No remaining actionable authorization, revision/receipt, byte-read or client-route
 finding was identified. Five existing Rust ignores and the local rootless-skopeo
 skip remain unqualified rather than silently counted as passes.
@@ -30,14 +30,11 @@ of this release; workspace package versions alone advance to beta.21.
 
 ## Qualification and installation status
 
-Exact-source GitHub source checks, both native image/runtime gates, AMD64
-release-image browser acceptance and sealed-artifact publication are pending.
-Fi remains healthy on beta.20 with normal audio enabled. Before installation,
-verify pending work and retain a matched stopped-writer Fi/NAS recovery pair.
-Only qualified bytes may be installed. Preserve identity, originals, private state,
-manual authority, meaningful evidence, credentials, Bridge/Caddy/tunnel topology
-and unrelated services. No production Jobs will be cancelled to make the update
-convenient. Final outcomes, digests and any failed attempt will be recorded here.
+Qualification, publication and the Fi update completed successfully at signed source
+`280b04f6cfe76f6f52122e63ea00e1238e37d1e6`. Fi is healthy on beta.21 with normal
+audio selected and its separate endpoint retained for the admin toggle. The
+stopped-writer recovery pair, immutable image identity and live acceptance are
+recorded below. Earlier failed attempts remain explicit historical evidence.
 
 ## Previous main-branch GitHub failure and correction
 
@@ -150,3 +147,97 @@ retained, along with the preceding playback/export/analysis assertions. The prec
 long-lived-page/CDP sequence remains an unresolved browser-automation limitation;
 these diagnostics do not establish that an ordinary native file picker fails.
 Final source qualification of the isolated journey is still required.
+
+## Final qualification and publication
+
+- Source [Checks 41795544460](https://github.com/AberrantWolf/junk-collector/actions/runs/41795544460)
+  passed at `280b04f`: full coverage from beta.20, 636 Rust tests, five existing
+  ignores, strict workspace Clippy, format, architecture/document links, tooling,
+  generated contracts, web types/build/models and all 30 browser journeys. The
+  receipt records `dirty=false`, `status=passed` and `source_unchanged=true`.
+  The purchase journey passes in hosted Chrome 157.0.8103.38 with real folder
+  selection, disjoint packages, publication and immediate Library refresh.
+- [Qualification 41798535769](https://github.com/AberrantWolf/junk-collector/actions/runs/41798535769)
+  reused that exact receipt; both native AMD64/ARM64 release exports passed their
+  actual runtime gates, and AMD64 release-image browser acceptance passed. Rootless
+  OCI transport was exercised on Linux after installing skopeo; the earlier local
+  skip is not counted as a local pass. The accepted exports were assembled,
+  reverified and sealed as artifact `13306866217`, attempt 1, artifact digest
+  `sha256:2363138841b8137cc4b98aa3f7c5ad1134bed47a6a5690ce8631f32fb78df1c8`.
+- The signed tag `v0.1.0-beta.21` targets that exact source. Its redundant tag-push
+  Checks run `41799051589` was cancelled because the same source was already fully
+  qualified; it is not additional passing evidence. No failed run was blindly
+  retried. The diagnostic-only branch is not release evidence.
+- [Publication 41799054107](https://github.com/AberrantWolf/junk-collector/actions/runs/41799054107)
+  restored those exports, reverified their labels/digests, published without another
+  build and passed anonymous verification. The release package and `release-image.json`
+  match `SHA256SUMS`; the downloaded sealed OCI archive matches its recorded digest.
+  [Beta.21](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.21)
+  is a public prerelease. `preview` matches its immutable index and `latest` remains
+  absent, unchanged from before publication.
+
+| Published object | SHA-256 digest |
+| --- | --- |
+| Multi-platform index | `897ed9af50f3f3e500cd83f3177d95389a4d7339cbf2209b9fac07310b5dbc74` |
+| Linux AMD64 manifest | `0904c0cc1d5fd24bec18d3c31b77bdbb458b9add6a304cd381fb95b958b58b79` |
+| Linux ARM64 manifest | `a719ae22db7b8115e03c9273c53c3cc0ae8ac7accca95132febd96ff7652fdc7` |
+| Sealed OCI archive | `0bb3ca7269c5106fd8380d7ee672c7da34b1d1bc5eebfbe0aa7f7e1a335eeac5` |
+
+Install reference:
+`ghcr.io/aberrantwolf/junk-collector@sha256:897ed9af50f3f3e500cd83f3177d95389a4d7339cbf2209b9fac07310b5dbc74`.
+The Fi source archive checksum is
+`6643da05bfb38dc6ce2ef92a15415d9e6b3aea79080e2fdff6d111a209f2a38c`.
+
+## Fi activation and live acceptance — 17:27 JST
+
+Fi anonymously pulled the immutable index using an isolated empty Docker auth
+configuration, and its platform/version/source labels matched qualification.
+Before activation, all five stack containers were stopped through the owning
+`junk-collector-remote.service`; no Jobs were cancelled. Both databases passed
+`quick_check` against the stopped full-state snapshot. The complete recovery pair
+is sealed in private metadata under
+`/var/backups/collector-fi-pairs/before-beta21-20261104-280b04f`:
+
+- Fi read-only full local-state snapshot: that directory's `fi-data` subvolume,
+  including config, private/catalog state, profiles, certificates and Caddy data;
+  the media authority service key and exact deployment/env/unit files are retained
+  alongside it with private permissions.
+- NAS read-only whole archive-parent snapshot:
+  `/volume1/collector-recovery/before-beta21-20261104-280b04f`, snapshot UUID
+  `b4ce1310-d18e-8d4c-96a7-16b29eb2cd3e`, source UUID
+  `83961ea2-acfb-374d-a2c6-41be3ebf2a1b`. Nested subvolumes and NAS Collector writers
+  were checked absent before snapshotting. This is a matched stopped-writer pair,
+  not a partial database rollback or an independent/off-site backup claim.
+
+The exact source's preflight and HTTP readiness overlay were installed. The
+preflight uses systemd's existing EnvironmentFile, verified read-only before the
+update; it is not run with an accidentally empty helper environment. Only the
+saved remote-media endpoint was restored to active config. Normal audio stays
+allowed and automatic private playback stays disabled. Other parsed config values
+and TLS material are unchanged. Core/media image references alone advance to the
+accepted image; activation uses the whole systemd-owned Compose stack.
+
+All five containers run, core is healthy, CLI reports `0.1.0-beta.21`, core/media
+report the exact source and both have restart count zero. Bridge is fresh/synced
+with its unchanged independently checked certificate pin. Bridge, Caddy and tunnel
+container IDs/images, home, profiles, topology, permissions and mounts are retained;
+seven unrelated running containers retain their IDs and start times. The before/
+after facts match: 123 Items, 6,811 Jobs, one user, two grants, two profile files,
+one paused mail connection at revision 2, unchanged cursor and no unfinished Jobs.
+Receipt suggestions and accepted purchase facts are compared, not recreated.
+
+Trusted public and LAN HTTPS health/identity return 200 with unchanged ServerId
+`01a15429-856a-7763-b558-3c158b1604a0`. All eight checked assets, including the new
+administration bundle, match frozen release source. Anonymous playback discovery,
+audio bytes, FLAC export and admin audio-policy requests return 401 on both origins.
+The provisioned separate HTTPS identity also returns the same ServerId. An early
+live probe during stack startup returned 502; it was not counted as acceptance.
+After the explicit readiness check succeeded, all live checks above passed.
+
+Authenticated production playback, iPhone/Safari and cellular behavior were not
+retested during this update. Real signed-in playback, ranges, seeking, route
+switching and permission denial are qualified by the isolated source/image tests;
+those are not a claim of a live Fi listening session. Five existing Rust ignores
+and the precise old-page directory automation limitation remain documented.
+Private deployment evidence stays on Fi; session logs, public receipts and registry
+checks are retained under `/tmp/collector-beta21` for this working session.

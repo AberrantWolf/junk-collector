@@ -26,7 +26,20 @@ check uses the configured core HTTP listener, which starts after the configured
 authority. Generic core-only installations need no separate service. Storage
 identity, mount, filesystem and writable-root checks remain.
 
-## Fi configuration acceptance
+## Fi beta.21 installation — 17:27 JST
+
+Signed source `280b04f` is now published and installed on Fi as beta.21. Normal audio
+remains selected (`remote_media_allowed = true`, `local_playback_enabled = false`);
+the original `[remote_media]` endpoint is restored without changing other parsed
+config values. The installed admin toggle can therefore reenable separate audio
+without editing config. Identity, private state, originals, credentials and the
+existing Bridge/Caddy/tunnel topology are preserved. Full source/image acceptance,
+matched stopped-writer snapshots, anonymous 401 checks and exact public/LAN HTTPS
+asset checks pass. Authenticated live Fi playback was not retested; real playback
+is covered by the isolated source/release-image journeys. See [the final operation
+record](container-beta21-publication-2026-11-04.md) for immutable digests and evidence.
+
+## Initial Fi configuration acceptance — beta.20, 14:36 JST
 
 Fi retains release `0.1.0-beta.20`, source `253e37e`, runtime image
 `sha256:36b95f5a7c731d9cff5d5fb1c1664819d520875c748d5e56ad4206d6c72572d5`.
@@ -114,8 +127,8 @@ remote-archive profile: it always starts media, whose first startup needs the
 service key. Retaining a previously generated key on Fi had hidden the fresh-volume
 failure. Preflight now requires the provisioned authority regardless of route
 preference, while allowing normal audio. Offline admission coverage checks normal
-mode with configured authority, wrong sockets and absent authority. During the new
-release update, Fi will regain its original endpoint section without enabling
-separate routing. This makes later admin toggling possible without a config edit.
+mode with configured authority, wrong sockets and absent authority. During the beta.21
+update, Fi regained its original endpoint section without enabling separate
+routing. Later admin toggling is now possible without a config edit.
 No UI/API authority, revision/receipt, role/exposure or media-read finding remains
-from the review. Release qualification and Fi update are in progress.
+from the review. Release qualification, publication and the Fi update completed successfully; see the final operation record above.

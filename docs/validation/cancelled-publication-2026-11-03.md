@@ -81,3 +81,11 @@ Logs/reports are retained in `/private/tmp/cancelled-publication-checks.log`,
 `/private/tmp/cancelled-publication-browser-resume.log` and
 `/private/tmp/cancelled-publication-game-regression.log`. No production data,
 profiles, provider requests, release tags or deployment images are changed.
+
+## Release installation — 2026-11-04
+
+This delivery is included in beta.21 at signed source `280b04f`, with full exact-source
+checks and native image qualification. Fi was updated from the exact published
+image after retaining a matched stopped-writer recovery pair. See [the completed
+release record](container-beta21-publication-2026-11-04.md). The earlier source-only
+validation and its failures above remain dated evidence.
