@@ -90,3 +90,47 @@ impl Store {
         Ok(result)
     }
 }
+
+pub(crate) fn read_audio_connection(
+    db: &Connection,
+    default_allowed: bool,
+) -> Result<collector_app::AudioConnectionSettings> {
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT value FROM private.settings WHERE key='audio_connection'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(storage)?;
+    raw.map(|s| serde_json::from_str(&s).map_err(storage))
+        .transpose()
+        .map(|saved| {
+            saved.unwrap_or(collector_app::AudioConnectionSettings {
+                revision: Revision(0),
+                remote_media_allowed: default_allowed,
+            })
+        })
+}
+impl Store {
+    pub(crate) fn save_audio_connection_record(
+        &self,
+        default_allowed: bool,
+        command: &collector_app::UpdateAudioConnectionSettings,
+    ) -> Result<collector_app::AudioConnectionSettings> {
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        let current = read_audio_connection(&tx, default_allowed)?;
+        if current.revision != command.expected_revision {
+            return Err(Error::Conflict);
+        }
+        let result = collector_app::AudioConnectionSettings {
+            revision: Revision(current.revision.0.checked_add(1).ok_or(Error::Conflict)?),
+            remote_media_allowed: command.remote_media_allowed,
+        };
+        tx.execute("INSERT INTO private.settings(key,value) VALUES('audio_connection',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [serde_json::to_string(&result).map_err(storage)?]).map_err(storage)?;
+        self.record_command(&tx, &result)?;
+        tx.commit().map_err(storage)?;
+        Ok(result)
+    }
+}

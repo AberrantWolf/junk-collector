@@ -98,6 +98,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     let mut state = AppState::new(store.clone(), pairing.clone());
     state.ingress = Ingress::Private;
     state.direct_media = true;
+    state.remote_media_allowed = false;
     let browser_origin = format!("https://{address}");
     state.allowed_origins = Arc::new(vec![browser_origin.clone()]);
     let collection = state
@@ -169,6 +170,10 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     let local = state.local_playback.clone().unwrap();
     let mut public = state.clone();
     public.direct_media = false;
+    public.remote_media_allowed = false;
+    let (blocked_session, _) = store
+        .issue_session(owner.user_id, "Public refusal")
+        .unwrap();
     let blocked = tower::ServiceExt::oneshot(
         router(public),
         axum::http::Request::builder()
@@ -176,6 +181,7 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
                 "/api/v1/items/{}/representations/{}/0",
                 item.id, upload.representation_id
             ))
+            .header("cookie", format!("collector_session={blocked_session}"))
             .body(axum::body::Body::empty())
             .unwrap(),
     )
@@ -448,39 +454,54 @@ async fn paired_lan_authentication_and_ranged_download_work_without_a_public_rou
     assert_eq!(response.status(), reqwest_status_partial());
     assert_eq!(response.bytes().await.unwrap().as_ref(), b"2345");
     // Exercise the actual blocking decoder adapter against the trusted listener.
-    let saved = enrolled.clone();
     let item_id = item.id;
     let representation = upload.representation_id;
-    tokio::task::spawn_blocking(move || {
-        use std::io::{Read, Seek, SeekFrom};
-        let storage = TestCredentialStorage(std::sync::Mutex::new(Some(saved)));
-        let client = EnrolledClient::from_storage(&storage, connection_key).unwrap();
-        let cancellation = collector_client::MediaCancellation::default();
-        let mut reader = client
-            .media_reader(item_id, representation, 0, cancellation.clone())
+    for normal in [true, false] {
+        let current = service.audio_connection_settings(&owner, false).unwrap();
+        service
+            .update_audio_connection_settings(
+                &owner,
+                false,
+                collector_app::UpdateAudioConnectionSettings {
+                    expected_revision: current.revision,
+                    remote_media_allowed: normal,
+                },
+                &command(),
+            )
             .unwrap();
-        assert!(
-            reader.is_local(),
-            "the enrolled control origin was used for media"
-        );
-        assert_eq!(reader.length(), 10);
-        reader.seek(SeekFrom::Start(2)).unwrap();
-        let mut bytes = [0; 4];
-        reader.read_exact(&mut bytes).unwrap();
-        assert_eq!(&bytes, b"2345");
-        reader.seek(SeekFrom::End(-2)).unwrap();
-        let mut last = Vec::new();
-        reader.read_to_end(&mut last).unwrap();
-        assert_eq!(last, b"89");
-        assert!(reader.seek(SeekFrom::Start(11)).is_err());
-        cancellation.cancel();
-        assert_eq!(
-            reader.read(&mut bytes).unwrap_err().kind(),
-            std::io::ErrorKind::Interrupted
-        );
-    })
-    .await
-    .unwrap();
+        let saved = enrolled.clone();
+        tokio::task::spawn_blocking(move || {
+            use std::io::{Read, Seek, SeekFrom};
+            let storage = TestCredentialStorage(std::sync::Mutex::new(Some(saved)));
+            let client = EnrolledClient::from_storage(&storage, connection_key).unwrap();
+            let cancellation = collector_client::MediaCancellation::default();
+            let mut reader = client
+                .media_reader(item_id, representation, 0, cancellation.clone())
+                .unwrap();
+            assert_eq!(
+                reader.is_local(),
+                !normal,
+                "native route must follow the saved operator choice"
+            );
+            assert_eq!(reader.length(), 10);
+            reader.seek(SeekFrom::Start(2)).unwrap();
+            let mut bytes = [0; 4];
+            reader.read_exact(&mut bytes).unwrap();
+            assert_eq!(&bytes, b"2345");
+            reader.seek(SeekFrom::End(-2)).unwrap();
+            let mut last = Vec::new();
+            reader.read_to_end(&mut last).unwrap();
+            assert_eq!(last, b"89");
+            assert!(reader.seek(SeekFrom::Start(11)).is_err());
+            cancellation.cancel();
+            assert_eq!(
+                reader.read(&mut bytes).unwrap_err().kind(),
+                std::io::ErrorKind::Interrupted
+            );
+        })
+        .await
+        .unwrap();
+    }
     let list_input = collector_client::collector_api_types::CreateCollectionList {
         kind: None,
         name: "LAN playlist".into(),

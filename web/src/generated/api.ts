@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/admin/audio-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["audio_connection_settings"];
+        put: operations["update_audio_connection_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/catalog-sources": {
         parameters: {
             query?: never;
@@ -3014,6 +3030,11 @@ export interface components {
             /** @enum {string} */
             kind: "edition";
         };
+        /** @description Private operator policy; saved preferences override the startup default. */
+        AudioConnectionSettings: {
+            remote_media_allowed: boolean;
+            revision: components["schemas"]["Revision"];
+        };
         /** @enum {string} */
         AudioVerificationStatus: "verified" | "incomplete_search" | "mismatched" | "no_data" | "ambiguous_offsets" | "unavailable" | "unsupported";
         Availability: {
@@ -5974,6 +5995,10 @@ export interface components {
             command: components["schemas"]["UpdateAssetCommand"];
             expected_revision: components["schemas"]["Revision"];
         };
+        UpdateAudioConnectionSettings: {
+            expected_revision: components["schemas"]["Revision"];
+            remote_media_allowed: boolean;
+        };
         UpdateCdLibrarySettings: {
             check_accuraterip_on_ingest: boolean;
             expected_revision: components["schemas"]["Revision"];
@@ -6101,6 +6126,71 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    audio_connection_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioConnectionSettings"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_audio_connection_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAudioConnectionSettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioConnectionSettings"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     catalog_sources: {
         parameters: {
             query?: never;

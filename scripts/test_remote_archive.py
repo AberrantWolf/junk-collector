@@ -69,8 +69,14 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.check(self.env, remote_caddy)
 
-    def test_missing_media_authority_configuration_is_refused_before_startup(self):
+    def test_provisioned_media_supports_normal_audio_and_missing_authority_is_refused(self):
         config = Path(self.env["COLLECTOR_CONFIG"]) / "collector.toml"
+        original = config.read_text()
+        config.write_text('remote_media_allowed=true\n' + original)
+        module.check(self.env, self.table)
+        config.write_text(original.replace('/run/collector-authority/socket', '/wrong/socket'))
+        with self.assertRaises(ValueError):
+            module.check(self.env, self.table)
         config.write_text('archive="/data/archive"\nstate="/data/state"\n[archive_mount]\nnfs_source="nas:/archive"\n')
         with self.assertRaises(ValueError):
             module.check(self.env, self.table)

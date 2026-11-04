@@ -18,19 +18,20 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.5
+## Beta.21
 
-[`v0.1.0-beta.5`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.5)
-adds isolated direct HTTPS music delivery, browser Now Playing metadata and a LAN
-discovery repair. Login/control can stay on Cloudflare while music uses a separate
-endpoint. Docker images support
-**linux/amd64** and **linux/arm64**; publication and anonymous pulls passed.
-Synology DS1522+ uses AMD64 automatically; the permanent NAS update passed.
-See [publication and deployment evidence](docs/validation/container-beta5-publication-2026-10-23.md).
+[`v0.1.0-beta.21`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.21)
+uses the normal signed-in connection for audio by default, with an administrator
+option to require private or separate HTTPS playback. Login and collection
+permissions always apply; operators decide whether their provider permits audio.
+It also repairs abandoned processing-publication cleanup after cancellation.
+Docker images support **linux/amd64** and **linux/arm64**. See the
+[qualification and Fi deployment record](docs/validation/container-beta21-publication-2026-11-04.md)
+for completed gates and current installation status.
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.5.md)
-for media setup, security boundaries and update requirements.
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.21.md)
+for routing, security boundaries and update requirements.
 
 ## What it supports
 

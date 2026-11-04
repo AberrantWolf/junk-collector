@@ -1,5 +1,11 @@
 # Direct HTTPS media with Cloudflare control access
 
+**Policy update, 2026-11-04:** this separate route is optional. Normal authenticated
+website audio is now the default, including through proxies/tunnels. Operators
+can require a separate connection in Administration or configuration; Collector
+does not detect providers or enforce their restrictions. The dated deployment
+evidence and the opt-in implementation below retain their original scope.
+
 Selected design and source contract, **2026-10-23**. **Implemented and deployed
 on the NAS; basic external iPhone Safari playback/seek/track navigation is
 operator-accepted, including an audible track change while locked. A 2026-10-24
@@ -411,12 +417,13 @@ lean `media` Docker target omits core, management assets and encoders. No core
 operational state is mounted into either media image. Read
 Trash Amp's sibling instructions before modifying it.
 
-Selection is private first, then the explicitly enabled direct HTTPS media route.
-Cloudflare remains control-only even when every media candidate fails. Replace
-the current public-origin fallback decision, rather than setting
-`remote_media_allowed=true` and inadvertently enabling tunneled media. Keep refusal
-of music bodies on the control listener as a server-side invariant. Remote grants
-do not authorize the private listener's long-lived native-credential path.
+When the operator requires separate audio, selection is private first, then the
+configured direct HTTPS route; the public control listener refuses music bodies
+even if every alternate candidate fails. With the default normal-audio policy,
+`remote_media_allowed = true`, clients use the authenticated control connection
+and do not probe these alternatives. This is the operator's choice, independent
+of provider identity or claimed restrictions. Remote grants do not authorize the
+private listener's long-lived native-credential path.
 
 Use ordinary public-CA/hostname validation for the remote origin and expected
 server identity obtained through the authenticated descriptor before sending a

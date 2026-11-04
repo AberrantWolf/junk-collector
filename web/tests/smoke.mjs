@@ -498,8 +498,16 @@ try{
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'metadata review has mobile horizontal overflow');
  await page.setViewportSize({width:1440,height:1000});
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
- await page.getByRole('searchbox',{name:'Search collection'}).fill('試験盤');await page.waitForTimeout(350);
- assert.equal(await page.locator('.collection-row').count(),1,'effective metadata was not searchable');
+ // Search is asynchronous: a fixed delay can inspect the cleared old scope.
+ // Hold one actual response past the former 350 ms wait, then require its row.
+ const matchingSearch=url=>url.pathname==='/api/v1/library'&&url.searchParams.get('search')==='試験盤';
+ let delayedMetadataSearch=false;
+ await page.route(matchingSearch,async route=>{delayedMetadataSearch=true;await new Promise(resolve=>setTimeout(resolve,600));await route.continue();},{times:1});
+ const searched=page.waitForResponse(response=>matchingSearch(new URL(response.url()))&&response.ok());
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('試験盤');await searched;
+ await expect(page.locator('.collection-row'),'effective metadata was not searchable').toHaveCount(1);
+ await expect(page.locator('.collection-row').first()).toContainText('試験盤');
+ assert.equal(delayedMetadataSearch,true,'metadata search must exercise a slow response');
  await page.getByRole('button',{name:/試験盤/}).click();
  await clickAction(page,'Review metadata');
  await metadataReview.locator('.candidate.current').first().waitFor();
@@ -514,7 +522,7 @@ try{
  await metadataReview.getByLabel('Displayed artist / edition',{exact:true}).fill('Japan · CD');
  await metadataReview.getByRole('button',{name:'Save artist / edition',exact:true}).click();
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
- await page.getByRole('searchbox',{name:'Search collection'}).fill('A test pressing');await page.waitForTimeout(350);
+ await page.getByRole('searchbox',{name:'Search collection'}).fill('A test pressing');
  await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
  await clickAction(page,'Edit / attach files');
  await curator.getByRole('button',{name:'Advanced evidence',exact:true}).click();

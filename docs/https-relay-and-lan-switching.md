@@ -1,5 +1,12 @@
 # HTTPS relay and automatic LAN connections
 
+**Policy update, 2026-11-04:** the default is now normal authenticated website
+audio, including proxies/tunnels. Operators can require a separate connection in
+[configuration or Administration](configuration.md#public-exposure); Collector
+does not detect providers or enforce their restrictions. This supersedes the
+dated route exclusions/priorities below. Private/relay experiments and historical
+qualification retain their original scope.
+
 **Remote direction selected, 2026-10-23:** use the
 [direct HTTPS media plan](direct-https-media-plan.md): existing Cloudflare control/
 login plus a dedicated direct public media-only origin. This is design only and

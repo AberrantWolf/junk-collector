@@ -1299,6 +1299,12 @@ pub trait JobPort: Send + Sync {
 }
 
 pub trait AdministrationPort: Send + Sync {
+    fn audio_connection_settings(&self, default_allowed: bool) -> Result<AudioConnectionSettings>;
+    fn save_audio_connection_settings(
+        &self,
+        default_allowed: bool,
+        command: &UpdateAudioConnectionSettings,
+    ) -> Result<AudioConnectionSettings>;
     fn worker_settings(&self) -> Result<WorkerSettings>;
     fn save_worker_settings(&self, command: &UpdateWorkerSettings) -> Result<WorkerSettings>;
     fn default_username(&self) -> Result<String>;

@@ -72,8 +72,8 @@ def check(env, table):
     config = tomllib.loads((paths["CONFIG"] / "collector.toml").read_text())
     if config.get("archive") != "/data/archive" or config.get("state") != "/data/state" or config.get("archive_mount", {}).get("nfs_source") != env["COLLECTOR_ARCHIVE_SOURCE"]:
         raise ValueError("container storage paths and archive_mount.nfs_source must match the deployment")
-    if config.get("remote_media_allowed", False) or config.get("remote_media", {}).get("socket") != "/run/collector-authority/socket":
-        raise ValueError("isolated media requires its dedicated authority socket and disabled control-origin fallback")
+    if config.get("remote_media", {}).get("socket") != "/run/collector-authority/socket":
+        raise ValueError("isolated media requires its dedicated authority socket")
     expected = str(uuid.UUID(env["COLLECTOR_ARCHIVE_ID"])) + "\n"
     for path in (paths["ARCHIVE"] / ".archive-identity", paths["STATE"] / "archive-binding"):
         if path.is_symlink() or path.stat().st_size != 37 or path.read_text() != expected:

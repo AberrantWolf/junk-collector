@@ -314,14 +314,27 @@ pub(crate) async fn routes(
     headers: HeaderMap,
 ) -> ApiResult<Json<LocalPlaybackDescriptor>> {
     principal(&state, &headers)?;
+    let allowed = state
+        .service
+        .audio_connection_policy(state.remote_media_allowed)?
+        .remote_media_allowed;
+    // A normal signed-in connection needs no private network probe or media grant.
+    if allowed {
+        return Ok(Json(LocalPlaybackDescriptor {
+            server_id: state.pairing.server_id,
+            endpoints: vec![],
+            remote_media_allowed: true,
+            remote_media: None,
+        }));
+    }
     let mut descriptor = state
         .local_playback
         .as_ref()
-        .map(|local| local.descriptor(state.remote_media_allowed || state.direct_media))
+        .map(|local| local.descriptor(false))
         .unwrap_or(LocalPlaybackDescriptor {
             server_id: state.pairing.server_id,
             endpoints: vec![],
-            remote_media_allowed: state.direct_media || state.remote_media_allowed,
+            remote_media_allowed: false,
             remote_media: None,
         });
     descriptor.remote_media =

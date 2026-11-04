@@ -5,6 +5,58 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/admin/audio-connection": {
+      "get": {
+        "operationId": "audio_connection_settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioConnectionSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_audio_connection_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAudioConnectionSettings"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioConnectionSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/api/v1/admin/catalog-sources": {
       "get": {
         "operationId": "catalog_sources",
@@ -10077,6 +10129,23 @@
             }
           }
         ]
+      },
+      "AudioConnectionSettings": {
+        "type": "object",
+        "description": "Private operator policy; saved preferences override the startup default.",
+        "required": [
+          "revision",
+          "remote_media_allowed"
+        ],
+        "properties": {
+          "remote_media_allowed": {
+            "type": "boolean"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
       },
       "AudioVerificationStatus": {
         "type": "string",
@@ -22576,6 +22645,22 @@
           },
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateAudioConnectionSettings": {
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "remote_media_allowed"
+        ],
+        "properties": {
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "remote_media_allowed": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

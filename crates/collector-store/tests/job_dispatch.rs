@@ -377,3 +377,120 @@ fn busy_yield_preserves_work_and_committed_phase_fences_old_workers_and_cancella
     );
     assert!(store.claim_job("worker", 30).unwrap().is_none());
 }
+
+#[test]
+fn audio_connection_choice_survives_restart_fences_edits_and_requires_administrator() {
+    use collector_app::{CollectionService, CommandContext, UpdateAudioConnectionSettings};
+    let root = tempfile::tempdir().unwrap();
+    let archive = root.path().join("archive");
+    let state = root.path().join("state");
+    let store = Arc::new(Store::open(&archive, &state).unwrap());
+    store
+        .create_user("owner", "audio policy owner password", true)
+        .unwrap();
+    store
+        .create_user("viewer", "audio policy viewer password", false)
+        .unwrap();
+    let (_, owner) = store
+        .login("owner", "audio policy owner password", "test")
+        .unwrap();
+    let (_, viewer) = store
+        .login("viewer", "audio policy viewer password", "test")
+        .unwrap();
+    let service = CollectionService::new(
+        store.clone(),
+        Arc::new(collector_modules::Registry::builtins()),
+    );
+    assert!(
+        service
+            .audio_connection_policy(true)
+            .unwrap()
+            .remote_media_allowed
+    );
+    assert!(
+        !service
+            .audio_connection_policy(false)
+            .unwrap()
+            .remote_media_allowed
+    );
+    let command = UpdateAudioConnectionSettings {
+        expected_revision: Revision(0),
+        remote_media_allowed: false,
+    };
+    let context = CommandContext::new(TransactionId::new().to_string()).unwrap();
+    assert!(matches!(
+        service.audio_connection_settings(&viewer.principal, true),
+        Err(Error::Forbidden)
+    ));
+    assert!(matches!(
+        service.update_audio_connection_settings(
+            &viewer.principal,
+            true,
+            command.clone(),
+            &context
+        ),
+        Err(Error::Forbidden)
+    ));
+    let saved = service
+        .update_audio_connection_settings(&owner.principal, true, command.clone(), &context)
+        .unwrap();
+    assert_eq!(saved.revision, Revision(1));
+    // A repeated submission returns the committed result even if startup defaults change.
+    assert_eq!(
+        service
+            .update_audio_connection_settings(&owner.principal, false, command.clone(), &context)
+            .unwrap()
+            .revision,
+        saved.revision
+    );
+    assert!(matches!(
+        service.update_audio_connection_settings(
+            &owner.principal,
+            true,
+            command,
+            &CommandContext::new(TransactionId::new().to_string()).unwrap()
+        ),
+        Err(Error::Conflict)
+    ));
+    assert!(matches!(
+        service.update_audio_connection_settings(
+            &owner.principal,
+            true,
+            UpdateAudioConnectionSettings {
+                expected_revision: Revision(0),
+                remote_media_allowed: true
+            },
+            &context
+        ),
+        Err(Error::IdempotencyConflict)
+    ));
+    drop(service);
+    drop(store);
+    let reopened = Arc::new(Store::open(&archive, &state).unwrap());
+    let service =
+        CollectionService::new(reopened, Arc::new(collector_modules::Registry::builtins()));
+    assert!(
+        !service
+            .audio_connection_policy(true)
+            .unwrap()
+            .remote_media_allowed
+    );
+    let saved = service
+        .update_audio_connection_settings(
+            &owner.principal,
+            false,
+            UpdateAudioConnectionSettings {
+                expected_revision: Revision(1),
+                remote_media_allowed: true,
+            },
+            &CommandContext::new(TransactionId::new().to_string()).unwrap(),
+        )
+        .unwrap();
+    assert!(saved.remote_media_allowed);
+    assert!(
+        service
+            .audio_connection_policy(false)
+            .unwrap()
+            .remote_media_allowed
+    );
+}

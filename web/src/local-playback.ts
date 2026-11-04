@@ -15,6 +15,7 @@ export let playbackRoute='Checking local playback';
 function reset(){epoch++;route?.close();route=undefined;descriptor=undefined;refreshed=0;grants.clear();remoteGrants.clear();remoteBase=undefined;selecting=undefined;playbackRoute='Checking local playback';}
 window.addEventListener('collector-api-identity-changed',reset);
 window.addEventListener('online',reset);
+window.addEventListener('collector-audio-connection-changed',reset);
 (navigator as unknown as {connection?:EventTarget}).connection?.addEventListener('change',reset);
 function privateHost(host:string){host=host.replace(/^\[|\]$/g,'');if(host==='::1'||/^f[cd][0-9a-f]*:/i.test(host))return true;const n=host.split('.').map(Number);return n.length===4&&n.every(x=>Number.isInteger(x)&&x>=0&&x<=255)&&(n[0]===10||n[0]===127||n[0]===192&&n[1]===168||n[0]===172&&n[1]>=16&&n[1]<=31||n[0]===100&&n[1]>=64&&n[1]<=127);}
 async function bounded<T>(promise:Promise<T>,milliseconds:number,message:string):Promise<T>{let timer:ReturnType<typeof setTimeout>;try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error(message)),milliseconds);})]);}finally{clearTimeout(timer!);}}
@@ -25,6 +26,7 @@ async function select(){
  if(advertised.server_id!==server.server_id||advertised.endpoints.length>8)throw new Error('Playback server identity mismatch.');
  if(descriptor?.remote_media?.base_url!==advertised.remote_media?.base_url)remoteGrants.clear();
  remoteBase=undefined;descriptor=advertised;refreshed=Date.now();
+ if(advertised.remote_media_allowed){route?.close();route=undefined;playbackRoute='HTTPS playback';return;}
  let permission:PermissionState|undefined;
  for(const name of ['local-network','local-network-access']){try{permission=(await navigator.permissions.query({name:name as PermissionName})).state;break;}catch{}}
  if(permission==='denied'&&!advertised.remote_media_allowed&&!advertised.remote_media)throw new Error('Local network access is blocked for Collector. Allow it in this site’s permissions, then use Play to retry. Public media fallback is disabled.');
@@ -53,7 +55,6 @@ async function select(){
   const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}if(JSON.parse(new TextDecoder().decode(bytes)).server_id!==server.server_id)throw new Error('Direct media identity mismatch.');
   if(token!==epoch)throw new Error('Playback account changed.');remoteBase=base;playbackRoute='Direct HTTPS playback';return;
  }
- if(advertised.remote_media_allowed){playbackRoute='HTTPS playback';return;}
  throw new Error(WT?'No local playback endpoint is available. Public media fallback is disabled.':'This browser does not support secure local playback. Use a browser with WebTransport support, or the Trash Amp app. Public media fallback is disabled.');
 }
 async function ensureRoute(){if(route||descriptor&&(descriptor.remote_media_allowed||remoteBase)&&Date.now()-refreshed<30000)return;if(!selecting){const pending=select();selecting=pending;void pending.finally(()=>{if(selecting===pending)selecting=undefined;}).catch(()=>{});}return selecting;}

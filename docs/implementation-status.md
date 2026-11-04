@@ -1,3 +1,27 @@
+## Beta.21 reviewed release candidate — 2026-11-04
+
+The requested review fixes remote-profile fresh-volume admission while retaining
+normal authenticated audio by default. Beta.21 also includes the unreleased
+cancelled-publication cleanup. Qualification, publication and Fi installation are
+in progress; [the operation record](validation/container-beta21-publication-2026-11-04.md)
+tracks exact-source gates, failure diagnoses and the required paired recovery point.
+Fi currently remains on beta.20 with normal audio configured. Do not treat a
+source check or running build as a successful publication or deployment.
+
+## Normal authenticated audio by default — 2026-11-04
+
+Normal playback uses the signed-in website connection, including proxies/tunnels.
+A persistent administrator toggle can require private/separate audio; config
+supplies the default, with no provider detection. Alternate endpoints can remain
+provisioned while unused. Authentication, collection permissions and exposure
+composition retain authority. See [delivery and validation](validation/audio-connection-policy-2026-11-04.md).
+Fi now uses normal audio on its existing beta.20 release, with the original
+separate config retained for testing. The new admin toggle is source-only until
+a future release installation; no new image was deployed.
+Rust coverage with corrected fixture reruns, strict Clippy, web/contract/tooling
+checks and all 30 browser journeys pass; existing ignored/skipped cases and live
+playback limits are recorded in the delivery evidence.
+
 ## Cancelled processing publication cleanup — source implementation, 2026-11-03
 
 V4 publication now removes its own unpublished journal/staging on cancellation,
@@ -907,8 +931,9 @@ checks live parent/collection authority over a restricted core Unix socket.
 It never accepts login cookies or long-lived account credentials. The shared
 native client retains system HTTPS trust for media independently of control trust;
 the web player uses ordinary anonymous HTTPS audio and preserves position on
-lease renewal. Private routes stay preferred and control-origin music remains
-refused. No VPN, relay, HLS or mobile app was introduced.
+lease renewal. When the operator requires separate audio, private routes stay
+preferred and control-origin music is refused. Normal authenticated website audio
+is the default as of 2026-11-04. No VPN, relay, HLS or mobile app was introduced.
 
 The optional Compose overlay gives media no networking, read-only archive/root,
 no capabilities, dedicated socket named volumes and bounded resources. Startup
@@ -1007,8 +1032,9 @@ Trash Amp together: authenticated private endpoint/pin discovery, software-manag
 short-lived certificates, pinned browser WebTransport with a streaming worker,
 and native HTTPS route selection through the shared range reader. Saved account,
 connection, queue and cache identities remain stable. Each range checks current
-authorization. Public media fallback defaults to disabled; ordinary control/login
-access remains. No Tailscale integration or configuration is involved.
+authorization. As of 2026-11-04, normal authenticated website audio is the default;
+this private-first route is selected only when the operator requires separate audio.
+Ordinary control/login access remains. No Tailscale integration or configuration is involved.
 
 See [dated source acceptance](validation/automatic-private-playback-2026-10-22.md)
 for actual playback/seek, trust, revocation, rollover and regression results and

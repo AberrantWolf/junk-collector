@@ -81,6 +81,7 @@ async fn isolated_media_enforces_grants_exact_bytes_and_socket_revocation() {
         base_url: audience.into(),
         socket: root.path().join("auth/socket"),
     };
+    state.remote_media_allowed = false;
     state.remote_media = Some(Arc::new(config.clone()));
     let collection = state
         .service
@@ -357,6 +358,133 @@ async fn isolated_media_enforces_grants_exact_bytes_and_socket_revocation() {
         .await
         .unwrap();
     assert_eq!(response.status(), 503, "control origin served audio");
+    // Saving normal mode reuses this same router and keeps exact byte/session checks.
+    let revision = state
+        .service
+        .audio_connection_settings(&actor.principal, false)
+        .unwrap()
+        .revision;
+    state
+        .service
+        .update_audio_connection_settings(
+            &actor.principal,
+            false,
+            UpdateAudioConnectionSettings {
+                expected_revision: revision,
+                remote_media_allowed: true,
+            },
+            &command(),
+        )
+        .unwrap();
+    let normal = collector_server::router(state.clone());
+    let media_path = format!(
+        "/api/v1/items/{item}/representations/{}/{}",
+        target.representation_id, target.file_index
+    );
+    let anonymous = normal
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+    let response = normal
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("cookie", format!("collector_session={session}"))
+                .header("range", "bytes=2-9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 206);
+    assert_eq!(
+        &axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap()[..],
+        &audio[2..10]
+    );
+    let response = normal
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri(&media_path)
+                .header("cookie", format!("collector_session={session}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers()["content-length"],
+        audio.len().to_string()
+    );
+    let outsider = store
+        .create_user("no-audio-access", "another listener password", false)
+        .unwrap();
+    let (outsider_session, _) = store
+        .issue_session(outsider, "No collection access")
+        .unwrap();
+    let denied = normal
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&media_path)
+                .header("cookie", format!("collector_session={outsider_session}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        denied.status(),
+        403,
+        "normal audio must retain collection authorization"
+    );
+    let routes = normal
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/playback/routes")
+                .header("cookie", format!("collector_session={session}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let routes: collector_api_types::LocalPlaybackDescriptor = serde_json::from_slice(
+        &axum::body::to_bytes(routes.into_body(), 65536)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(routes.remote_media_allowed);
+    assert!(routes.endpoints.is_empty());
+    assert!(
+        routes.remote_media.is_none(),
+        "retained separate configuration must not redirect normal playback"
+    );
+    state
+        .service
+        .update_audio_connection_settings(
+            &actor.principal,
+            false,
+            UpdateAudioConnectionSettings {
+                expected_revision: Revision(1),
+                remote_media_allowed: false,
+            },
+            &command(),
+        )
+        .unwrap();
+
     // A grant never becomes a collection-wide or service-secret authorization.
     let other = store
         .create_user("listener", "another remote test password", false)
@@ -730,6 +858,7 @@ async fn native_round_trip(
         socket: root.join("native-auth/socket"),
     };
     let mut control = state.clone();
+    control.remote_media_allowed = false;
     control.remote_media = Some(Arc::new(config.clone()));
     let _authority = remote_media::start(control.clone(), &config).await.unwrap();
     let key = std::fs::read_to_string(config.socket.parent().unwrap().join("service-key")).unwrap();

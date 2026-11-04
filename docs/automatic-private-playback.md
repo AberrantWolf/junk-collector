@@ -1,9 +1,12 @@
 # Automatic private playback
 
-Source delivery, 2026-10-22. Web and Trash Amp keep their normal authenticated
-control connection and prefer a reachable, cryptographically trusted private
-media listener. Public/Cloudflare media fallback defaults to **disabled**. This
-feature does not deploy a relay or change public hosting, DNS or Tailscale.
+Updated 2026-11-04: normal playback uses the same authenticated website connection,
+including proxies/tunnels. Private-first playback described below is optional:
+enable Require a separate audio connection in Administration → Server settings,
+or set `remote_media_allowed = false` when no saved override exists. Collector
+does not detect providers or enforce their restrictions. Alternate listeners may
+remain provisioned while normal playback is enabled. This feature does not deploy
+a relay or change public hosting, DNS or Tailscale.
 
 ## Listener experience
 
@@ -66,7 +69,8 @@ through the control connection.
 Only explicitly composed direct listeners permit ordinary same-origin media.
 Public listener media is refused while `remote_media_allowed` is false, including
 when DNS or forwarded headers claim a local path. Enabling that operator policy
-would permit public fallback; leave it false while Cloudflare media is unresolved.
+selects the normal authenticated route without private probes. Operators decide
+whether their connection provider permits audio.
 Public login, pairing, library metadata and permission checks remain available.
 
 ## Trust and transfer policy

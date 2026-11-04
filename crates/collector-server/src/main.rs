@@ -235,7 +235,7 @@ impl Default for Config {
             lan_bind: "0.0.0.0:9843".parse().unwrap(),
             local_playback_bind: Some("0.0.0.0:9845".parse().unwrap()),
             local_playback_enabled: true,
-            remote_media_allowed: false,
+            remote_media_allowed: true,
             remote_media: None,
             multi_user: false,
             exposure: Exposure::default(),
@@ -308,7 +308,7 @@ fn instructions(config: &Config, path: &std::path::Path) {
         );
     }
     println!(
-        "Public media fallback: {}. Login/library control remains available.",
+        "Audio on normal connection (configuration default): {}. Saved Administration audio settings override this default; login and collection permissions still apply.",
         if config.remote_media_allowed {
             "enabled"
         } else {
@@ -819,10 +819,6 @@ async fn main() -> Result<()> {
     config.jobs.validate()?;
     if let Some(remote) = &config.remote_media {
         remote.validate()?;
-        anyhow::ensure!(
-            !config.remote_media_allowed,
-            "a separate remote media endpoint requires control-origin media fallback disabled"
-        );
     }
     if let Some(reminder) = &config.backup_reminder {
         reminder.validate()?;

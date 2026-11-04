@@ -1,3 +1,7 @@
+Beta.21 preparation, 2026-11-04: the official current-stable manifest remains dated
+2026-10-15 and selects Rust 1.99.1 (`58cf8f9c3`, 2026-10-13). Repository, CI and
+Docker pins retain that version. Only workspace package versions advance.
+
 Beta.18 preparation, 2026-11-02: the official current-stable manifest remains dated
 2026-10-15 and selects Rust 1.99.1 (`58cf8f9c3`, 2026-10-13). The repository,
 installed toolchain, CI and Docker builder retain that exact version.

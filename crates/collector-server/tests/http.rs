@@ -1301,6 +1301,12 @@ async fn catalog_administration_routes_follow_administration_listener_compositio
         let app = router(state);
         for (method, path, body) in [
             ("GET", "/api/v1/admin/catalog-sources".into(), None),
+            ("GET", "/api/v1/admin/audio-connection".into(), None),
+            (
+                "PUT",
+                "/api/v1/admin/audio-connection".into(),
+                Some(serde_json::json!({"expected_revision":0,"remote_media_allowed":true})),
+            ),
             (
                 "GET",
                 format!("/api/v1/admin/collections/{collection}/catalog-snapshots"),

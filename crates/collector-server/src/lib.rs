@@ -103,7 +103,7 @@ impl AppState {
             pairing,
             multi_user: false,
             local_playback: None,
-            remote_media_allowed: false,
+            remote_media_allowed: true,
             remote_media: None,
             direct_media: false,
             backup_reminder: None,
@@ -831,6 +831,10 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(repair_bridge).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(settings))
         .routes(routes!(worker_settings, update_worker_settings))
+        .routes(routes!(
+            audio_connection_settings,
+            update_audio_connection_settings
+        ))
         .routes(routes!(inboxes))
         .routes(routes!(import_inbox))
         .routes(routes!(create_user))
@@ -2747,13 +2751,18 @@ async fn media(
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
-    if !state.direct_media && !state.remote_media_allowed {
+    let actor = principal(&state, &headers)?;
+    if !state.direct_media
+        && !state
+            .service
+            .audio_connection_policy(state.remote_media_allowed)?
+            .remote_media_allowed
+    {
         return Err(Error::Unavailable(
             "Local playback is required; public media fallback is disabled".into(),
         )
         .into());
     }
-    let actor = principal(&state, &headers)?;
     let resource = blocking(move || {
         state
             .service
@@ -2789,12 +2798,17 @@ async fn music_flac_export(
     headers: HeaderMap,
     Path((item, source, position)): Path<(ItemId, RepresentationId, u16)>,
 ) -> ApiResult<Response> {
-    if !state.direct_media && !state.remote_media_allowed {
+    let actor = principal(&state, &headers)?;
+    if !state.direct_media
+        && !state
+            .service
+            .audio_connection_policy(state.remote_media_allowed)?
+            .remote_media_allowed
+    {
         return Err(
             Error::Unavailable("Local media access is required for this download".into()).into(),
         );
     }
-    let actor = principal(&state, &headers)?;
     let slot = state
         .music_export_slots
         .clone()
@@ -5488,6 +5502,42 @@ fn same_upload_inventory(
                 .get(file.name.as_str())
                 .is_some_and(|actual| actual.bytes == file.bytes && actual.sha256 == file.sha256)
         })
+}
+
+#[utoipa::path(get, path="/api/v1/admin/audio-connection", responses((status=200,body=collector_app::AudioConnectionSettings),(status=403)))]
+async fn audio_connection_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<collector_app::AudioConnectionSettings>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .audio_connection_settings(&actor, state.remote_media_allowed)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(put, path="/api/v1/admin/audio-connection", request_body=collector_app::UpdateAudioConnectionSettings, responses((status=200,body=collector_app::AudioConnectionSettings),(status=403),(status=409)))]
+async fn update_audio_connection_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::UpdateAudioConnectionSettings>,
+) -> ApiResult<Json<collector_app::AudioConnectionSettings>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state.service.update_audio_connection_settings(
+                &actor,
+                state.remote_media_allowed,
+                command,
+                &context,
+            )
+        })
+        .await?,
+    ))
 }
 
 #[utoipa::path(get, path="/api/v1/admin/workers", responses((status=200,body=collector_app::WorkerSettings),(status=403)))]

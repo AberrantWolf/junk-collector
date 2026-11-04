@@ -1918,6 +1918,19 @@ impl JobPort for Store {
 }
 
 impl AdministrationPort for Store {
+    fn audio_connection_settings(
+        &self,
+        default_allowed: bool,
+    ) -> Result<collector_app::AudioConnectionSettings> {
+        library_settings::read_audio_connection(&*lock(&self.db)?, default_allowed)
+    }
+    fn save_audio_connection_settings(
+        &self,
+        default_allowed: bool,
+        command: &collector_app::UpdateAudioConnectionSettings,
+    ) -> Result<collector_app::AudioConnectionSettings> {
+        self.save_audio_connection_record(default_allowed, command)
+    }
     fn worker_settings(&self) -> Result<collector_app::WorkerSettings> {
         self.worker_settings_record()
     }

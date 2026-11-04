@@ -99,3 +99,50 @@ impl CollectionService {
         })
     }
 }
+
+/// Private operator policy; saved preferences override the startup default.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AudioConnectionSettings {
+    pub revision: Revision,
+    pub remote_media_allowed: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateAudioConnectionSettings {
+    pub expected_revision: Revision,
+    pub remote_media_allowed: bool,
+}
+impl CollectionService {
+    pub fn audio_connection_settings(
+        &self,
+        actor: &Principal,
+        default_allowed: bool,
+    ) -> Result<AudioConnectionSettings> {
+        self.require_administrator(actor)?;
+        self.audio_connection_policy(default_allowed)
+    }
+    pub fn audio_connection_policy(
+        &self,
+        default_allowed: bool,
+    ) -> Result<AudioConnectionSettings> {
+        self.administration
+            .audio_connection_settings(default_allowed)
+    }
+    pub fn update_audio_connection_settings(
+        &self,
+        actor: &Principal,
+        default_allowed: bool,
+        command: UpdateAudioConnectionSettings,
+        context: &CommandContext,
+    ) -> Result<AudioConnectionSettings> {
+        self.require_administrator(actor)?;
+        self.execute_command(
+            actor,
+            context,
+            "admin.audio_connection",
+            &command,
+            |effects| effects.save_audio_connection_settings(default_allowed, &command),
+        )
+    }
+}

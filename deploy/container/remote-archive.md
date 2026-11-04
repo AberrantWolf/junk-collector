@@ -132,9 +132,13 @@ Use `compose.yaml`, `compose.media.yaml`, `compose.inbox.yaml`, then
 `compose.remote.yaml` **in that order**, with a reviewed copy of
 [remote.env.example](remote.env.example). The last overlay disables the generic
 initializer and Docker automatic restarts for core, media and proxy. Media waits
-for the core authority socket/key health condition before its first key read,
-including when its named volume is new. Retain the [isolated media configuration](media.md),
-including the dedicated authority socket and disabled control-origin fallback. Its source
+for the core HTTP readiness check before its first key read; core starts its
+configured authority before opening that listener, including when its named
+volume is new. Retain the [isolated media configuration](media.md), including the
+dedicated authority socket, because this profile provisions both processes.
+Normal authenticated website audio is the default and leaves this endpoint unused;
+requiring a separate connection in Administration activates alternate routing.
+The preflight refuses a missing authority configuration before starting the stack. Its source
 requirement also reaches CLI import/restore via `COLLECTOR_NFS_SOURCE` (equivalent
 to global `--nfs-source SOURCE`). Source conflicts with configuration are refused.
 Directory existence and `create_host_path: false` alone do not establish a mount.

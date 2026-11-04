@@ -1,3 +1,25 @@
+## Operator audio connection policy — 2026-11-04
+
+Audio uses the normal authenticated connection by default, including proxy/tunnel
+listeners. No provider detection or provider restriction policy is implemented.
+`remote_media_allowed = true` supplies the startup default. Application-owned
+AudioConnectionSettings in private settings override it after an administrator
+saves the revision-fenced, input-bound command. Management routes retain their
+existing exposure composition. Session and collection authorization still protect
+every audio read; a routing choice never grants access.
+
+When normal audio is allowed, playback discovery advertises no alternate endpoints,
+so existing web/native clients use the enrolled connection without private probes.
+Requiring a separate connection restores private-first/separate-HTTPS behavior and
+refuses public-origin media bytes. Direct LAN listeners retain their existing media
+eligibility. Configured alternate endpoints and their isolated process may remain
+provisioned while unused. New reads observe saved policy; active transfers are not
+forcibly disconnected. Other clients may need reconnecting to clear cached routes.
+The remote-archive Compose profile still provisions media and therefore requires
+its authority configuration even in normal mode; core HTTP readiness follows
+successful authority startup. Generic core-only installations need no media
+service. No archive conversion or collection-data rewrite is involved.
+
 ## Error boundary policy review — 2026-11-03
 
 Application services retain workflow/eligibility/summary policy; adapters diagnose

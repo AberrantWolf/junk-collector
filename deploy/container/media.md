@@ -4,8 +4,15 @@ Source delivery instructions; do not assume an older published image contains
 `collector-media`. Build this source or select a release explicitly documenting
 the feature. No DNS/router changes are made by these files.
 
-Keep the normal Collector control/login hostname on Cloudflare. Use a separate
-DNS-only hostname for music, pointing at the home static public IP. The media
+Normal playback uses the same authenticated connection as the website by default.
+This optional setup is for operators who choose a separate audio route, for example
+because of their tunnel provider’s restrictions. Enable Require a separate audio
+connection in Administration → Server settings, or set `remote_media_allowed = false`
+when no saved override exists. Collector does not detect providers or their rules.
+The endpoint can remain configured while normal playback is enabled.
+
+For Cloudflare control with direct music, keep the control/login hostname and use
+a separate DNS-only hostname for music, pointing at the home static public IP. The media
 container has **no IP networking**, reads the archive through a read-only mount,
 and uses only two local HTTP Unix sockets: one from the TLS proxy, and one to the
 core's restricted media authorization adapter. It cannot use that adapter to

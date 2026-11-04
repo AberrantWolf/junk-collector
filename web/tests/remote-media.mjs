@@ -14,7 +14,7 @@ async function port(){const server=netServer();await new Promise(resolve=>server
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp('/tmp/jc-media-');
 const ports=await Promise.all([port(),port(),port(),port()]);const single=process.env.COLLECTOR_TEST_SINGLE_ORIGIN==='1';const upstream=`http://localhost:${ports[0]}`;const origin=single?`https://localhost:${ports[3]}`:upstream;const remote=`https://localhost:${ports[3]}/${single?'media/':''}`;
 const config=path.join(scratch,'collector.toml');const authority=path.join(scratch,'auth/socket');const mediaSocket=path.join(scratch,'http/socket');await mkdir(path.dirname(mediaSocket));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_enabled = false\nremote_media_allowed = false\nallowed_origins = ["${origin}"]\n[remote_media]\nbase_url = "${remote}"\nsocket = "${authority}"\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_enabled = false\nallowed_origins = ["${origin}"]\n[remote_media]\nbase_url = "${remote}"\nsocket = "${authority}"\n[exposure]\npublic_curation = true\npublic_administration = true\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));const password='Disposable remote-media fixture password';
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 const children=[];let logs='';const start=(binary,args)=>{const child=spawn(binary,args,{stdio:['ignore','pipe','pipe']});children.push(child);child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);return child;};
@@ -41,9 +41,30 @@ try{
  await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Album tracks'}).waitFor();
+ // The default uses authenticated control audio even with a separate endpoint configured.
+ await page.evaluate(()=>{window.WebTransport=class {constructor(){throw Error('Normal playback must not probe private routes');}};document.querySelector('audio').loop=true;});
+ await page.getByRole('region',{name:'Album tracks'}).getByRole('button',{name:'Play album',exact:true}).click();
+ await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&!a.paused&&a.currentTime>.02&&a.currentSrc.includes('/representations/');});
+ assert.equal(observed.filter(r=>r.path==='/read').length,0);
+ await page.evaluate(()=>window.mediaActions.stop({action:'stop'}));
+ await page.getByRole('button',{name:'Administration',exact:true}).click();
+ await admin.getByRole('button',{name:'Server settings',exact:true}).click();
+ const audioSettings=admin.getByRole('region',{name:'Audio connection',exact:true});
+ const separate=audioSettings.getByRole('checkbox',{name:'Require a separate audio connection'});
+ await expect(separate).not.toBeChecked();
+ await page.setViewportSize({width:390,height:844});
+ await separate.scrollIntoViewIfNeeded();await expect(separate).toBeInViewport();
+ assert.equal(await audioSettings.evaluate(el=>el.scrollWidth<=el.clientWidth),true,'audio settings overflow on mobile');
+ if(process.env.COLLECTOR_SCREENSHOTS)await audioSettings.screenshot({path:path.join(process.env.COLLECTOR_SCREENSHOTS,'audio-connection-mobile.png')});
+ await separate.check();await audioSettings.getByRole('button',{name:'Save audio connection',exact:true}).click();
+ await expect(audioSettings.getByRole('status')).toContainText('Audio connection saved');
+ await page.setViewportSize({width:1440,height:1000});
+ if(process.env.COLLECTOR_SCREENSHOTS)await page.screenshot({path:path.join(process.env.COLLECTOR_SCREENSHOTS,'audio-connection-desktop.png')});
+ await admin.getByRole('button',{name:'Close administration'}).click();
+ await page.getByRole('button',{name:'Administration',exact:true}).click();await admin.getByRole('button',{name:'Server settings',exact:true}).click();await expect(separate).toBeChecked();await admin.getByRole('button',{name:'Close administration'}).click();
  // Force the ordinary-HTTPS browser path; no WebTransport/worker is available.
  await page.evaluate(()=>{window.WebTransport=undefined;document.querySelector('audio').loop=true;});
- await page.getByRole('region',{name:'Album tracks'}).getByRole('button',{name:'Play album',exact:true}).click();
+ await page.getByRole('region',{name:'Music player'}).getByRole('button',{name:'Play',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('audio');return audio&&!audio.paused&&audio.currentTime>.02&&audio.currentSrc.includes('/read?grant=');});
  const player=page.getByRole('region',{name:'Music player'});await expect(player).toContainText('Direct HTTPS playback');
  await page.waitForFunction(()=>navigator.mediaSession.metadata?.title==='FLAC original');
@@ -67,7 +88,7 @@ try{
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Music player'}).waitFor();await page.evaluate(()=>{window.WebTransport=undefined;document.querySelector('audio').loop=true;});await page.getByRole('region',{name:'Music player'}).getByRole('button',{name:'Play',exact:true}).click();await page.waitForFunction(()=>{const audio=document.querySelector('audio');return audio&&!audio.paused&&audio.currentTime>.02;});
  const detached=await page.locator('audio').elementHandle();assert.equal(await page.evaluate(async()=>(await fetch('/api/v1/auth/logout',{method:'POST'})).status),204);await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();assert.deepEqual(await detached.evaluate(a=>({paused:a.paused,src:a.getAttribute('src')})),{paused:true,src:null});await detached.dispose();assert.equal(await page.evaluate(()=>navigator.mediaSession.metadata),null);assert.equal(await page.evaluate(()=>Object.values(window.mediaActions).every(handler=>handler===null)),true);
  assert.ok(observed.some(r=>r.path==='/read'));assert.ok(observed.every(r=>!r.cookie&&!r.authorization),'browser sent account credentials to media');if(!single)assert.ok(observed.every(r=>!r.incomingCookie),'cross-origin request carried a login cookie');if(rejectFirst)assert.ok(rejectedGrant,'lease-loss fixture was not exercised');assert.deepEqual(errors,[]);
- console.log(`Remote HTTPS playback (${single?'one origin with a media path':'separate origins'}) passed in Chrome ${await browser.version()}: real separate media executable/Unix sockets, actual FLAC/MP3 playback/seeks, OS media metadata/artwork/actions and automatic track transition, control media refusal, live logout/source release, no browser credential forwarding, synthetic challenge and real early/late range test. Fixture TLS only; iPhone Safari/cellular remains unqualified.`);
+ console.log(`Default signed-in audio, saved/reopened admin toggle with immediate route refresh and mobile/desktop layout, then remote HTTPS playback (${single?'one origin with a media path':'separate origins'}) passed in Chrome ${await browser.version()}: real separate media executable/Unix sockets, actual FLAC/MP3 playback/seeks, OS media metadata/artwork/actions and automatic track transition, control media refusal, live logout/source release, no browser credential forwarding, synthetic challenge and real early/late range test. Fixture TLS only; iPhone Safari/cellular remains unqualified.`);
 }catch(error){console.error(logs);throw error;}finally{
  await browser?.close();if(front){front.closeAllConnections();await new Promise(resolve=>front.close(resolve));}
  for(const child of children.reverse())await stopProcess(child);

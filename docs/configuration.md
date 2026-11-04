@@ -35,12 +35,30 @@ A `.local` name must resolve on your network independently of Junk Collector. Me
 
 ### Public exposure
 
-For Cloudflare control plus a separate streaming service, configure
-`[remote_media]` with `base_url` (a fixed HTTPS URL ending in `/`) and `socket`
-(an absolute Unix socket path in a dedicated shared directory). Keep top-level
-`remote_media_allowed = false`; enabling it together with a separate endpoint is
-rejected. Run the separate `collector-media` executable/container using that
-socket and read-only archive access. See the [operator instructions](../deploy/container/media.md).
+Audio uses the same authenticated connection as the website by default, including
+through proxies and tunnels. Collector does not detect Cloudflare or enforce
+provider restrictions. The server operator chooses the route policy; login,
+collection permissions and exposure checks always apply.
+
+| Option | Default | Effect |
+|---|---|---|
+| `remote_media_allowed` | `true` | Uses the normal signed-in connection for audio. Set `false` to require a private or separate HTTPS audio route on public listeners. |
+| `local_playback_enabled` | `true` | Starts the optional private media listeners. They are unused by normal-mode playback. Set `false` for a setup without those listeners. |
+
+In **Administration → Server settings → Audio connection**, enable **Require a
+separate audio connection** to disable normal public-origin audio. Saved choices
+persist across restarts and override `remote_media_allowed` in the config. New
+requests observe the setting; reconnect other clients to clear cached routes.
+An active transfer is not forcibly disconnected. Direct LAN listeners retain
+ordinary media access.
+
+For optional separate HTTPS streaming, configure `[remote_media]` with `base_url`
+(a fixed HTTPS URL ending in `/`) and `socket` (an absolute Unix socket path in a
+dedicated shared directory). Run `collector-media` with that socket and read-only
+archive access. The endpoint may stay configured while normal audio is enabled;
+it is advertised only when separate audio is required. If no separate/private
+route is reachable in that mode, playback fails visibly without public fallback.
+See the [operator instructions](../deploy/container/media.md).
 No setting opens the router, creates DNS or supplies browser certificate trust.
 
 These settings apply to both the public HTTP upstream and the direct LAN TLS listener. Private listeners include all management surfaces; users still need the appropriate permissions.
