@@ -2,7 +2,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-import {expect} from '@playwright/test';
+import {expect,chooseFolder} from './support/browser.mjs';
 
 export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixture}){
  const nav=page.getByRole('navigation',{name:'Collection tasks'});
@@ -16,7 +16,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  startProviderFixture();
  await nav.getByRole('button',{name:'Imports',exact:true}).click();
  const imports=page.getByRole('region',{name:'Imports workspace'});
- await imports.getByLabel('Choose folders',{exact:true}).setInputFiles(folder);
+ await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),folder);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  assert.equal(await imports.getByLabel('Automatic metadata and artwork').isChecked(),true);
  assert.equal(await imports.getByLabel('Prepare FLAC after import').isChecked(),false);
@@ -31,7 +31,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const intakeId=new URL(page.url()).searchParams.get('item');assert.ok(intakeId);
  releaseUpload();await page.reload({waitUntil:'domcontentloaded'});
  await expect.poll(async()=>{const count=await page.getByRole('region',{name:'Imports workspace'}).count();if(!count){const status=await page.evaluate(async()=>{const c=new AbortController();setTimeout(()=>c.abort(),2000);try{return (await fetch('/api/v1/me',{signal:c.signal})).status;}catch(e){return String(e);}});console.log('Bulk reload account status:',status);}return count;},{timeout:60000}).toBe(1);
- await imports.getByLabel('Reselect original folder to resume the complete batch').setInputFiles(folder);
+ await chooseFolder(page,imports.getByLabel('Reselect original folder to resume the complete batch'),folder);
  await expect.poll(()=>page.evaluate(async id=>{const r=await fetch(`/api/v1/intakes/${id}`);if(!r.ok)return 0;return (await r.json()).preserved;},intakeId),{timeout:60000}).toBe(2);
  const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
  const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Conflicting release disc placements must remain available for reviewed grouping');

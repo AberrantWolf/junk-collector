@@ -66,3 +66,42 @@ Fi preflight reports 123 Items, one user, two grants and 6,811 Jobs, with no unf
 Jobs, paused mail connection revision 2 and a fresh synced Bridge. Local Btrfs has
 about 458 GB free, and the archive remains the intended hard NFSv4.1 mount. These
 read-only observations do not constitute deployment or a recovery point.
+
+## First beta.21 qualification failure and repair
+
+Candidate `f4a46b7` source Checks
+[41784619475](https://github.com/AberrantWolf/junk-collector/actions/runs/41784619475)
+passed 636 Rust tests (five existing ignores), strict Clippy, tooling/web/model
+checks and the preceding browser journeys, including the repaired metadata search.
+It failed in `digital-purchases.mjs` during `setInputFiles` on the folder picker,
+waiting 30 seconds for a directory input event before discovery began. The hosted
+browser was Chrome 157.0.8103.38; local Chrome was 156.0.8078.74.
+
+Inspection shows the Imports picker is disabled during asynchronous IndexedDB
+draft restoration, while Playwright protocol file injection does not wait for
+enabled state. A local minimal case confirmed that direct injection can act on a
+disabled control, so these tests bypassed real user readiness. Folder selection now
+uses a click, which waits for enabled state, followed by the actual file chooser.
+The initial folder, resumed-folder and legacy guided-folder journeys share this
+mechanism; package discovery/publication and all original assertions remain.
+This repairs the unsafe test interaction without increasing its timeout or
+substituting file lists for actual directory selection. Final hosted verification
+is required; a specific Chrome defect is not asserted from this evidence alone.
+
+Both native image jobs and AMD64 release-image browser acceptance passed in
+[41784619526](https://github.com/AberrantWolf/junk-collector/actions/runs/41784619526),
+but that qualification run was cancelled after the source failure, before its
+fallback could execute the same source checks again. These exports are not sealed
+release evidence and will not be published. No workflow was blindly rerun. The next
+candidate's source Checks must pass before container qualification is dispatched.
+Fi remains on the healthy beta.20 image; no deployment or recovery snapshot has
+been performed for beta.21 yet.
+
+The readiness drill now selects a real directory through a picker initially
+blocked for 500 ms; the chooser waits for readiness and returns the actual file
+(local measured 867 ms). The repaired complete purchase journey passes locally
+(67.11 seconds), including real Steam-style nested folder discovery, reviewed
+sharing, publication and playback. The cancelled qualification's fallback source
+step never executed. The complete integration/import/resume journey also passes (142.01 seconds),
+including real initial, resumed and guided directory selection, before the
+repaired candidate is pushed.

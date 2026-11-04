@@ -1,6 +1,6 @@
 import {stopProcess} from './support/runtime.mjs';
 // Actual browser setup, purchased-file intake and listening against an isolated server.
-import {chromium,expect} from './support/browser.mjs';
+import {chromium,expect,chooseFolder} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,copyFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -276,7 +276,7 @@ try{
  await copyFile(path.join(fixture,'cover.png'),path.join(steam,'Game Name OST/cover.png'));
  await writeFile(path.join(steam,'Game Name OST/Booklet/booklet.txt'),'PRIVATE STEAM BOOKLET');
  await page.goto(`${origin}/imports?collection=${collection}`);
- await imports.getByLabel('Choose folders',{exact:true}).setInputFiles(steam);
+ await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),steam);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  const packageRows=imports.locator('.intake-review-row');await expect(packageRows).toHaveCount(3);
  const flacRow=packageRows.filter({has:page.getByText('Game Name OST (FLAC)',{exact:true})});

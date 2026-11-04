@@ -1,7 +1,7 @@
 import {waitForServer as waitUntilReady} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 import {clickAction,showAction} from './actions.mjs';
-import {chromium,expect} from './support/browser.mjs';
+import {chromium,expect,chooseFolder} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {chmod,mkdir,mkdtemp,readFile,readdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -1166,7 +1166,7 @@ try{
  const folderForm=page.getByRole('dialog',{name:/Add or import/});const folderImport=folderForm.getByRole('region',{name:'Import original files'});
  assert.equal(await folderForm.getByLabel('Title',{exact:true}).count(),0);
  assert.equal(await folderForm.getByRole('button',{name:'Add entry',exact:true}).count(),0);
- await folderImport.getByLabel('Dump folder',{exact:true}).setInputFiles(folderRoot);
+ await chooseFolder(page,folderImport.getByLabel('Dump folder',{exact:true}),folderRoot);
  await folderImport.getByText('2 dump packages found.',{exact:true}).waitFor();
  await folderImport.getByText('1 file is outside the detected packages and will not be uploaded',{exact:true}).waitFor();
  await folderImport.getByText('Package details and import options',{exact:true}).click();

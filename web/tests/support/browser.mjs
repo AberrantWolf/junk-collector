@@ -47,3 +47,10 @@ export async function launchBrowser(options={}){
 export const chromium={launch:launchBrowser};
 // Runs even if diagnostics in an old test's catch/finally throw.
 process.once('beforeExit',()=>void cleanup().catch(error=>{console.error(error);process.exitCode=1;}));
+
+// Use the browser chooser so selection waits for an enabled, actionable control
+// after draft restoration. Direct protocol file injection bypasses those checks.
+export async function chooseFolder(page,input,directory){
+ const [chooser]=await Promise.all([page.waitForEvent('filechooser'),input.click()]);
+ await chooser.setFiles(directory);
+}
