@@ -1,3 +1,10 @@
+## Routine Fi beta update checks — source delivery, 2026-11-07
+
+The [routine procedure](../deploy/container/fi-beta-update.md) keeps the
+matched Fi/NAS rollback point and automates acceptance for image-only updates.
+Live qualification remains pending the next authorized Fi update. See the
+[validation record](validation/fi-beta-update-checks-2026-11-07.md).
+
 ## Beta release checks and upgrade baseline — source delivery, 2026-11-07
 
 Workspace Rust coverage and browser journeys are selected separately. Release

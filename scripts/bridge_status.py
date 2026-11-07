@@ -8,7 +8,7 @@ import stat
 import time
 
 
-def query(path, now):
+def query(path, now, *, require_synced=False):
     try:
         metadata=path.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 8192:
@@ -34,6 +34,8 @@ def query(path, now):
             raise ValueError()
         if value['observed_at']>now+5 or now-value['observed_at']>20:
             return 'Bridge status is stale; check the container and reporter.',2
+        if require_synced and value['phase'] != 'synced':
+            return 'Bridge has not reported a completed sync.',2
         phase={'starting':'starting','unknown':'running; sync progress not yet reported','syncing':'syncing mailbox','synced':'reported sync finished','interrupted':'sync interrupted; waiting for retry','stopped':'stopped'}[value['phase']]
         text='Bridge: '+phase
         percent=value.get('percent')

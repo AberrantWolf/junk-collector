@@ -1,6 +1,7 @@
 # Fi local state with a remote FatChocobo archive
 
-Prepared 2026-10-30; **not a migration approval or a live deployment change**.
+The [routine Fi beta update procedure](fi-beta-update.md) applies to the
+installed split stack. The migration assessment below was prepared 2026-10-30.
 [Delivery/validation](../../docs/validation/remote-archive-safety-2026-10-30.md)
 records what actually ran. The previous [single-NAS snapshot procedure](snapshot-recovery.md)
 remains historical evidence for the old layout; one NAS snapshot is insufficient

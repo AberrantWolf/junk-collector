@@ -1,3 +1,10 @@
+## Routine Fi beta update checks — source delivery, 2026-11-07
+
+The Fi runbook retains the matched stopped-writer rollback point and provides
+before/after checks for image pins, runtime, HTTPS, authenticated retained
+inventory and stopped SQLite state. See the [routine procedure](../deploy/container/fi-beta-update.md)
+and [local validation record](validation/fi-beta-update-checks-2026-11-07.md).
+
 ## Beta release checks and upgrade baseline — source delivery, 2026-11-07
 
 Change checks v2 separates browser selection from Rust workspace coverage.

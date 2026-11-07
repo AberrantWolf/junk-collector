@@ -161,7 +161,7 @@ def bundle(root, expected, record, destination):
     names = ("compose.yaml", "compose.inbox.yaml", "compose.media.yaml", "Caddyfile.media", "media.md", "initialize-media.sh", ".env.example", "collector.proxy.toml.example",
              "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py",
              "compose.remote.yaml", "remote.env.example", "remote-preflight.py", "compose.mail.yaml",
-             "junk-collector-remote.service", "remote-archive.md")
+             "junk-collector-remote.service", "remote-archive.md", "fi-beta-update.md")
     for name in names:
         shutil.copyfile(root / "deploy/container" / name, destination / name)
     # The optional mail override must ship with its independently built Bridge context
@@ -172,7 +172,8 @@ def bundle(root, expected, record, destination):
         shutil.copyfile(root / "deploy/proton-bridge" / name, bridge / name)
     scripts = destination / "scripts"
     scripts.mkdir()
-    shutil.copyfile(root / "scripts/configure_proton_mail.py", scripts / "configure_proton_mail.py")
+    for name in ("configure_proton_mail.py", "fi_update_check.py", "bridge_status.py"):
+        shutil.copyfile(root / "scripts" / name, scripts / name)
     bridge_readme = bridge / "README.md"
     bridge_readme.write_text(bridge_readme.read_text()
         .replace("../container/README.md", "../README.md")

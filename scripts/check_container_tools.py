@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from test_remote_archive import AdmissionTests, ProbeTests
+from test_fi_update_check import FiUpdateTests
 
 helper = Path(__file__).resolve().parents[1] / "deploy/container/freeze-tar-time.py"
 spec = importlib.util.spec_from_file_location("freeze_tar_time", helper)

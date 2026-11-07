@@ -3,6 +3,8 @@
 import copy
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import container_release as release
@@ -105,6 +107,8 @@ class ReleaseTests(unittest.TestCase):
             for name in ("Dockerfile", "entrypoint.sh", "status.py", "bridge_pubkey.asc", "bridge.pol"):
                 self.assertEqual((destination/"proton-bridge"/name).read_bytes(), (ROOT/"deploy/proton-bridge"/name).read_bytes())
             self.assertEqual((destination/"scripts/configure_proton_mail.py").read_bytes(), (ROOT/"scripts/configure_proton_mail.py").read_bytes())
+            subprocess.run([sys.executable, "-E", "-s", "-B", str(destination / "scripts/fi_update_check.py"), "--help"],
+                           check=True, stdout=subprocess.DEVNULL, timeout=10)
             self.assertIn("proton-bridge/README.md", text)
             self.assertIn("../README.md", (destination/"proton-bridge/README.md").read_text())
             for document in destination.glob("*.md"):
