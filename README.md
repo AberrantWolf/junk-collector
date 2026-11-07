@@ -18,20 +18,17 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.21
+## Beta.22
 
-[`v0.1.0-beta.21`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.21)
-uses the normal signed-in connection for audio by default, with an administrator
-option to require private or separate HTTPS playback. Login and collection
-permissions always apply; operators decide whether their provider permits audio.
-It also repairs abandoned processing-publication cleanup after cancellation.
-Docker images support **linux/amd64** and **linux/arm64**. See the
-[qualification and Fi deployment record](docs/validation/container-beta21-publication-2026-11-04.md)
-for completed gates and current installation status.
+[`v0.1.0-beta.22`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.22)
+adds Opus album and batch preparation, live readiness for the selected preset,
+and bulk album edits from saved import groups. Sign-in asks for a username
+by default. Docker images support **linux/amd64** and **linux/arm64**. See the
+[qualification and Fi deployment record](docs/validation/container-beta22-publication-2026-11-07.md).
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.21.md)
-for routing, security boundaries and update requirements.
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.22.md)
+for sign-in behavior and update requirements.
 
 ## What it supports
 

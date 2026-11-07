@@ -1,3 +1,12 @@
+## Beta.22 published and installed on Fi — 2026-11-07
+
+Signed source `6faa8cd` is published as beta.22 and installed on Fi. Exact-source
+checks passed 640 Rust tests, strict Clippy and all 31 browser journeys. Both native
+image gates and AMD64 release-image browser acceptance passed. Fi runs the sealed
+release digest with healthy core and synced Bridge. Fi now asks for a username
+at sign-in. A matched stopped-writer Fi/NAS recovery pair is retained. See the
+[qualification, publication and live acceptance record](validation/container-beta22-publication-2026-11-07.md).
+
 ## Username sign-in — source delivery, 2026-11-07
 
 The sign-in form starts with an empty username by default. Explicit single-user
