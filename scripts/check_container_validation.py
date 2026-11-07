@@ -76,6 +76,32 @@ class ValidationTests(unittest.TestCase):
         self.platform_checks = {arch:dict(runtime='passed',runtime_scope='full',browser='passed' if arch == 'amd64' else 'covered-on-amd64') for arch in ('amd64','arm64')}
         self.evidence = validation.seal(self.expected, self.image, self.archive, '123', '2', self.checks, self.platform_checks)
 
+    def test_published_baseline_binds_the_release_asset_and_validation_attempt(self):
+        tag = 'v0.1.0-beta.5'
+        image = dict(self.image, anonymous_docker_pulls=True, validation=dict(run_id=123, attempt=2))
+        raw = json.dumps(image).encode()
+        asset = dict(name='release-image.json', id=80, size=len(raw), digest=digest(raw))
+        repository = 'Owner/collector'
+        prefix = 'repos/' + repository
+        replies = {
+            prefix + '/releases/tags/' + tag: dict(tag_name=tag, draft=False, published_at='2026-11-07', assets=[asset]),
+            prefix + '/actions/runs/123': self.run,
+            prefix: dict(id=7),
+            prefix + '/actions/workflows/container-release.yml': dict(id=19),
+        }
+        with patch.object(validation, 'api', side_effect=replies.__getitem__), \
+             patch.object(validation.subprocess, 'check_output', return_value=raw) as download:
+            validation.published_baseline(repository, tag, image['revision'])
+            with self.assertRaisesRegex(ValueError, 'tag source'):
+                validation.published_baseline(repository, tag, 'b' * 40)
+            download.return_value = raw + b' '
+            with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+                validation.published_baseline(repository, tag, image['revision'])
+            download.return_value = raw
+            self.run['run_attempt'] = 3
+            with self.assertRaisesRegex(ValueError, 'attempt changed'):
+                validation.published_baseline(repository, tag, image['revision'])
+
     def test_release_level_and_native_browser_prerequisites_are_enforced(self):
         for field, value in [('status','failed'), ('dirty',True), ('revision','b'*40)]:
             with self.subTest(field=field), self.assertRaises(ValueError):

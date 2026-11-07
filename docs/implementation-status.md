@@ -1,13 +1,24 @@
+## Beta.23 published and installed on Fi — 2026-11-07
+
+Signed source `ed65d66` is published as beta.23 and installed on Fi. This release
+includes direct Library audio batch submission, settled cancellation before
+retry, and the Proton Bridge folder picker. The exact-source run passed 641 Rust
+tests, strict Clippy and all 31 browser journeys. Both native image gates and
+AMD64 release-image browser acceptance passed. Fi runs the sealed digest with
+healthy core, synced Bridge and a matched stopped-writer Fi/NAS recovery pair.
+See the [qualification and live acceptance record](validation/container-beta23-publication-2026-11-07.md).
+
 ## Routine Fi beta update checks — source delivery, 2026-11-07
 
 The Fi runbook retains the matched stopped-writer rollback point and provides
-before/after checks for image pins, runtime, HTTPS, authenticated retained
-inventory and stopped SQLite state. See the [routine procedure](../deploy/container/fi-beta-update.md)
+before, cutoff and after checks for image pins, runtime, HTTPS, authenticated
+retained inventory and stopped SQLite state. See the [routine procedure](../deploy/container/fi-beta-update.md)
 and [local validation record](validation/fi-beta-update-checks-2026-11-07.md).
 
 ## Beta release checks and upgrade baseline — source delivery, 2026-11-07
 
-Change checks v2 separates browser selection from Rust workspace coverage.
+Change checks v3 separates browser selection from Rust workspace coverage,
+selects changed browser journeys and verifies published release baselines.
 Routine native beta image checks cover the shipped Compose core and isolated
 media runtime. Full qualification retains the longer Compose and browser
 journeys. AMD64 short browser smoke runs once against the release image.

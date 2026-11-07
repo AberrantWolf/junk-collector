@@ -7,6 +7,8 @@ from pathlib import Path
 import stat
 import time
 
+SYNC_INTERRUPTED = 3
+
 
 def query(path, now, *, require_synced=False):
     try:
@@ -35,6 +37,8 @@ def query(path, now, *, require_synced=False):
         if value['observed_at']>now+5 or now-value['observed_at']>20:
             return 'Bridge status is stale; check the container and reporter.',2
         if require_synced and value['phase'] != 'synced':
+            if value['phase'] == 'interrupted':
+                return 'Bridge reported an interrupted sync.', SYNC_INTERRUPTED
             return 'Bridge has not reported a completed sync.',2
         phase={'starting':'starting','unknown':'running; sync progress not yet reported','syncing':'syncing mailbox','synced':'reported sync finished','interrupted':'sync interrupted; waiting for retry','stopped':'stopped'}[value['phase']]
         text='Bridge: '+phase

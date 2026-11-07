@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: Previous validated release ref covering the entire candidate (empty requires full checks)
+        description: Previously qualified published version tag (unverified or empty requires full checks)
         required: false
         default: ''
         type: string
@@ -64,6 +64,7 @@ jobs:
       reuse: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' || inputs.validation_run_id != '' }}
       tag: ${{ github.event.release.tag_name || inputs.retry_release_tag }}
       runtime_scope: ${{ steps.runtime.outputs.scope }}
+      base: ${{ steps.runtime.outputs.base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,23 +94,29 @@ jobs:
         id: runtime
         if: github.event_name == 'workflow_dispatch' && inputs.retry_release_tag == '' && inputs.validation_run_id == ''
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_REF: ${{ inputs.base_ref }}
           CHECK_LEVEL: ${{ inputs.check_level }}
           QUALIFY_RUNTIME: ${{ inputs.qualify_runtime }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
-          scope=smoke
-          if [[ "$CHECK_LEVEL" == full || "$QUALIFY_RUNTIME" == true || ! "$RELEASE_VERSION" =~ -(alpha|beta)(\.|$) ]] ||
-             [[ -z "$BASE_REF" ]] ||
-             ! base=$(git rev-parse --verify --end-of-options "$BASE_REF^{commit}") ||
-             [[ "$base" == "$(git rev-parse HEAD)" ]] ||
-             ! git merge-base --is-ancestor "$base" HEAD ||
-             ! git diff --quiet "$base" HEAD -- Dockerfile .dockerignore deploy/container/ \
+          base=
+          if [[ "$BASE_REF" == v* ]] &&
+             candidate_base=$(git rev-parse --verify --end-of-options "refs/tags/$BASE_REF^{commit}") &&
+             [[ "$candidate_base" != "$(git rev-parse HEAD)" ]] &&
+             git merge-base --is-ancestor "$candidate_base" HEAD &&
+             python3 scripts/container_validation.py published-baseline "$GITHUB_REPOSITORY" "$BASE_REF" "$candidate_base"; then
+            base=$candidate_base
+          fi
+          scope=full
+          if [[ -n "$base" && "$CHECK_LEVEL" != full && "$QUALIFY_RUNTIME" != true && "$RELEASE_VERSION" =~ -(alpha|beta)(\.|$) ]] &&
+             git diff --quiet "$base" HEAD -- Dockerfile .dockerignore deploy/container/ \
                scripts/check_container.py scripts/check_media_container.py scripts/inbox_cleanup_qualification.py \
                .github/workflows/container-release.yml ':(exclude,glob)deploy/container/**/*.md'; then
-            scope=full
+            scope=smoke
           fi
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: release-plan-${{ github.run_attempt }}
@@ -120,7 +127,7 @@ jobs:
     uses: ./.github/workflows/check.yml
     with:
       source_ref: ${{ needs.plan.outputs.revision }}
-      base_ref: ${{ inputs.base_ref }}
+      base_ref: ${{ needs.plan.outputs.base }}
       classification: ${{ inputs.classification || 'auto' }}
       level: ${{ inputs.check_level || 'beta' }}
       journeys: ${{ inputs.journeys }}

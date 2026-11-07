@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -131,6 +132,53 @@ class FiUpdateTests(unittest.TestCase):
             status.write_text(json.dumps(dict(report, phase="synced")))
             self.assertEqual(check.bridge_status(status, 100, require_synced=True)[1], 0)
             self.assertNotEqual(check.bridge_status(status, 121, require_synced=True)[1], 0)
+            status.write_text(json.dumps(dict(report, phase="interrupted")))
+            self.assertEqual(check.bridge_status(status, 100, require_synced=True)[1], check.SYNC_INTERRUPTED)
+
+    def test_bridge_wait_allows_startup_but_distinguishes_timeout_and_failure(self):
+        path = Path("report.json")
+        with patch.object(check, "bridge_status", side_effect=[("syncing", 2), ("synced", 0)]), \
+             patch.object(check.time, "monotonic", side_effect=[0, 1]), patch.object(check.time, "sleep"):
+            self.assertEqual(check.wait_for_bridge(path, 10), "synced")
+        with patch.object(check, "bridge_status", return_value=("syncing", 2)), \
+             patch.object(check.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(ValueError, "Timed out"):
+                check.wait_for_bridge(path, 10)
+        with patch.object(check, "bridge_status", return_value=("Interrupted", check.SYNC_INTERRUPTED)):
+            with self.assertRaisesRegex(ValueError, "^Interrupted$"):
+                check.wait_for_bridge(path, 10)
+
+    def test_cutoff_requires_stopped_writers_and_clean_snapshot_before_sealing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pair = Path(temporary).resolve()
+            snapshot = pair / "fi-data"
+            (snapshot / "state").mkdir(parents=True)
+            (snapshot / "config").mkdir()
+            (snapshot / "config/collector.toml").write_text("fixture")
+            args = SimpleNamespace(nas_snapshot_uuid="nas", project="fi", pair_dir=pair, state_in_snapshot=Path("state"))
+            service = {"Id": "old", "Image": "old-image", "Config": {"Image": "pin"},
+                       "State": {"Running": True, "Restarting": False},
+                       "Mounts": [{"Source": str(pair / "live"), "Destination": "/data/state", "Type": "bind", "RW": True}]}
+            services = {"collector": service}
+            before = {"services": check.container_facts(services)}
+            with patch.object(check, "stack", return_value=services), \
+                 patch.object(check.subprocess, "run", return_value=SimpleNamespace(stdout="inactive\n")), \
+                 patch.object(check, "snapshot_identity", return_value=(snapshot, "fi")), \
+                 patch.object(check, "state_facts", side_effect=ValueError("Unfinished Jobs")) as facts:
+                with self.assertRaisesRegex(ValueError, "Stop all Fi"):
+                    check.seal_cutoff(args, {}, before)
+                facts.assert_not_called()
+                service["State"]["Running"] = False
+                with self.assertRaisesRegex(ValueError, "Unfinished Jobs"):
+                    check.seal_cutoff(args, {}, before)
+                self.assertFalse((pair / "cutoff.json").exists())
+                facts.side_effect = None
+                facts.return_value = {"items": 1}
+                check.seal_cutoff(args, {}, before)
+                facts.assert_called_with(snapshot / "state", stopped=True)
+                receipt = json.loads((pair / "cutoff.json").read_text())
+                self.assertEqual(receipt["fi_snapshot_uuid"], "fi")
+                self.assertEqual(receipt["nas_snapshot_uuid"], "nas")
 
     def test_after_refuses_a_changed_public_origin_before_asking_for_session(self):
         item = "00000000-0000-4000-8000-000000000001"

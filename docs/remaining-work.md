@@ -1,7 +1,18 @@
+## Beta.23 published and installed on Fi — 2026-11-07
+
+Signed source `ed65d66` is published as beta.23 and installed on Fi. This release
+includes direct Library audio batch submission, settled cancellation before
+retry, and the Proton Bridge folder picker. The exact-source run passed 641 Rust
+tests, strict Clippy and all 31 browser journeys. Both native image gates and
+AMD64 release-image browser acceptance passed. Fi runs the sealed digest with
+healthy core, synced Bridge and a matched stopped-writer Fi/NAS recovery pair.
+See the [qualification and live acceptance record](validation/container-beta23-publication-2026-11-07.md).
+
 ## Routine Fi beta update checks — source delivery, 2026-11-07
 
 The [routine procedure](../deploy/container/fi-beta-update.md) keeps the
 matched Fi/NAS rollback point and automates acceptance for image-only updates.
+The stopped cutoff is checked before switching images.
 Live qualification remains pending the next authorized Fi update. See the
 [validation record](validation/fi-beta-update-checks-2026-11-07.md).
 

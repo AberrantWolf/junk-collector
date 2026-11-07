@@ -11,6 +11,7 @@ import resource
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -304,6 +305,42 @@ def api(path):
     return json.loads(data)
 
 
+def published_baseline(repository, tag, revision):
+    """Verify the evidence attached by publication without fetching image bytes."""
+    prefix = 'repos/' + repository
+    published = api(prefix + '/releases/tags/' + tag)
+    if published.get('tag_name') != tag or published.get('draft') is not False or not published.get('published_at'):
+        raise ValueError('Baseline has no published release')
+    assets = [asset for asset in published['assets'] if asset.get('name') == 'release-image.json']
+    if len(assets) != 1:
+        raise ValueError('Baseline release has no unique image record')
+    asset = assets[0]
+    if (type(asset.get('id')) is not int or not 0 < asset.get('size', 0) <= MAX_JSON
+        or not release.DIGEST.fullmatch(asset.get('digest') or '')):
+        raise ValueError('Baseline image record is missing its size or digest')
+    raw = subprocess.check_output(
+        ['gh', 'api', '-H', 'Accept: application/octet-stream', prefix + '/releases/assets/' + str(asset['id'])],
+        timeout=60,
+    )
+    if len(raw) != asset['size'] or 'sha256:' + hashlib.sha256(raw).hexdigest() != asset['digest']:
+        raise ValueError('Baseline image record digest mismatch')
+    image = json.loads(raw)
+    if (image.get('revision') != revision or image.get('version') != tag[1:]
+        or image.get('source') != 'https://github.com/' + repository
+        or image.get('anonymous_docker_pulls') is not True
+        or not release.DIGEST.fullmatch(image.get('digest', ''))):
+        raise ValueError('Baseline image record does not qualify the tag source')
+    validate_platform_map(image.get('platforms'))
+    proof = image['validation']
+    run_id = proof['run_id']
+    if type(run_id) is not int or run_id < 1:
+        raise ValueError('Baseline has no validation run')
+    run = api(prefix + '/actions/runs/' + str(run_id))
+    check_run(run, image, api(prefix)['id'], api(prefix + '/actions/workflows/container-release.yml')['id'])
+    if run['run_attempt'] != proof['attempt']:
+        raise ValueError('Baseline validation attempt changed after publication')
+
+
 def restore(expected, destination, selected):
     repository = expected['source'].removeprefix('https://github.com/')
     repository_id = api('repos/' + repository)['id']
@@ -368,6 +405,10 @@ def restore(expected, destination, selected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='operation', required=True)
+    baseline = sub.add_parser('published-baseline')
+    baseline.add_argument('repository')
+    baseline.add_argument('tag')
+    baseline.add_argument('revision')
     merged = sub.add_parser('assemble')
     merged.add_argument('platforms', type=Path)
     merged.add_argument('archive', type=Path)
@@ -384,6 +425,16 @@ def main():
     recovered = sub.add_parser('restore')
     recovered.add_argument('destination', type=Path)
     args = parser.parse_args()
+    if args.operation == 'published-baseline':
+        try:
+            if not args.tag.startswith('v'):
+                raise ValueError('Use a published version tag')
+            release.version_key(args.tag[1:])
+            published_baseline(args.repository, args.tag, args.revision)
+        except (ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            print(f'Baseline evidence unavailable: {error}', file=sys.stderr)
+            return 1
+        return 0
     expected = json_file(Path('release-plan.json'))
     if args.operation == 'assemble':
         digest = assemble(args.platforms, args.archive)
@@ -415,4 +466,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

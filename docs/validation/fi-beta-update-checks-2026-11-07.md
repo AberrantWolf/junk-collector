@@ -6,6 +6,13 @@ the full read-only Fi and NAS snapshots together before changing either image
 pin. The checker compares the running stack against its before record and the
 stopped Fi state. The NAS snapshot is attested in the operator's pair record.
 
+The review follow-up adds a stopped cutoff command before activation. It
+refuses an active unit, running Compose containers, or unfinished work at the
+snapshot, then records the snapshot UUID and state fingerprints. The after
+check requires this receipt. Bridge startup has a bounded wait with separate
+timeout and interrupted-sync results. Focused local fixtures passed for these
+paths.
+
 Local fixtures passed for committed SQLite WAL reads, retained grants and
 staged imports, active work refusal, image and mount mismatches, companion
 recreation, Bridge report freshness, and session protection on redirects

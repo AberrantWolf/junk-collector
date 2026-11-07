@@ -18,17 +18,17 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.22
+## Beta.23
 
-[`v0.1.0-beta.22`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.22)
-adds Opus album and batch preparation, live readiness for the selected preset,
-and bulk album edits from saved import groups. Sign-in asks for a username
-by default. Docker images support **linux/amd64** and **linux/arm64**. See the
-[qualification and Fi deployment record](docs/validation/container-beta22-publication-2026-11-07.md).
+[`v0.1.0-beta.23`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.23)
+starts Library audio batches immediately and plans albums in the background.
+Proton Bridge setup and saved receipt connections now offer a mail folder
+picker. Docker images support **linux/amd64** and **linux/arm64**. See the
+[qualification and Fi deployment record](docs/validation/container-beta23-publication-2026-11-07.md).
 
 **Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.22.md)
-for sign-in behavior and update requirements.
+interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.23.md)
+for update requirements.
 
 ## What it supports
 

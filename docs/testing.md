@@ -2,7 +2,7 @@
 
 Choose checks from the complete change. Text-only changes do not require unit
 tests. The selector records what ran and why; release images are always optimized
-release builds. Current policy is `change-checks-v2`.
+release builds. Current policy is `change-checks-v3`.
 
 ## Everyday commands
 
@@ -33,9 +33,10 @@ select affected crate tests and transitive in-repository consumers, with Clippy.
 Storage, authentication, contracts, dependencies, toolchain, build/release tooling,
 policy behavior changes and unknown paths select broader workspace coverage.
 Browser selection is independent of workspace coverage. Local and beta checks
-use the short smoke and any named journeys for UI and infrastructure changes.
-When a behavioral web change has no named journey, the broad integration
-journey is the fallback. Name the affected journeys whenever a browser workflow
+use the short smoke, any named journeys, and journeys whose test files change.
+Changes to shared test helpers select the full browser set. When a behavioral
+web change has no selected journey, the broad integration journey is the
+fallback. Name the affected journeys whenever a browser workflow
 changes, including backend-only changes. Full functional qualification and
 beta qualification without a usable baseline retain the complete browser
 suite. An isolated workspace
@@ -59,8 +60,10 @@ python3 scripts/check_changes.py --base v0.1.0-beta.22 --level beta --source-onl
 
 Local defaults compare HEAD with the whole working tree. An explicit `--base`
 also includes every committed change after that baseline. For release source
-checks, choose the actual previously qualified ref. It must be a strict ancestor
-of the candidate. A missing or unsuitable baseline requires broad checks. To
+checks in CI, supply a published version tag. The release workflow checks its
+published image record and successful validation run, and requires the tagged
+commit to be a strict ancestor of the candidate. Missing or unverified evidence
+selects full source and native checks. To
 request full functional qualification, run
 
 ```sh

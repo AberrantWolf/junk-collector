@@ -47,6 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_REF: ${{ inputs.base_ref || github.event.pull_request.base.sha || github.event.before }}
+          VERIFIED_RELEASE_BASE: ${{ inputs.base_ref }}
           CLASSIFICATION: ${{ inputs.classification || 'auto' }}
           CHECK_LEVEL: ${{ inputs.level || 'beta' }}
           JOURNEYS: ${{ inputs.journeys }}
@@ -59,6 +60,8 @@ jobs:
           revision = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
           base = os.environ.get('BASE_REF', '')
           classification = os.environ['CLASSIFICATION']
+          if os.environ['REUSE_CHECKS'] == 'true':
+              base = os.environ['VERIFIED_RELEASE_BASE']
           if os.environ['REUSE_CHECKS'] != 'true' and os.environ['GITHUB_EVENT_NAME'] == 'push':
               # A reviewed trailer applies to the entire push diff, never just
               # the final file/commit. Candidate dispatch inputs remain authoritative.
@@ -75,11 +78,17 @@ jobs:
           for journey in filter(None, os.environ.get('JOURNEYS', '').split(',')):
               arguments += ['--journey', journey]
           if os.environ['REUSE_CHECKS'] == 'true': arguments += ['--source-only']
-          subprocess.run(['python3','scripts/check_changes.py',*arguments,'--dry-run','--report','/tmp/check-plan.json'],check=True)
-          report = json.loads(Path('/tmp/check-plan.json').read_text())
+          def plan():
+              subprocess.run(['python3','scripts/check_changes.py',*arguments,'--dry-run','--report','/tmp/check-plan.json'],check=True)
+              return json.loads(Path('/tmp/check-plan.json').read_text())
+          report = plan()
           if report['base_known'] and base and level == 'full' and report['classification'] in ('docs','ui-copy','cli-copy'):
-              subprocess.run(['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],base,'/tmp/baseline-check-report.json','--full'],check=True)
-              arguments += ['--baseline-report','/tmp/baseline-check-report.json']
+              baseline = subprocess.run(['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],base,'/tmp/baseline-check-report.json','--full'])
+              if baseline.returncode == 0:
+                  arguments += ['--baseline-report','/tmp/baseline-check-report.json']
+              else:
+                  arguments[arguments.index('--classification') + 1] = 'infra'
+                  report = plan()
           Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
           reused = False
           if os.environ['REUSE_CHECKS'] == 'true':

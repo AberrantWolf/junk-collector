@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {createHash,X509Certificate} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 let scratch,server,bridge,browser,page,logs='',heartbeat;let stale=false,partial=false;
+let reportTail=Promise.resolve(),reportError;
 async function port(){const s=createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 const password='Disposable-email-fixture-password';
 try{
@@ -19,7 +20,20 @@ try{
  bridge=spawn('python3',['-u',fileURLToPath(new URL('./support/mail-bridge.py',import.meta.url)),certificate,key,mailCommands,mailControls],{stdio:['ignore','pipe','pipe']});
  const imapPort=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('IMAP fixture startup timed out')),10000);bridge.stdout.once('data',v=>{clearTimeout(timer);resolve(Number(v.toString().trim()));});bridge.once('exit',()=>{clearTimeout(timer);reject(Error('IMAP fixture exited before listening'));});});
  const fingerprint=createHash('sha256').update(new X509Certificate(await readFile(certificate)).raw).digest('hex');
- async function report(){const now=Math.floor(Date.now()/1000);await writeFile(status+'.pending',JSON.stringify({schema:1,imap_port:imapPort,observed_at:stale?now-60:now,event_at:partial?null:stale?now-60:now,phase:partial?'synced':'syncing',percent:partial?null:37.5,elapsed_seconds:12,remaining_seconds:partial?null:20,certificate_sha256:fingerprint}));await rename(status+'.pending',status);}
+ function report(){
+  const write=reportTail.then(async()=>{
+   const now=Math.floor(Date.now()/1000);
+   const observedAt=stale?now-60:now;
+   await writeFile(status+'.pending',JSON.stringify({
+    schema:1,imap_port:imapPort,observed_at:observedAt,event_at:partial?null:observedAt,
+    phase:partial?'synced':'syncing',percent:partial?null:37.5,elapsed_seconds:12,
+    remaining_seconds:partial?null:20,certificate_sha256:fingerprint,
+   }));
+   await rename(status+'.pending',status);
+  });
+  reportTail=write.catch(error=>{reportError??=error;});
+  return write;
+ }
  await report();heartbeat=setInterval(()=>void report().catch(()=>{}),1000);
  const config=path.join(scratch,'collector.toml');await writeFile(config,`archive="${scratch}/archive"\nstate="${scratch}/state"\npublic_bind="127.0.0.1:${publicPort}"\nprivate_bind="127.0.0.1:${privatePort}"\nlan_bind="127.0.0.1:${lanPort}"\nlocal_playback_enabled=false\nmulti_user=true\nallowed_origins=["${origin}"]\n`);
  const setup=spawnSync(serverBinary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
@@ -104,7 +118,7 @@ try{
  stale=true;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('alert').filter({hasText:'unavailable or stale'}).waitFor();await expect(connection.getByRole('progressbar')).toHaveCount(0);
  assert.equal(await page.evaluate(async request=>(await fetch('/api/v1/mail/setup',{method:'POST',headers:{'content-type':'application/json','idempotency-key':request.key},body:request.body})).status,successRequest),200);
  assert.equal(await page.evaluate(async request=>(await fetch('/api/v1/mail/setup',{method:'POST',headers:{'content-type':'application/json','idempotency-key':request.key},body:JSON.stringify({...JSON.parse(request.body),username:'different-input'})})).status,successRequest),409);
- stale=false;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('progressbar').waitFor();
+ stale=false;await Promise.all([report(),report()]);await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('progressbar').waitFor();
  partial=true;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await expect(connection.getByRole('progressbar')).toHaveCount(0);assert.equal(await page.evaluate(async()=>(await (await fetch('/api/v1/mail/setup')).json()).bridge),null);partial=false;await report();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();await connection.getByRole('progressbar').waitFor();
  const settings=await page.evaluate(async()=>{const r=await fetch('/api/v1/admin/users',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({username:'mail-viewer',password:'Disposable-mail-viewer-password',administrator:false})});if(!r.ok)throw Error(await r.text());return r.json();});
  const viewer=await browser.newContext();const viewerPage=await viewer.newPage();await viewerPage.goto(origin);await viewerPage.getByLabel('Username',{exact:true}).fill('mail-viewer');await viewerPage.getByLabel('Password',{exact:true}).fill('Disposable-mail-viewer-password');await viewerPage.getByRole('button',{name:'Sign in',exact:true}).click();await viewerPage.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
@@ -172,4 +186,4 @@ db.commit()
  for(const route of ['/purchase-inbox','/purchase-inbox.js','/api/v1/mail/profiles','/api/v1/collections/'+ids.collection+'/purchase-inbox'])assert.equal((await fetch(`http://127.0.0.1:${publicPort}${route}`)).status,404,route);
  assert.deepEqual(errors,[]);console.log('Email purchase UI passed: accept, link/cancel, intentional duplicate, dismiss, restart, mobile and public listener denial.');
 }catch(error){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw error;}
-finally{try{await browser?.close();}finally{clearInterval(heartbeat);const stopped=await Promise.allSettled([stopProcess(server),stopProcess(bridge)]);if(scratch)await rm(scratch,{recursive:true,force:true});for(const result of stopped)if(result.status==='rejected')throw result.reason;}}
+finally{try{await browser?.close();}finally{clearInterval(heartbeat);await reportTail;const stopped=await Promise.allSettled([stopProcess(server),stopProcess(bridge)]);if(scratch)await rm(scratch,{recursive:true,force:true});for(const result of stopped)if(result.status==='rejected')throw result.reason;if(reportError)throw reportError;}}

@@ -50,8 +50,19 @@ Run a targeted live workflow when the release affects that path.
    image and exact env, Compose, systemd/mount configuration and media authority
    key. Check both snapshots cover their full roots and seal the pair record
    with both paths and snapshot IDs before editing the pins. An incomplete
-   pair stops the update. The checker does not create or certify the NAS
-   snapshot.
+   pair stops the update. With writers still stopped, pass the recorded NAS
+   snapshot UUID to the cutoff check. It verifies the read-only Fi snapshot,
+   checks both SQLite databases and requires idle Jobs and imports. It records
+   the Fi snapshot UUID and fingerprints for the post-update comparison.
+
+   ```bash
+   sudo python3 -B scripts/fi_update_check.py cutoff "${check_args[@]}" \
+     --nas-snapshot-uuid "$nas_snapshot_uuid"
+   ```
+
+   If the state directory has another name inside `fi-data`, supply
+   `--state-in-snapshot RELATIVE_PATH` to this step. The NAS UUID comes from
+   the operator's sealed pair record. Wait for the cutoff check to pass.
 4. Edit only `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` in the installed
    EnvironmentFile to the verified immutable reference. Run
    `sudo systemctl start junk-collector-remote.service` so the mount preflight runs.
@@ -62,8 +73,6 @@ Run a targeted live workflow when the release affects that path.
    sudo python3 -B scripts/fi_update_check.py after "${check_args[@]}"
    ```
 
-   For a supported Fi layout where the state directory has another
-   name inside `fi-data`, supply `--state-in-snapshot RELATIVE_PATH`.
 5. Record the pass beside the sealed pair, then resume ordinary use and restore
    the receipt scan setting if it changed. The checker compares the exact
    running image and its pinned reference, restart counts, mounts, retained
@@ -72,9 +81,10 @@ Run a targeted live workflow when the release affects that path.
    and grant rows, mail connections, archive binding, TLS certificate, config,
    and Item, Job and Import counts with the stopped Fi snapshot. Staged imports
    and imports awaiting review keep their recorded identity and revision.
-   SQLite integrity checks run on the snapshot. A snapshot WAL is read using
-   a temporary local database copy when needed. These checks read no media
-   payloads.
+   A snapshot WAL is read using a temporary local database copy when needed.
+   These checks read no media payloads. The after check waits up to two
+   minutes for a fresh completed Bridge sync and reports a sync interruption
+   separately from a timeout.
 
 A failed check is an unresolved update. Preserve the pair and diagnose the
 reported failure. If rollback is needed after new writes, restore the matching

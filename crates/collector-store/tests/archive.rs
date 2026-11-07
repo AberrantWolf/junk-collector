@@ -14634,7 +14634,8 @@ fn album_requests_from_another_curator_keep_job_details_private_and_respect_role
 
 #[test]
 fn album_failed_admission_is_visible_retryable_and_cancel_fences_late_children() {
-    let (_root, store, actor, service, collection) = setup();
+    let clock = Arc::new(TestClock::new(chrono::Utc::now().timestamp()));
+    let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let imported = derivative_import(&service, &actor, collection.id);
     let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
@@ -14677,9 +14678,11 @@ fn album_failed_admission_is_visible_retryable_and_cancel_fences_late_children()
     let FrozenPreparationMember::Prepare { job_id, input, .. } = &frozen.members[0] else {
         panic!("member");
     };
-    service
+    let cancelling = service
         .cancel_music_preparation_batch(&actor, batch.batch_id, &command())
         .unwrap();
+    assert_eq!(cancelling.admission_state, JobState::CancelRequested);
+    assert!(!cancelling.can_retry);
     let late = store.enqueue_preparation_member(claim.id, &claim.claim_token, JobSpec {
         id: *job_id, user_id: actor.user_id, collection_id: Some(collection.id), item_id: None,
         kind: "music_derivative".into(), phase: "queued".into(), total_units: 1,
@@ -14691,6 +14694,61 @@ fn album_failed_admission_is_visible_retryable_and_cancel_fences_late_children()
         store.job_record(*job_id, actor.user_id),
         Err(Error::NotFound)
     ));
+
+    // Cancellation can win after admission finishes but before the worker commits its outcome.
+    store
+        .complete_job(
+            claim.id,
+            &claim.claim_token,
+            serde_json::json!({"admitted": 0}),
+        )
+        .unwrap();
+    let settled = service
+        .music_preparation_batch(&actor, batch.batch_id)
+        .unwrap();
+    assert_eq!(settled.admission_state, JobState::Cancelled);
+    assert!(settled.can_retry);
+
+    service
+        .retry_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    service.run_next_job("preparation-worker").unwrap();
+    let track = store.claim_job("preparation-worker", 30).unwrap().unwrap();
+    assert_eq!(track.kind, "music_derivative");
+    let cancelling = service
+        .cancel_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    assert_eq!(cancelling.running, 1);
+    assert_eq!(cancelling.cancelled, 1);
+    assert!(!cancelling.can_retry);
+    store
+        .fail_job(track.id, &track.claim_token, "late worker error")
+        .unwrap();
+    assert_eq!(
+        store.job_record(track.id, actor.user_id).unwrap().state,
+        JobState::Cancelled
+    );
+
+    service
+        .retry_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    let lost = store.claim_job("preparation-worker", 30).unwrap().unwrap();
+    service
+        .cancel_music_preparation_batch(&actor, batch.batch_id, &command())
+        .unwrap();
+    assert!(store.claim_job("preparation-worker", 30).unwrap().is_none());
+    clock.advance(31);
+    assert!(store.claim_job("preparation-worker", 30).unwrap().is_none());
+    assert_eq!(
+        store.job_record(lost.id, actor.user_id).unwrap().state,
+        JobState::Cancelled
+    );
+    assert!(
+        service
+            .music_preparation_batch(&actor, batch.batch_id)
+            .unwrap()
+            .can_retry
+    );
 }
 
 #[test]

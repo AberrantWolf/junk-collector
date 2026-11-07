@@ -90,6 +90,15 @@ class SelectionTests(unittest.TestCase):
                     file.write('dependencies = ["different"]\n')
                 self.assertFalse(checks.release_version_only('base', checks.VERSION_FILES, root))
 
+    def test_changed_journeys_are_selected_even_with_explicit_journeys(self):
+        paths = ['web/tests/email-purchases.mjs', 'web/tests/opus-preparation.mjs']
+        _, steps = checks.select(paths, level='beta', journeys=['accounts'])
+        source = checks.container_source_steps(steps)
+        browser = next(step['command'][2:] for step in source if step['name'] == 'browser')
+        self.assertEqual(set(browser), {'accounts', 'email-purchases', 'opus-preparation'})
+        _, steps = checks.select(['web/tests/support/browser.mjs'], level='beta', journeys=['accounts'])
+        self.assertEqual(set(next(step['command'][2:] for step in steps if step['name'] == 'browser')), set(checks.BROWSER))
+
     def test_text_rc_reuses_full_baseline_but_cannot_inflate_coverage(self):
         base = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True, revision='b'*40,
                     coverage='full', classification='infra', level='full', paths=['Dockerfile'],

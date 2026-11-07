@@ -31,3 +31,16 @@ The [supported direct upgrade baseline](../decisions/pre-release-evolution.md#co
 is beta.22, catalog schema v15 and private SQLite schema v23. This delivery
 changes the support policy and qualification, with no format conversion or
 production deployment.
+
+## Review follow-up
+
+Change checks v3 verifies the published release record and validation run for
+the supplied version tag before using it as a baseline. Unverified inputs
+select full source and runtime coverage. Local workflow checks exercised the
+rejected ancestor and verified beta.22 tag, and the verifier accepted the
+published beta.23 record. The selector now uses the browser runner's journey
+map to include changed tests alongside any named journeys. Focused selector
+and evidence tests passed. Web types, build, models, short browser smoke and
+the email purchase journey passed in the merged worktree. Opus selection was
+checked by the selector tests. The browser Opus journey requires opusenc,
+which was unavailable locally.

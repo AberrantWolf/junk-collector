@@ -20,6 +20,9 @@ not rerun compilation, source tests or image builds.
    ```
    Empty inputs produce **Validate container candidate**, without registry writes.
    They require full source coverage because no validated baseline was supplied.
+   Reduced coverage requires a published version tag with a matching image
+   record and successful validation run for its exact commit. A missing or
+   unverified baseline selects full source and native checks.
    For a reviewed UI copy-only beta, add `-f base_ref=vPREVIOUS_VERSION -f
    classification=ui-copy`; see [selection and evidence](testing.md). Use
    `-f journeys=JOURNEY,OTHER` for focused browser acceptance and

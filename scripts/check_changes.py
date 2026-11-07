@@ -10,13 +10,14 @@ import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY = 'change-checks-v2'
+POLICY = 'change-checks-v3'
 POLICY_DOCS = {'docs/architecture.md', 'docs/release-requirements.md', 'docs/release-toolchain.md', 'docs/container-release-pipeline.md', 'docs/testing-and-packaging-plan.md', 'docs/testing.md'}
 KINDS = ('auto', 'docs', 'ui-copy', 'cli-copy', 'style', 'ui', 'rust', 'infra')
 BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapshots', 'actions',
            'cd-library', 'opus-preparation', 'scans', 'work', 'fx04', 'fx05', 'fx06', 'fx04-review', 'local-playback', 'lists',
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
            'email-purchases', 'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media', 'storage')
+JOURNEY_SCRIPTS = json.loads((ROOT / 'web/tests/journeys.json').read_text())
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}
 CHROME = {'integration', 'fx05', 'local-playback', 'digital-matching', 'purchases',
           'game-audio', 'documents', 'remote-media'}
@@ -156,7 +157,14 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
     if full:
         selected = list(BROWSER)
     elif kind in ('ui-copy', 'style', 'ui', 'infra'):
-        feature_journeys = journeys or (('integration',) if web_behavior else ())
+        test_paths = {path for path in paths if path.startswith('web/tests/')}
+        mapped = {f'web/tests/{script}.mjs': name for name, script in JOURNEY_SCRIPTS.items()}
+        if test_paths - mapped.keys():
+            # A changed runner or shared helper can affect any journey.
+            inferred = BROWSER
+        else:
+            inferred = tuple(name for path, name in mapped.items() if path in test_paths and name in BROWSER)
+        feature_journeys = (*journeys, *inferred) or (('integration',) if web_behavior else ())
         selected = list(dict.fromkeys(['smoke', *feature_journeys]))
     else:
         selected = list(journeys)
