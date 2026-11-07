@@ -283,6 +283,37 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                     StatusCode::NOT_FOUND
                 }
             );
+            for (method, path, enabled) in [
+                ("POST", "/api/v1/mail/setup/folders", admin),
+                (
+                    "GET",
+                    "/api/v1/mail/profiles/example/folders",
+                    curation || admin,
+                ),
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .header("origin", "https://collector.example")
+                            .header("x-forwarded-for", "127.0.0.1")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    if enabled {
+                        StatusCode::UNAUTHORIZED
+                    } else {
+                        StatusCode::NOT_FOUND
+                    },
+                    "{path} curation={curation}, admin={admin}"
+                );
+            }
             let discovery = app.clone().oneshot(Request::builder()
                 .method("POST").uri("/api/v1/ingests/discover")
                 .header("origin", "https://collector.example")

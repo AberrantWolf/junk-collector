@@ -7,6 +7,12 @@ struct Setup {
     owners: Mutex<Vec<UserId>>,
 }
 impl MailSetupPort for Setup {
+    fn discover_bridge_folders(&self, _: &DiscoverBridgeFolders) -> Result<Vec<String>> {
+        Err(Error::NotFound)
+    }
+    fn discover_profile_folders(&self, _: UserId, _: &str) -> Result<Vec<String>> {
+        Err(Error::NotFound)
+    }
     fn repair_bridge(&self, _: UserId, _: &str, _: &RepairBridge, _: &str) -> Result<MailProfile> {
         Err(Error::NotFound)
     }

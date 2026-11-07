@@ -760,6 +760,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
             routes!(stage_provisional_import_chunk).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .routes(routes!(mail_profiles))
+        .routes(routes!(discover_profile_folders))
         .routes(routes!(mail_connections))
         .routes(routes!(configure_mail).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(purchase_inbox))
@@ -830,6 +831,7 @@ fn administration_api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(mail_setup))
         .routes(routes!(connect_bridge).layer(DefaultBodyLimit::max(16 * 1024)))
+        .routes(routes!(discover_bridge_folders).layer(DefaultBodyLimit::max(8 * 1024)))
         .routes(routes!(repair_bridge).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(settings))
         .routes(routes!(worker_settings, update_worker_settings))

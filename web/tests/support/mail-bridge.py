@@ -19,7 +19,7 @@ class Handler(socketserver.StreamRequestHandler):
             tag,command=parts[:2];command=command.upper()
             if len(sys.argv)>3:
                 with open(sys.argv[3],'a') as log:
-                    if command=='EXAMINE':log.write(command+' '+parts[2]+'\n')
+                    if command in ('EXAMINE','LIST'):log.write(command+' '+parts[2]+'\n')
             if command=='CAPABILITY':answer='* CAPABILITY IMAP4rev1 STARTTLS\r\n'+tag+' OK capability'
             elif command=='STARTTLS':
                 self.wfile.write((tag+' OK begin TLS\r\n').encode());self.wfile.flush()
@@ -34,6 +34,12 @@ class Handler(socketserver.StreamRequestHandler):
             elif command=='LOGOUT':
                 self.wfile.write(('* BYE fixture\r\n'+tag+' OK logout\r\n').encode());self.wfile.flush();return
             elif not authenticated:answer=tag+' NO login required'
+            elif command=='LIST':
+                answer=('* LIST () "/" INBOX\r\n'
+                        '* LIST (\\Noselect) "/" "Folders"\r\n'
+                        '* LIST () "/" "Folders/Receipts"\r\n'
+                        '* LIST () "/" {26}\r\nFolders/&ZeVnLIqe- &- Shop\r\n'
+                        +tag+' OK list')
             elif command=='EXAMINE':answer='* 0 EXISTS\r\n'+tag+' OK [READ-ONLY] mailbox'
             elif command=='STATUS':answer=f"* STATUS INBOX (UIDVALIDITY 42 UIDNEXT {controls().get('uidnext',1)})\r\n"+tag+' OK status'
             elif command=='UID' and parts[2].upper().startswith('SEARCH '):answer='* SEARCH\r\n'+tag+' OK search'

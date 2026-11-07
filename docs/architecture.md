@@ -242,6 +242,15 @@ account changes. Terminal status uses the same sanitized snapshot without stoppi
 Bridge. Acceptance includes real UI setup, refresh/reopen, denied access, stale
 status, failed TLS/login, input-bound retries and reporter shutdown/restart.
 
+## Proton Bridge folder discovery — 2026-11-07
+
+The application authorizes an administrator to list folders with submitted setup
+credentials, and an enabled profile owner to list folders with saved credentials.
+The HTTP routes follow administration and curation exposure respectively. The
+provider uses the same loopback TLS pin and login as receipt scanning, then runs
+a bounded read-only IMAP LIST. It returns selectable names and decodes modified
+UTF-7 for display. Discovery does not change profile, connection or scan state.
+
 ## Email account-disable review correction — 2026-10-31
 
 Mail sync now rechecks its owner's enabled state after fetching. Batch admission

@@ -287,6 +287,7 @@
 .bridge-connect-form fieldset { display: grid; gap: 1rem; min-width: 0; }
 .bridge-connect-form label { display: grid; gap: .4rem; }
 .bridge-connect-form input, .bridge-connect-form textarea { box-sizing: border-box; width: 100%; min-width: 0; }
+.bridge-connect-form select { box-sizing: border-box; max-width: 100%; min-width: 0; }
 .mail-connection code { overflow-wrap: anywhere; white-space: normal; }
 .mail-certificate { font-size: .85rem; }
 

@@ -140,7 +140,11 @@ impl MailProviderPort for ProtonMailProvider {
         run_mail(request, cursor, 90)
     }
 }
-fn run_mail(request: Vec<u8>, cursor: &str, timeout: u64) -> Result<MailBatch> {
+fn run_mail<T: serde::de::DeserializeOwned>(
+    request: Vec<u8>,
+    cursor: &str,
+    timeout: u64,
+) -> Result<T> {
     if cursor.len() > 65536 {
         return Err(Error::Invalid("Mail cursor too large".into()));
     }

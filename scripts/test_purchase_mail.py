@@ -55,6 +55,30 @@ class FakeIMAP:
         assert 'BODY.PEEK[]' in args[-1];return 'OK',[(b'1 BODY[]',raw)]
     def logout(self):self.commands.append('LOGOUT')
 class IMAP(unittest.TestCase):
+    def test_list_preserves_exact_names_and_rejects_malformed_results(self):
+        class Mailboxes:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def list(self, reference, pattern):
+                self.args = reference, pattern
+                return 'OK', self.rows
+
+        mailboxes = Mailboxes([
+            b'() "/" Inbox',
+            b'() "/" INBOX',
+            b'(\\NoSelect) "/" Folders',
+            br'(\HasNoChildren) "/" "Folders/ \"Quotes\" \\ slash "',
+            (b'() NIL {10}', b'&ZeVnLIqe-'),
+            b'',
+        ])
+        self.assertEqual(mail.list_folders(mailboxes), ['INBOX', 'Folders/ "Quotes" \\ slash ', '日本語'])
+        self.assertEqual(mailboxes.args, ('""', '*'))
+        self.assertEqual(mail.list_folders(Mailboxes([None])), [])
+        for row in [b'() "/" "unclosed', b'() "/" &missing-shift', (b'() "/" {9}', b'short')]:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                mail.list_folders(Mailboxes([b'() "/" INBOX', row, b'']))
+
     def test_readonly_history_resume_and_reset(self):
         FakeIMAP.commands=[];profile=dict(id='private',username='local',password='secret',certificate_sha256=mail.hashlib.sha256(b'certificate').hexdigest())
         with patch.object(mail.imaplib,'IMAP4',FakeIMAP):

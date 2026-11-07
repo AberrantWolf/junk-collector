@@ -1,7 +1,8 @@
 use super::*;
 use collector_app::{
-    ConfigureMail, ConnectBridge, MailConnection, MailProfile, MailSetupStatus, PurchaseInbox,
-    PurchaseInboxView, ReopenPurchase, RepairBridge, ReviewPurchase,
+    ConfigureMail, ConnectBridge, DiscoverBridgeFolders, MailConnection, MailProfile,
+    MailSetupStatus, PurchaseInbox, PurchaseInboxView, ReopenPurchase, RepairBridge,
+    ReviewPurchase,
 };
 #[utoipa::path(get,path="/api/v1/mail/setup",responses((status=200,body=MailSetupStatus),(status=401),(status=403)))]
 pub(super) async fn mail_setup(
@@ -23,6 +24,33 @@ pub(super) async fn connect_bridge(
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.connect_mail_bridge(&actor, command, &context)).await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/mail/setup/folders",request_body=DiscoverBridgeFolders,responses((status=200,body=Vec<String>),(status=400),(status=401),(status=403),(status=503)))]
+pub(super) async fn discover_bridge_folders(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(credentials): Json<DiscoverBridgeFolders>,
+) -> ApiResult<Json<Vec<String>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .discover_mail_bridge_folders(&actor, credentials)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(get,path="/api/v1/mail/profiles/{id}/folders",params(("id"=String,Path)),responses((status=200,body=Vec<String>),(status=401),(status=404),(status=503)))]
+pub(super) async fn discover_profile_folders(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<String>>> {
+    let actor = principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.discover_mail_profile_folders(&actor, &id)).await?,
     ))
 }
 #[derive(Deserialize)]

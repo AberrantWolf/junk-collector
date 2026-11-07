@@ -486,6 +486,14 @@ owner's in-flight batch is discarded; re-enabling resumes from the retained
 cursor. The deterministic regression covers both the blocking-fetch race and
 independent commit refusal. See the [review follow-up](validation/email-purchases-2026-10-30.md#account-disable-review-follow-up--2026-10-31).
 
+## Proton Bridge folder picker — source delivery, 2026-11-07
+
+Bridge setup and **Edit scanned folders** can list selectable folder names and
+add them to the receipt scan list. Existing profiles use their saved credentials.
+Manual entry is available alongside discovery. See the
+[email intake workflow](email-purchases.md#boundaries) and
+[fixture acceptance](validation/mail-folder-editing-2026-10-31.md#folder-picker-follow-up--2026-11-07).
+
 ## Email purchase intake — branch implementation, 2026-10-30
 
 The requested branch `codex/email-purchases` adds optional user-owned Proton

@@ -1,3 +1,10 @@
+## Proton Bridge folder picker — source delivery, 2026-11-07
+
+**Find mail folders** lists selectable folders during Bridge setup and while
+editing an existing receipt scan. Users can add names from the dropdown or
+enter them manually. See the [email intake workflow](email-purchases.md#boundaries)
+and [fixture acceptance](validation/mail-folder-editing-2026-10-31.md#folder-picker-follow-up--2026-11-07).
+
 ## Beta.22 published and installed on Fi — 2026-11-07
 
 Signed source `6faa8cd` is published as beta.22 and installed on Fi. Exact-source

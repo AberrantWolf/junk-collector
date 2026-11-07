@@ -82,3 +82,14 @@ an independently invoked remote-reader subprocess fixture. Real personal receipt
 calibration, production deployment, release-image qualification and physical
 mobile/cellular acceptance were not run for this source-only feature. All mail
 fixtures are synthetic and isolated; no real credentials or messages entered chat.
+
+## Folder picker follow-up — 2026-11-07
+
+The focused Chrome journey used a local TLS IMAP fixture to list and add folders
+in setup and the connected profile editor. It verified that discovery issues LIST
+without opening a mailbox, that a literal Japanese name reaches EXAMINE in its
+exact IMAP encoding, and that a different user cannot list the owner's folders.
+The listener matrix covers both discovery routes. The Python fixtures also cover
+escaped, duplicate, nonselectable and malformed replies. The short Chrome smoke
+passed, and the picker fit the 390px viewport. Discovery against a live Proton
+account and release deployment remain outside this source validation.

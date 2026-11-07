@@ -35,8 +35,15 @@ supports enable/pause and **Edit scanned folders**; changing an existing profile
 destination is refused.
 Use a new profile ID to import to another collection.
 
-**Edit scanned folders** accepts 1–16 exact IMAP folder names, one per line, then
-**Save folders**. Include `INBOX` to keep scanning inbox mail; archived receipts
+During Bridge setup or in **Edit scanned folders**, select **Find mail folders**,
+choose a folder from **Available mail folders**, and select **Add folder**. Repeat
+for each folder to scan. Setup uses the local IMAP credentials you entered and
+the editor uses your saved profile. Discovery lists selectable folders over the
+pinned local IMAP connection without opening them or fetching messages. If Bridge
+is unavailable, you can still enter exact names manually.
+
+**Edit scanned folders** accepts 1–16 names, one per line, then **Save folders**.
+Include `INBOX` to keep scanning inbox mail. Archived receipts
 require their folders or the exact Bridge All Mail folder name. Saving retains
 the enabled/paused state, suggestions and saved folder scan positions. New folders
 start at the beginning; removing a folder stops its future reads without deleting

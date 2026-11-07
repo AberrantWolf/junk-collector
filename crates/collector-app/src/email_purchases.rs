@@ -204,7 +204,16 @@ pub struct ConnectBridge {
     pub password: String,
     pub folders: Vec<String>,
 }
+/// Local IMAP credentials for a read-only lookup before saving a profile.
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverBridgeFolders {
+    pub username: String,
+    pub password: String,
+}
 pub trait MailSetupPort: Send + Sync {
+    fn discover_bridge_folders(&self, credentials: &DiscoverBridgeFolders) -> Result<Vec<String>>;
+    fn discover_profile_folders(&self, owner: UserId, profile: &str) -> Result<Vec<String>>;
     fn repair_bridge(
         &self,
         owner: UserId,
@@ -264,6 +273,34 @@ impl CollectionService {
             |p| p.setup_status(),
         )
     }
+    pub fn discover_mail_bridge_folders(
+        &self,
+        actor: &Principal,
+        credentials: DiscoverBridgeFolders,
+    ) -> Result<Vec<String>> {
+        self.mail_enabled_user(actor)?;
+        self.require_administrator(actor)?;
+        if !valid_bridge_credentials(&credentials.username, &credentials.password) {
+            return Err(Error::Invalid(
+                "Enter local Bridge IMAP credentials.".into(),
+            ));
+        }
+        self.mail_setup
+            .as_ref()
+            .ok_or_else(|| Error::Unavailable("Bridge setup unavailable".into()))?
+            .discover_bridge_folders(&credentials)
+    }
+    pub fn discover_mail_profile_folders(
+        &self,
+        actor: &Principal,
+        profile: &str,
+    ) -> Result<Vec<String>> {
+        self.mail_enabled_user(actor)?;
+        self.mail_setup
+            .as_ref()
+            .ok_or(Error::NotFound)?
+            .discover_profile_folders(actor.user_id, profile)
+    }
     pub fn connect_mail_bridge(
         &self,
         actor: &Principal,
@@ -272,12 +309,7 @@ impl CollectionService {
     ) -> Result<MailProfile> {
         self.mail_enabled_user(actor)?;
         self.require_administrator(actor)?;
-        if command.username.is_empty()
-            || command.username.len() > 320
-            || command.username.chars().any(char::is_control)
-            || command.password.is_empty()
-            || command.password.len() > 1024
-            || command.password.chars().any(char::is_control)
+        if !valid_bridge_credentials(&command.username, &command.password)
             || validate_mail_folders(&command.folders).is_err()
         {
             return Err(Error::Invalid(
@@ -300,12 +332,7 @@ impl CollectionService {
     ) -> Result<MailProfile> {
         self.mail_enabled_user(actor)?;
         self.require_administrator(actor)?;
-        if command.username.is_empty()
-            || command.username.len() > 320
-            || command.username.chars().any(char::is_control)
-            || command.password.is_empty()
-            || command.password.len() > 1024
-            || command.password.chars().any(char::is_control)
+        if !valid_bridge_credentials(&command.username, &command.password)
             || command.certificate_sha256.len() != 64
             || !command
                 .certificate_sha256
@@ -737,6 +764,15 @@ pub fn purchase_search_keys(title: &str, orders: &[PurchaseOrder]) -> Vec<String
         .chain(orders.iter().map(|p| p.title.as_str()))
         .map(normalized_purchase_title)
         .collect()
+}
+
+fn valid_bridge_credentials(username: &str, password: &str) -> bool {
+    !username.is_empty()
+        && username.len() <= 320
+        && !username.chars().any(char::is_control)
+        && !password.is_empty()
+        && password.len() <= 1024
+        && !password.chars().any(char::is_control)
 }
 
 fn validate_mail_folders(folders: &[String]) -> Result<()> {

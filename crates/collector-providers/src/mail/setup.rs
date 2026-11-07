@@ -1,7 +1,8 @@
-//! Private setup mechanisms. Only sanitized status and MailProfile leave this adapter.
+//! Private setup and mailbox discovery mechanisms.
 use super::*;
 use collector_app::{
-    BridgeSyncPhase, BridgeSyncStatus, ConnectBridge, MailSetupPort, MailSetupStatus, RepairBridge,
+    BridgeSyncPhase, BridgeSyncStatus, ConnectBridge, DiscoverBridgeFolders, MailFailure,
+    MailSetupPort, MailSetupStatus, RepairBridge,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -183,6 +184,26 @@ impl ProtonMailProvider {
     }
 }
 impl MailSetupPort for ProtonMailProvider {
+    fn discover_bridge_folders(&self, credentials: &DiscoverBridgeFolders) -> Result<Vec<String>> {
+        let bridge = self.bridge_for_connect()?;
+        discover_folders(&serde_json::json!({
+            "username": credentials.username,
+            "password": credentials.password,
+            "certificate_sha256": bridge.certificate_sha256.ok_or_else(unavailable)?,
+            "port": bridge.imap_port,
+        }))
+    }
+    fn discover_profile_folders(&self, owner: UserId, id: &str) -> Result<Vec<String>> {
+        let profile = self
+            .profiles
+            .lock()
+            .map_err(|_| unavailable())?
+            .iter()
+            .find(|p| p.id == id && p.owner == owner)
+            .cloned()
+            .ok_or(Error::NotFound)?;
+        discover_folders(&profile)
+    }
     fn repair_bridge(
         &self,
         owner: UserId,
@@ -195,7 +216,7 @@ impl MailSetupPort for ProtonMailProvider {
                 &serde_json::json!({"profile":profile,"cursor":"","operation":"authenticate"}),
             )
             .map_err(|_| unavailable())?;
-            let batch = super::run_mail(request, "", 20)?;
+            let batch: MailBatch = super::run_mail(request, "", 20)?;
             if let Some(failure) = batch.failure {
                 return Err(probe_failure(&failure));
             }
@@ -267,7 +288,7 @@ impl MailSetupPort for ProtonMailProvider {
                 &serde_json::json!({"profile":profile,"cursor":"","operation":"probe"}),
             )
             .map_err(|_| unavailable())?;
-            let batch = super::run_mail(request, "", 20)?;
+            let batch: MailBatch = super::run_mail(request, "", 20)?;
             if let Some(failure) = batch.failure {
                 return Err(probe_failure(&failure));
             }
@@ -276,6 +297,13 @@ impl MailSetupPort for ProtonMailProvider {
     }
 }
 impl ProtonMailProvider {
+    fn bridge_for_connect(&self) -> Result<BridgeSyncStatus> {
+        let status = self.setup_status()?;
+        if !status.can_connect {
+            return Err(Error::Unavailable("Bridge is not ready for a connection. Check its status and sign in through the private Bridge terminal first.".into()));
+        }
+        status.bridge.ok_or_else(unavailable)
+    }
     fn repair_with_probe(
         &self,
         owner: UserId,
@@ -457,11 +485,7 @@ impl ProtonMailProvider {
         if profiles.len() >= 16 || profiles.iter().any(|p| p.owner == owner) {
             return Err(Error::Conflict);
         }
-        let status = self.setup_status()?;
-        if !status.can_connect {
-            return Err(Error::Unavailable("Bridge is not ready for a connection. Check its status and sign in through the private Bridge terminal first.".into()));
-        }
-        let bridge = status.bridge.ok_or_else(unavailable)?;
+        let bridge = self.bridge_for_connect()?;
         let profile = Profile {
             revision: collector_core::Revision(1),
             id: format!("bridge-{owner}"),
@@ -500,7 +524,22 @@ impl ProtonMailProvider {
     }
 }
 
-fn probe_failure(failure: &collector_app::MailFailure) -> Error {
+fn discover_folders(profile: &impl Serialize) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Discovery {
+        Listed { folders: Vec<String> },
+        Failed { failure: MailFailure },
+    }
+    let request = serde_json::to_vec(&serde_json::json!({"profile":profile,"operation":"list"}))
+        .map_err(|_| unavailable())?;
+    match super::run_mail(request, "", 20)? {
+        Discovery::Listed { folders } => Ok(folders),
+        Discovery::Failed { failure } => Err(probe_failure(&failure)),
+    }
+}
+
+fn probe_failure(failure: &MailFailure) -> Error {
     use collector_app::MailFailureKind;
     let message = match failure.kind {
         MailFailureKind::Authentication => {

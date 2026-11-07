@@ -2,6 +2,7 @@
 No STORE/APPEND/EXPUNGE, external resource fetching, raw-mail persistence or logging.
 """
 import base64
+from contextlib import contextmanager
 import datetime as dt
 import email.policy
 import email.utils
@@ -251,6 +252,64 @@ def imap_folder(name):
     return ''.join(output)
 
 
+def decode_imap_folder(raw):
+    encoded = raw.decode('ascii')
+
+    def decode_shift(match):
+        value = match[1].replace(',', '/')
+        if not value:
+            return '&'
+        return base64.b64decode(value + '=' * (-len(value) % 4), validate=True).decode('utf-16-be')
+
+    name = re.sub(r'&([A-Za-z0-9+,]*)-', decode_shift, encoded)
+    if imap_folder(name) != encoded:
+        raise ValueError('invalid modified UTF-7 mailbox name')
+    return name
+
+
+LIST_ROW = re.compile(rb'\(([^()]*)\) (?:NIL|"(?:\\["\\]|[^"\\])") (.+)', re.I)
+QUOTED_MAILBOX = re.compile(rb'"((?:\\["\\]|[^"\\])*)"')
+ATOM_MAILBOX = re.compile(rb'[^(){%*"\\\x00-\x20\x7f-\xff]+')
+LITERAL_MAILBOX = re.compile(rb'\{([0-9]{1,4})\}')
+
+
+def list_folders(client):
+    rows = checked(client.list('""', '*'))
+    if rows == [None]:
+        return []
+    folders = set()
+    replies = iter(rows)
+    for row in replies:
+        prefix, literal = row if isinstance(row, tuple) else (row, None)
+        parsed = LIST_ROW.fullmatch(prefix)
+        if not parsed:
+            raise MailError('invalid_response')
+        flags, token = parsed.groups()
+        if literal is not None:
+            size = LITERAL_MAILBOX.fullmatch(token)
+            if size is None or int(size[1]) != len(literal) or next(replies, None) != b'':
+                raise MailError('invalid_response')
+            raw = literal
+        elif quoted := QUOTED_MAILBOX.fullmatch(token):
+            raw = re.sub(rb'\\(["\\])', rb'\1', quoted[1])
+        elif ATOM_MAILBOX.fullmatch(token):
+            raw = token
+        else:
+            raise MailError('invalid_response')
+        if {b'\\noselect', b'\\nonexistent'}.intersection(flags.lower().split()):
+            continue
+        name = decode_imap_folder(raw)
+        # Use the same name limits as the application folder setting.
+        if not name.strip() or len(name.encode('utf-8')) > 256 or any(
+            unicodedata.category(c) == 'Cc' for c in name
+        ):
+            continue
+        folders.add('INBOX' if name.upper() == 'INBOX' and name.isascii() else name)
+        if len(folders) > 4096:
+            raise MailError('invalid_response')
+    return sorted(folders, key=lambda name: (name != 'INBOX', name.casefold(), name))
+
+
 class MailError(ValueError):
     def __init__(self, kind, folder=None):
         self.kind, self.folder = kind, folder
@@ -277,16 +336,32 @@ def folder_progress(folder, validity, last, end):
                 checked_at=dt.datetime.now(dt.timezone.utc).isoformat())
 
 
-def fetch_batch(profile, cursor, probe=False, auth_only=False):
+class DiscoveryIMAP(imaplib.IMAP4):
+    """Bound LIST response accumulation, including literals, before imaplib stores it."""
+    remaining = 1024 * 1024
+
+    def readline(self):
+        line = super().readline()
+        self.remaining -= len(line)
+        if self.remaining < 0:
+            raise MailError('invalid_response')
+        return line
+
+    def read(self, size):
+        if size > 1024 or size > self.remaining:
+            raise MailError('invalid_response')
+        self.remaining -= size
+        return super().read(size)
+
+
+@contextmanager
+def bridge_session(profile, discover=False):
     if any(not isinstance(profile.get(field), str) or any(ord(c) < 32 or ord(c) == 127 for c in profile[field]) for field in ('username', 'password')):
         raise ValueError('invalid local credentials')
     if profile.get('host', '127.0.0.1') != '127.0.0.1':
         raise ValueError('Bridge must use loopback')
-    state = json.loads(cursor) if cursor else {}
-    folders = profile.get('folders', ['INBOX'])
-    if not 1 <= len(folders) <= 16:
-        raise ValueError('folder limit')
-    client = imaplib.IMAP4('127.0.0.1', profile.get('port', 1143), timeout=15)
+    connect = DiscoveryIMAP if discover else imaplib.IMAP4
+    client = connect('127.0.0.1', profile.get('port', 1143), timeout=15)
     try:
         # Bridge uses a self-signed certificate. Pin its exact DER digest before LOGIN.
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -301,6 +376,20 @@ def fetch_batch(profile, cursor, probe=False, auth_only=False):
             checked(client.login(profile['username'], profile['password']), 'authentication')
         except imaplib.IMAP4.error:
             raise MailError('authentication') from None
+        yield client
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def fetch_batch(profile, cursor, probe=False, auth_only=False):
+    state = json.loads(cursor) if cursor else {}
+    folders = profile.get('folders', ['INBOX'])
+    if not 1 <= len(folders) <= 16:
+        raise ValueError('folder limit')
+    with bridge_session(profile) as client:
         if auth_only:
             return dict(cursor='', purchases=[])
         purchases, details, progress = [], [], []
@@ -358,17 +447,17 @@ def fetch_batch(profile, cursor, probe=False, auth_only=False):
             if len(purchases) >= 80:
                 break
         return dict(cursor=json.dumps(state), purchases=purchases, details=details, progress=progress)
-    finally:
-        try:
-            client.logout()
-        except Exception:
-            pass
 
 
 if __name__ == '__main__':
     try:
         request = json.load(sys.stdin)
-        result = fetch_batch(request['profile'], request['cursor'], request.get('operation') == 'probe', request.get('operation') == 'authenticate')
+        operation = request.get('operation')
+        if operation == 'list':
+            with bridge_session(request['profile'], discover=True) as client:
+                result = dict(folders=list_folders(client))
+        else:
+            result = fetch_batch(request['profile'], request['cursor'], operation == 'probe', operation == 'authenticate')
         sys.stdout.write(json.dumps(result, ensure_ascii=False))
     except Exception as failure:
         # Only fixed typed categories and the submitted folder cross this boundary.
