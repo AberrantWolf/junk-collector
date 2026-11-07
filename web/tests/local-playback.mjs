@@ -22,7 +22,7 @@ try{
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  // localhost is a secure context; no certificate-error bypass or security flags.
  const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  let injectedReadContention=false;
  await page.route('**/api/v1/items/*',route=>{
   if(route.request().method()==='GET'&&!injectedReadContention){injectedReadContention=true;return route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}});}
@@ -69,7 +69,7 @@ try{
  assert.equal(await page.evaluate(async()=>(await fetch('/api/v1/auth/logout',{method:'POST'})).status),204);
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(await revokedAudio.evaluate(audio=>({paused:audio.paused,src:audio.getAttribute('src')})),{paused:true,src:null});await revokedAudio.dispose();
- await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await player.waitFor();
+ await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await player.waitFor();
  // Fail closed when the transport is unavailable: no ordinary HTTP media request.
  await page.reload();let mediaRequests=0;page.on('request',request=>{if(request.url().startsWith(origin+fixture.path))mediaRequests++;});
  await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').filter({hasText:'does not support secure local playback'}).waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);

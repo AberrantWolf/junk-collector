@@ -6895,6 +6895,13 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Account creation is disabled in single-user mode */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Forbidden */
             403: {
                 headers: {

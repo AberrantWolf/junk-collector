@@ -237,7 +237,7 @@ impl Default for Config {
             local_playback_enabled: true,
             remote_media_allowed: true,
             remote_media: None,
-            multi_user: false,
+            multi_user: true,
             exposure: Exposure::default(),
             authentication_origin: None,
             inboxes: std::collections::BTreeMap::new(),
@@ -919,6 +919,7 @@ async fn main() -> Result<()> {
                     config.state.display()
                 );
                 store.create_user(&username, &password()?, true)?;
+                println!("Created sign-in username {username:?}.");
             } else {
                 println!("Keeping existing accounts, passwords, collections and TLS identity.");
             }
@@ -937,7 +938,7 @@ async fn main() -> Result<()> {
             std::fs::write(&cli.config, toml::to_string_pretty(&config)?)?;
             instructions(&config, &cli.config);
             println!(
-                "Setup complete. Run serve with this configuration, then sign in with your existing password (or the one just created)."
+                "Setup complete. Run serve with this configuration, then sign in with your account credentials."
             );
         }
         Command::RecoverAccount { .. } | Command::Accounts { .. } | Command::Paths => {

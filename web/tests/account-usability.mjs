@@ -2,7 +2,7 @@ import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 import {chromium,expect} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -20,10 +20,12 @@ try{
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',value=>errors.push(value.message));page.on('dialog',dialog=>dialog.accept());
  const started=await context.request.post(base+'/api/v1/enrollments/start',{data:{device_name:'Trash Amp pairing test'}});assert.equal(started.status(),200);const enrollment=await started.json();
- await page.goto(base+enrollment.verification_url+'?code='+encodeURIComponent(enrollment.user_code));await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.goto(base+enrollment.verification_url+'?code='+encodeURIComponent(enrollment.user_code));
+ const features=await (await context.request.get(base+'/api/v1/features')).json();assert.equal(features.multi_user,true);assert.equal(features.default_username,null);
+ await expect(page.getByLabel('Username',{exact:true})).toHaveValue('');await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('heading',{name:'Connect Trash Amp',exact:true}).waitFor();await expect(page.getByLabel('Approval code',{exact:true})).toHaveValue(enrollment.user_code);await expect(page.getByText('Signed in as',{exact:false})).toContainText('owner');
  await page.getByLabel('Approval code',{exact:true}).fill('WRONG-CODE');await page.getByRole('button',{name:'Review connection',exact:true}).click();await page.getByRole('alert').filter({hasText:'That approval code is unavailable for this account'}).waitFor();
- await page.getByRole('button',{name:'Sign in as another account',exact:true}).click();await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Connect Trash Amp',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Sign in as another account',exact:true}).click();await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Connect Trash Amp',exact:true}).waitFor();
  await page.getByLabel('Approval code',{exact:true}).fill(enrollment.user_code);await page.getByRole('button',{name:'Review connection',exact:true}).click();await expect(page.getByText('Trash Amp pairing test',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Approve this app',exact:true}).click();await page.getByRole('heading',{name:'App approved',exact:true}).waitFor();
 
  const nativeStatus=async credential=>(await fetch(base+'/api/v1/me',{headers:{authorization:'Bearer '+credential}})).status;
@@ -35,21 +37,47 @@ try{
  await security.getByRole('button',{name:'Recovery',exact:true}).click();await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').first().waitFor();const codes=await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').allTextContents();assert.equal(codes.length,10);
  await security.getByRole('button',{name:'Close account and security',exact:true}).click();
  const collectionResponse=await context.request.post(base+'/api/v1/admin/collections',{headers:{origin:base,'idempotency-key':randomBytes(16).toString('hex')},data:{name:'Usability music',module:'org.junk.music'}});assert.equal(collectionResponse.status(),200);const collection=await collectionResponse.json();
- await page.getByRole('button',{name:'Administration',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByRole('button',{name:'Accounts',exact:true}).click();await admin.getByLabel('Username',{exact:true}).fill('second');await admin.getByLabel('Initial password',{exact:true}).fill(password);await admin.getByRole('button',{name:'Create account',exact:true}).click();await admin.getByRole('status').filter({hasText:'No collection access yet.'}).waitFor();
+ const secondPassword=randomBytes(24).toString('hex');
+ await page.getByRole('button',{name:'Administration',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByRole('button',{name:'Accounts',exact:true}).click();await admin.getByLabel('Username',{exact:true}).fill('second');await admin.getByLabel('Initial password',{exact:true}).fill(secondPassword);await admin.getByRole('button',{name:'Create account',exact:true}).click();await admin.getByRole('status').filter({hasText:'No collection access yet.'}).waitFor();
  const account=await context.request.get(base+'/api/v1/admin/users?search=second&limit=10');const second=(await account.json()).items[0];assert.ok(second);
  const grantCard=admin.getByRole('region',{name:'Account collection access'});await grantCard.getByRole('button',{name:/Usability music/}).click();
  const grantUrl=`**/api/v1/collections/${collection.id}/grants/second`;await page.route(grantUrl,async route=>{if(route.request().method()==='PUT')await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'unavailable',message:'Temporary grant failure'}})});else await route.continue();});
  await grantCard.getByRole('button',{name:'Save collection access',exact:true}).click();await admin.getByRole('alert').waitFor();await expect(grantCard).toBeVisible();await expect(admin.getByText('second',{exact:true}).first()).toBeVisible();await page.unroute(grantUrl);await grantCard.getByRole('button',{name:'Save collection access',exact:true}).click();await admin.getByRole('status').filter({hasText:'now has viewer access'}).waitFor();
- await grantCard.getByRole('button',{name:'Done assigning access',exact:true}).click();const secondRow=admin.locator('.stored-file').filter({hasText:/second.*Enabled/});await secondRow.getByRole('button',{name:'Make default',exact:true}).click();await expect(secondRow.locator('small')).toContainText('Default account');assert.equal((await (await context.request.get(base+'/api/v1/features')).json()).default_username,'second');
+ await grantCard.getByRole('button',{name:'Done assigning access',exact:true}).click();const secondRow=admin.locator('.stored-file').filter({hasText:/second.*Enabled/});await secondRow.getByRole('button',{name:'Make default',exact:true}).click();await expect(secondRow.locator('small')).toContainText('Default account');assert.equal((await (await context.request.get(base+'/api/v1/features')).json()).default_username,null);
  const ownerRow=admin.locator('.stored-file').filter({hasText:/owner.*Enabled/});await expect(ownerRow.locator('small')).toContainText('Current account');await ownerRow.getByRole('button',{name:'Make default',exact:true}).click();await expect(ownerRow.locator('small')).toContainText('Default account');await admin.getByRole('button',{name:'Close administration',exact:true}).click();
  // A separate signed-in browser approves the account-less request as the second account.
- const other=await browser.newContext();const otherLogin=await other.request.post(base+'/api/v1/auth/login',{headers:{origin:base},data:{username:'second',password,device_name:'Other browser'}});assert.equal(otherLogin.status(),200);
+ const other=await browser.newContext();const otherPage=await other.newPage();await otherPage.goto(base);
+ await expect(otherPage.getByLabel('Username',{exact:true})).toHaveValue('');
+ await otherPage.getByLabel('Username',{exact:true}).fill('second');await otherPage.getByLabel('Password',{exact:true}).fill(secondPassword);
+ await otherPage.getByRole('button',{name:'Sign in',exact:true}).click();
+ await otherPage.getByRole('heading',{name:'Library',exact:true}).waitFor();
  const secondStart=await other.request.post(base+'/api/v1/enrollments/start',{data:{device_name:'Second Trash Amp account'}});assert.equal(secondStart.status(),200);const secondEnrollment=await secondStart.json();assert.equal((await other.request.post(base+'/api/v1/enrollments/approve',{headers:{origin:base},data:{user_code:secondEnrollment.user_code}})).status(),200);const secondIssue=await other.request.post(`${base}/api/v1/enrollments/${secondEnrollment.id}/complete`,{data:{completion_secret:secondEnrollment.completion_secret}});assert.equal(secondIssue.status(),200);const secondCredential=await secondIssue.json();assert.equal(secondCredential.user_id,second.id);assert.notEqual(secondCredential.user_id,credential.user_id);
  await page.getByRole('button',{name:'Account & security',exact:true}).click();await security.getByRole('button',{name:'Apps',exact:true}).click();await security.getByRole('button',{name:'Sign out other sessions and apps',exact:true}).click();await security.getByRole('status').filter({hasText:'This browser remains signed in'}).waitFor();assert.notEqual(await nativeStatus(credential.credential),200);assert.equal(await nativeStatus(secondCredential.credential),200);
- await security.getByRole('button',{name:'Close account and security',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('button',{name:'Use a recovery code',exact:true}).click();await expect(page.getByText('Need help recovering your account?',{exact:true})).toBeVisible();await page.getByLabel('Recovery code',{exact:true}).fill(codes[0]);await page.getByLabel('New password',{exact:true}).fill(password+'-recovered');await page.getByRole('button',{name:'Use recovery code',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).waitFor();await expect(page.getByRole('button',{name:'Save replacement recovery codes',exact:true})).toBeVisible();await page.getByRole('button',{name:'Save replacement recovery codes',exact:true}).click();await page.getByRole('dialog',{name:'Account & security'}).getByRole('button',{name:'Generate replacement codes',exact:true}).waitFor();
+ await security.getByRole('button',{name:'Close account and security',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('button',{name:'Use a recovery code',exact:true}).click();await page.getByLabel('Username',{exact:true}).fill('owner');await expect(page.getByText('Need help recovering your account?',{exact:true})).toBeVisible();await page.getByLabel('Recovery code',{exact:true}).fill(codes[0]);await page.getByLabel('New password',{exact:true}).fill(password+'-recovered');await page.getByRole('button',{name:'Use recovery code',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).waitFor();await expect(page.getByRole('button',{name:'Save replacement recovery codes',exact:true})).toBeVisible();await page.getByRole('button',{name:'Save replacement recovery codes',exact:true}).click();await page.getByRole('dialog',{name:'Account & security'}).getByRole('button',{name:'Generate replacement codes',exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});const tasks=page.getByRole('navigation',{name:'Security tasks',exact:true});for(const name of ['Profile','Password','Passkeys','Recovery','Browser sessions','Apps'])await expect(tasks.getByRole('button',{name,exact:true})).toBeVisible();assert.ok(await tasks.evaluate(node=>node.scrollWidth<=node.clientWidth+1),'security tasks require hidden horizontal navigation');await tasks.getByRole('button',{name:'Profile',exact:true}).focus();await page.keyboard.press('Tab');await expect(tasks.getByRole('button',{name:'Password',exact:true})).toBeFocused();
  await page.screenshot({path:'/tmp/collector-account-security.png',fullPage:true});await other.close();
- assert.deepEqual(errors,[]);console.log('Account browser journey passed: password retains app access, created account survives failed grant, grant retry, current/default labels refresh, two-account approval, scoped app revocation, code recovery and guidance.');
+ // Explicit single-user mode keeps its sign-in shortcut and denies new accounts at the API.
+ await stopProcess(server);await writeFile(config,(await readFile(config,'utf8')).replace(/^multi_user = true$/m,'multi_user = false'));
+ server=spawn(binary,['--config',config,'serve']);server.stdout.on('data',value=>logs+=value);server.stderr.on('data',value=>logs+=value);
+ await waitForServer(base+'/healthz',server,{logs:()=>logs});
+ const single=await browser.newContext({viewport:{width:390,height:844}});const singlePage=await single.newPage();await singlePage.goto(base);
+ const singleFeatures=await (await single.request.get(base+'/api/v1/features')).json();assert.equal(singleFeatures.multi_user,false);assert.equal(singleFeatures.default_username,'owner');
+ await expect(singlePage.getByLabel('Username',{exact:true})).toHaveCount(0);
+ await singlePage.getByLabel('Password',{exact:true}).fill(password+'-recovered');await singlePage.getByRole('button',{name:'Sign in',exact:true}).click();
+ await singlePage.getByRole('button',{name:'Menu',exact:true}).click();
+ await singlePage.getByRole('button',{name:'Administration',exact:true}).click();
+ const singleAdmin=singlePage.getByRole('dialog',{name:'Administration'});
+ await singleAdmin.getByRole('button',{name:'Accounts',exact:true}).click();
+ await expect(singleAdmin.getByText(/Account creation is disabled/)).toBeVisible();
+ await expect(singleAdmin.getByRole('button',{name:'Create account',exact:true})).toHaveCount(0);
+ await expect(singleAdmin.locator('.stored-file').filter({hasText:/second.*Enabled/})).toBeVisible();
+ assert.equal(await singleAdmin.evaluate(node=>node.scrollWidth>node.clientWidth),false,'single-user notice causes horizontal overflow');
+ const blocked=await single.request.post(base+'/api/v1/admin/users',{headers:{origin:base,'idempotency-key':randomBytes(16).toString('hex')},data:{username:'blocked',password,administrator:false}});
+ assert.equal(blocked.status(),400);
+ assert.match((await blocked.json()).error.message,/multi_user = true/);
+ const lookup=await single.request.get(base+'/api/v1/admin/users?search=blocked');assert.equal(lookup.status(),200);assert.deepEqual((await lookup.json()).items,[]);
+ await single.close();
+ assert.deepEqual(errors,[]);console.log('Account browser journey passed: password retains app access, created account survives failed grant, grant retry, current/default labels refresh, two-account approval, scoped app revocation, code recovery, blank username sign-in and single-user creation denial.');
 }finally{
  await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});
 }

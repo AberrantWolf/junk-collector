@@ -100,12 +100,12 @@ try{
   const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);
   const features=await(await fetch('http://localhost:19841/api/v1/features')).json();assert.equal(features.administration,false);assert.equal(features.curation,false);
   await page.goto('http://127.0.0.1:19842');
-  await page.getByLabel('Password',{exact:true}).fill(password);
+  await page.getByLabel('Username',{exact:true}).fill(localSetup?'collector':'owner');await page.getByLabel('Password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByText('This browser address is not enabled',{exact:false}).waitFor();
  }
  await page.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
- await page.getByLabel('Password',{exact:true}).fill(password);
+ await page.getByLabel('Username',{exact:true}).fill(localSetup?'collector':'owner');await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  // Exercise the actual approval page with the browser's logged-in account.
@@ -1300,6 +1300,7 @@ try{
  assert.deepEqual(race,[200,401],'stale passkey ceremony issued a session');
 
  await page.getByRole('button',{name:'Sign out',exact:true}).click();
+ await page.getByLabel('Username',{exact:true}).fill('owner');
  await page.getByRole('button',{name:'Sign in with a passkey',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  }

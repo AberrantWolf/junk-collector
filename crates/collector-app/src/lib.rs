@@ -6052,6 +6052,7 @@ impl CollectionService {
         username: &str,
         password: &str,
         administrator: bool,
+        multi_user: bool,
         context: &CommandContext,
     ) -> Result<UserId> {
         self.require_recent_authentication(authenticated)?;
@@ -6059,6 +6060,11 @@ impl CollectionService {
         self.require_administrator(actor)?;
         let request = (username, Digest::sha256(password.as_bytes()), administrator);
         self.execute_command(actor, context, "account.create", &request, |effects| {
+            if !multi_user {
+                return Err(Error::Invalid(
+                    "Account creation is disabled in single-user mode. Set multi_user = true in the server configuration and restart.".into(),
+                ));
+            }
             effects.create_user(username, password, administrator)
         })
     }

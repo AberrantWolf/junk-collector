@@ -753,6 +753,9 @@
               }
             }
           },
+          "400": {
+            "description": "Account creation is disabled in single-user mode"
+          },
           "403": {
             "description": "Forbidden"
           },

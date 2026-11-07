@@ -101,7 +101,7 @@ impl AppState {
             exposure: Exposure::default(),
             ingress: Ingress::Public,
             pairing,
-            multi_user: false,
+            multi_user: true,
             local_playback: None,
             remote_media_allowed: true,
             remote_media: None,
@@ -5081,7 +5081,7 @@ struct NewUser {
     #[serde(default)]
     administrator: bool,
 }
-#[utoipa::path(post, path = "/api/v1/admin/users", params(("Idempotency-Key" = String, Header)), request_body = NewUser, responses((status = 200, body = serde_json::Value), (status = 403), (status = 409)))]
+#[utoipa::path(post, path = "/api/v1/admin/users", params(("Idempotency-Key" = String, Header)), request_body = NewUser, responses((status = 200, body = serde_json::Value), (status = 400, description = "Account creation is disabled in single-user mode"), (status = 403), (status = 409)))]
 async fn create_user(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -5095,6 +5095,7 @@ async fn create_user(
             &input.username,
             &input.password,
             input.administrator,
+            state.multi_user,
             &context,
         )
     })

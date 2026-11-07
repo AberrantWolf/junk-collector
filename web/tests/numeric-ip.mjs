@@ -31,7 +31,7 @@ try{
  browser=await chromium.launch({headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
- await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  const features=await(await page.request.get(origin+'/api/v1/features')).json();assert.equal(features.passkeys,false);assert.equal(features.passkeys_unavailable_reason,'dns_name_required');
  await page.getByRole('button',{name:'Account & security',exact:true}).click();const security=page.getByRole('dialog',{name:'Account & security'});
@@ -44,7 +44,7 @@ try{
  // A recovery request must also work through this numeric-IP origin, with the
  // usual fresh password/session, rather than merely displaying capability text.
  await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'Sign out',exact:true}).click();
- await page.getByRole('button',{name:'Use a recovery code',exact:true}).click();await page.getByLabel('Recovery code',{exact:true}).fill(code);await page.getByLabel('New password',{exact:true}).fill(randomBytes(24).toString('hex'));
+ await page.getByRole('button',{name:'Use a recovery code',exact:true}).click();await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Recovery code',{exact:true}).fill(code);await page.getByLabel('New password',{exact:true}).fill(randomBytes(24).toString('hex'));
  await page.getByRole('button',{name:'Use recovery code',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log(`Numeric-IP browser passed (Chrome ${await browser.version()}): actual TLS/IP identity, setup/doctor/startup, password sign-in, typed passkey guidance, mobile layout and recovery-code sign-in. Screenshot: ${artifact}`);
 }catch(error){console.error(logs);await page?.screenshot({path:artifact,fullPage:true}).catch(()=>{});throw error;}

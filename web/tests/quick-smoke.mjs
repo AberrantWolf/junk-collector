@@ -31,7 +31,7 @@ try{
  const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('requestfailed',request=>{if(failedRequests.length<30)failedRequests.push({url:request.url(),error:request.failure()?.errorText});});
  await page.goto(origin);
  for(const file of ['app.js','app.css','curation.js'])assert.equal(await page.evaluate(async file=>(await fetch('/'+file)).text(),file),await readFile(new URL('../dist/'+file,import.meta.url),'utf8'),`stale served asset: ${file}`);
- await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
  await admin.getByLabel('Collection name').fill('Smoke collection');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();
  await admin.getByRole('button',{name:'Server settings',exact:true}).click();

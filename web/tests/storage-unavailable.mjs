@@ -17,7 +17,7 @@ let server,browser,page,logs='';
 async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);await waitForServer('http://127.0.0.1:20151/healthz',server,{logs:()=>logs});}
 try{
  await start();browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1200,height:900}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
  await admin.getByLabel('Collection name').fill('Retained collection');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await page.getByRole('button',{name:'Close administration'}).click();
  const id=await page.evaluate(async()=>{

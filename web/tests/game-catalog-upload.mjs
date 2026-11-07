@@ -27,7 +27,7 @@ try{
  browser=await chromium.launch({headless:true});
  page=await browser.newPage({viewport:{width:1360,height:980}});page.setDefaultTimeout(15000);page.on('dialog',dialog=>dialog.accept());const errors=[],external=[];page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.status()===422)console.error('Rejected request:',await r.text());});
  await page.route('**/*',route=>{const url=new URL(route.request().url());if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.toString());return route.abort();}return route.continue();});
- await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
+ await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  const collection=await page.evaluate(async()=>{const r=await fetch('/api/v1/admin/collections',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({name:'Game fixtures',module:'org.junk.games'})});if(!r.ok)throw Error(await r.text());return r.json();});
  async function read(url){return page.evaluate(async url=>{
   const until=Date.now()+5000;

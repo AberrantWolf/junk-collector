@@ -1,3 +1,10 @@
+## Username sign-in — source delivery, 2026-11-07
+
+The sign-in form starts with an empty username by default. Explicit single-user
+mode (`multi_user = false`) uses the saved default account and disables account
+creation in Administration and its API. Existing accounts and grants are retained.
+See [delivery and validation](account-usability-delivery.md#username-sign-in--2026-11-07).
+
 ## GitHub #12–#15: Imports review and pagination — 2026-11-07
 
 Saved import groups page newest first by creation time. The stable cursor

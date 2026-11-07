@@ -36,7 +36,7 @@ try{
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',args:fixtureCertificateArgs(await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8')),headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(origin);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
  await admin.getByLabel('Collection name').fill('Game shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const data=await(await fetch('/api/v1/collection-search?limit=50')).json();return data.items.find(c=>c.name==='Game shelf').id;});

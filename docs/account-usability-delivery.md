@@ -105,3 +105,19 @@ and accepted explicit pairing. The live native transport independently reproduce
 UnknownIssuer and accepted the actual local public PEM. Phono affected tests,
 lint and both executable builds passed. The dated validation record distinguishes
 these checks from pending interactive OS-root/native GUI/second-device acceptance.
+
+## Username sign-in — 2026-11-07
+
+New configurations use `multi_user = true`. The browser starts with an empty
+username for password, passkey and recovery sign-in. Setup prints the username
+of the account it creates. An explicit `multi_user = false` retains the saved
+default account on the browser form. Administration hides account creation in
+that mode and the application rejects new account creation effects. Account
+records, grants and the saved default account remain available across mode
+changes. See [configuration](configuration.md#users-and-collection-access).
+
+The account browser journey passed with distinct credentials for two accounts.
+After restarting in single-user mode, it signed in with the saved default,
+checked the account-creation notice at mobile width, confirmed the second
+account was still listed and verified that a direct API request created no
+account. Pairing, numeric-IP recovery and short smoke also passed.

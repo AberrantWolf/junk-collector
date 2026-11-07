@@ -18,7 +18,7 @@ try{
  // Test-only self-signed browser acceptance; the PEM/name was independently validated above.
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
- await page.goto(fixture.origin);await page.getByLabel('Password',{exact:true}).fill(fixture.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.goto(fixture.origin);await page.getByLabel('Username',{exact:true}).fill(fixture.username);await page.getByLabel('Password',{exact:true}).fill(fixture.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('heading',{name:'Library',exact:true}).waitFor();
  await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
  let cancelledOnly=false,expectedOpusMedia=null;

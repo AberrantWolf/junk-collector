@@ -14,7 +14,7 @@ Edit `collector.toml` and restart the server to apply changes. Unknown configura
 |---|---|---|
 | `archive` | `".collector/archive"` | Original files, collection manifests, revisions, artwork, derivatives, and evidence. |
 | `state` | `".collector/state"` | Local SQLite databases, accounts, credentials, TLS keys, jobs, and upload/processing scratch. |
-| `multi_user` | `false` | When `false`, login uses the default profile and hides username selection. When `true`, users sign in to separate accounts. Authentication remains required in either mode. |
+| `multi_user` | `true` | Users enter their own username at sign-in. Set to `false` to use the default account on the sign-in form and disable new account creation. Both modes require authentication. |
 
 Keep `state` on local disk, even if `archive` is on a NAS. Allow space for retained originals, prepared audio, uploads, and temporary conversion work. Keep the complete state directory private to the server account; it contains credentials and TLS keys.
 
@@ -77,7 +77,7 @@ Change the storage and executable paths for your machine. Omit the optional prov
 ```toml
 archive = "/srv/junk-collector/archive"
 state = "/var/lib/junk-collector"
-multi_user = false
+multi_user = true
 
 public_bind = "127.0.0.1:9841"
 private_bind = "127.0.0.1:9842"
@@ -254,7 +254,10 @@ It retains downloaded data and a digest manifest. The server does not automatica
 
 ## Users and collection access
 
-For separate trusted users, set `multi_user = true`, restart, and create accounts in **Administration**. Assign each account the appropriate collection role:
+Users sign in with their own username by default. For an existing configuration
+with `multi_user = false`, set `multi_user = true` and restart the server to enable
+username entry and account creation. Create accounts in **Administration → Accounts**
+and assign each account the appropriate collection role.
 
 | Role | Access |
 |---|---|
@@ -262,7 +265,7 @@ For separate trusted users, set `multi_user = true`, restart, and create account
 | Curator | Viewer access plus inventory changes, imports, metadata/artwork work, and processing commands. |
 | Owner | Curator access plus collection access management. |
 
-Server administration and collection access are separate permissions. An administrator does not automatically receive permission to read every collection. Single-user mode keeps authentication and uses the default account; it is not anonymous access.
+Server administration and collection access are separate permissions. An administrator does not automatically receive permission to read every collection. Single-user mode uses the stored default account on the sign-in form and blocks new account creation in Administration and the API. Existing accounts and grants are retained.
 
 ### Passkeys
 
