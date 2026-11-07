@@ -702,6 +702,7 @@ impl CollectionService {
             record.state,
             crate::JobState::Cancelled | crate::JobState::CancelRequested
         ) || record.phase == "batch_cancelled";
+        let mut cancellation_pending = record.state == crate::JobState::CancelRequested;
         let mut updated_at = record.updated_at;
         let mut members = Vec::with_capacity(frozen.members.len());
         for member in frozen.members {
@@ -770,6 +771,10 @@ impl CollectionService {
                         .iter()
                         .any(|value| value.id == input.representation_id);
                     let job = self.jobs.job_record(job_id, actor.user_id);
+                    cancellation_pending |= matches!(
+                        job.as_ref(),
+                        Ok(job) if job.state == crate::JobState::CancelRequested
+                    );
                     let (state, attempt, error) = if published {
                         (MusicPreparationMemberState::Succeeded, None, None)
                     } else {
@@ -868,6 +873,7 @@ impl CollectionService {
             admission_error: record.error,
             can_cancel: can_stop && !cancelled_by_user && (queued > 0 || running > 0),
             can_retry: can_write
+                && !cancellation_pending
                 && (failed > 0 || cancelled > 0 || record.state == crate::JobState::Failed),
             created_at: frozen.created_at,
             updated_at,

@@ -213,7 +213,11 @@ opus = "${wrapper}"
  await album.getByRole('button',{name:'Cancel outstanding tracks'}).click();
  await expect(album.getByText(/batch cancelled/)).toBeVisible();
  await writeFile(gate,'ready');
+ const retryResponse=page.waitForResponse(response=>
+  /\/api\/v1\/music-preparation-batches\/[^/]+\/retry$/.test(response.url())
+  &&response.request().method()==='POST');
  await album.getByRole('button',{name:'Retry unfinished tracks'}).click();
+ assert.equal((await retryResponse).status(),200,'Retry must be accepted after cancellation settles');
  await expect(album.getByText('All album tracks are ready as Opus 192 kbps.',{exact:false})).toBeVisible({timeout:45000});
  const opusLink=album.getByRole('link',{name:/Opus 192 kbps/}).first();
  const href=await opusLink.getAttribute('href');

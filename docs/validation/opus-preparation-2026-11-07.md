@@ -100,3 +100,19 @@ admission, and a coordinator waking after completion with ready members.
 The focused archive tests, compact selection regression, strict workspace
 Clippy, web checks, API contracts, and Chrome smoke passed on the audio-only
 source.
+
+
+## Cancellation and retry qualification follow-up
+
+The [pushed main run](https://github.com/AberrantWolf/junk-collector/actions/runs/42364545369)
+timed out waiting for a cancelled Opus album batch to finish after Retry. The
+batch still showed one running track and two cancelled tracks. A worker
+completion or failure racing the cancellation now settles the matching claim
+as cancelled. The dispatcher also settles abandoned preparation cancellations
+when their worker is gone or their lease expires. Retry becomes available once
+the cancellation has settled. A track whose archive revision already committed
+keeps its completion path.
+
+The archive regression exercises cancellation during admission, late completion
+and failure, and recovery after lease expiration. The browser journey requires
+an accepted retry response and checks the resulting Opus bytes.

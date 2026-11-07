@@ -353,7 +353,8 @@ impl Store {
                    phase=CASE WHEN state='queued' THEN 'cancelled' ELSE phase END,
                    cancellation_requested=CASE WHEN state IN ('queued','running','cancel_requested') THEN 1 ELSE cancellation_requested END,
                    updated_at=?
-                 WHERE id=? AND user_id=? AND state IN ('queued','running','cancel_requested')",
+                 WHERE id=? AND user_id=? AND state IN ('queued','running','cancel_requested')
+                   AND phase<>'revision_committed'",
                 params![now, job_id.to_string(), user.to_string()],
             )
             .map_err(storage)?;
@@ -1055,7 +1056,8 @@ impl Store {
                     (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)) OR
                 (state='cancel_requested' AND
                     (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)
-                    AND id IN (SELECT child FROM private.digital_children)))",
+                    AND (kind IN ('music_derivative','music_derivative_batch')
+                         OR id IN (SELECT child FROM private.digital_children))))",
                 params![worker_instance, now],
                 |row| row.get(0),
             )
@@ -1064,14 +1066,14 @@ impl Store {
             return Ok(None);
         }
         let settle_needed: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2) AND id IN (SELECT child FROM private.digital_children))",
+            "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2) AND (kind IN ('music_derivative','music_derivative_batch') OR id IN (SELECT child FROM private.digital_children)))",
             params![worker_instance, now], |row| row.get(0),
         ).map_err(storage)?;
         if settle_needed {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
-            tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',worker_instance=NULL,claim_token=NULL,lease_expires=NULL,updated_at=?1 WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?2 OR lease_expires<=?1) AND id IN (SELECT child FROM private.digital_children)",params![now,worker_instance]).map_err(storage)?;
+            tx.execute("UPDATE private.jobs SET state='cancelled',phase='cancelled',worker_instance=NULL,claim_token=NULL,lease_expires=NULL,updated_at=?1 WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?2 OR lease_expires<=?1) AND (kind IN ('music_derivative','music_derivative_batch') OR id IN (SELECT child FROM private.digital_children))",params![now,worker_instance]).map_err(storage)?;
             crate::acquisitions::reconcile_provider_work_tx(&tx)?;
             tx.commit().map_err(storage)?;
         }
@@ -1350,6 +1352,10 @@ impl Store {
             )
             .map_err(storage)?;
         if changed != 1 {
+            // Preparation cancellation can win after the worker's last checkpoint.
+            if self.settle_cancelled_claim(&tx, id, claim_token, true)? {
+                return tx.commit().map_err(storage);
+            }
             return Err(Error::CommandInProgress);
         }
         let value: serde_json::Value = serde_json::from_str(&result).map_err(storage)?;
@@ -1371,13 +1377,14 @@ impl Store {
         message: &str,
     ) -> Result<()> {
         let message: String = message.chars().take(512).collect();
-        let changed = lock(&self.db)?
+        let db = lock(&self.db)?;
+        let changed = db
             .execute(
                 "UPDATE private.jobs SET state='failed',phase='failed',error=?,worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=? WHERE id=? AND claim_token=? AND state='running'",
                 params![message, self.clock.now().timestamp(), id.to_string(), claim_token],
             )
             .map_err(storage)?;
-        if changed != 1 {
+        if changed != 1 && !self.settle_cancelled_claim(&db, id, claim_token, true)? {
             return Err(Error::CommandInProgress);
         }
         Ok(())
@@ -1399,18 +1406,35 @@ impl Store {
     }
 
     pub(crate) fn cancel_claimed_job_record(&self, id: JobId, claim_token: &str) -> Result<()> {
-        let changed = lock(&self.db)?
-            .execute(
-                "UPDATE private.jobs SET state='cancelled',phase='cancelled',error=NULL,
-                   worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
-                 WHERE id=? AND claim_token=? AND state='cancel_requested'",
-                params![self.clock.now().timestamp(), id.to_string(), claim_token],
-            )
-            .map_err(storage)?;
-        if changed != 1 {
+        let db = lock(&self.db)?;
+        if !self.settle_cancelled_claim(&db, id, claim_token, false)? {
             return Err(Error::CommandInProgress);
         }
         Ok(())
+    }
+
+    fn settle_cancelled_claim(
+        &self,
+        db: &rusqlite::Connection,
+        id: JobId,
+        claim_token: &str,
+        preparation_only: bool,
+    ) -> Result<bool> {
+        let changed = db
+            .execute(
+                "UPDATE private.jobs SET state='cancelled',phase='cancelled',error=NULL,
+                   worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
+                 WHERE id=? AND claim_token=? AND state='cancel_requested'
+                   AND (NOT ? OR kind IN ('music_derivative','music_derivative_batch'))",
+                params![
+                    self.clock.now().timestamp(),
+                    id.to_string(),
+                    claim_token,
+                    preparation_only
+                ],
+            )
+            .map_err(storage)?;
+        Ok(changed == 1)
     }
 
     pub(crate) fn cancellation_requested_record(
