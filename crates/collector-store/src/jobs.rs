@@ -668,10 +668,15 @@ impl Store {
             }
         }
         if let Some((parent, token, position)) = bulk {
-            let allowed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library b ON b.id=j.id JOIN private.bulk_library_members m ON m.batch_id=b.id WHERE j.id=? AND j.user_id=? AND j.claim_token=? AND j.state='running' AND j.cancellation_requested=0 AND b.state='accepted' AND m.position=? AND m.state='ready' AND m.item_id=? AND m.collection_id=? AND EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=j.user_id AND u.enabled=1 AND g.collection_id=m.collection_id AND g.role>=1))",params![parent.to_string(),spec.user_id.to_string(),token,position,spec.item_id.map(|v|v.to_string()),spec.collection_id.map(|v|v.to_string())],|r|r.get(0)).map_err(storage)?;
-            if !allowed {
+            let current:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library b ON b.id=j.id JOIN private.bulk_library_members m ON m.batch_id=b.id WHERE j.id=? AND j.user_id=? AND j.claim_token=? AND j.lease_expires>? AND j.state='running' AND j.cancellation_requested=0 AND b.state='accepted' AND m.position=? AND m.state='ready' AND m.item_id=? AND m.collection_id=?)",params![parent.to_string(),spec.user_id.to_string(),token,now,position,spec.item_id.map(|v|v.to_string()),spec.collection_id.map(|v|v.to_string())],|r|r.get(0)).map_err(storage)?;
+            if !current {
                 return Err(Error::JobCancelled);
             }
+            crate::bulk_library::ensure_curator(
+                &tx,
+                spec.user_id,
+                spec.collection_id.ok_or(Error::Conflict)?,
+            )?;
         }
         ensure_bulk_allows_work(&tx, &spec.request)?;
         if let Some(item_id) = spec.item_id {
@@ -970,6 +975,22 @@ impl Store {
             let raw:String=tx.query_row("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND position=?",params![parent.to_string(),position],|r|r.get(0)).map_err(storage)?;
             let mut member: collector_app::FrozenBulkLibraryMember =
                 serde_json::from_str(&raw).map_err(storage)?;
+            if member.preparation.is_some()
+                && let Some(FrozenJobInput::DerivativeBatch(batch)) = &spec.frozen_input
+            {
+                member.view.tracks = batch.members.len() as u16;
+                member.view.already_ready = batch
+                    .members
+                    .iter()
+                    .filter(|track| {
+                        matches!(
+                            track,
+                            collector_app::FrozenPreparationMember::AlreadyAvailable { .. }
+                        )
+                    })
+                    .count() as u16;
+                crate::bulk_library::add_planned_tracks(&tx, spec.user_id, parent, &member.view)?;
+            }
             member.view.job_id = Some(spec.id);
             member.view.state = collector_app::BulkMemberState::Queued;
             tx.execute("UPDATE private.bulk_library_members SET job_id=?,state='queued',record=? WHERE batch_id=? AND position=?",params![spec.id.to_string(),serde_json::to_string(&member).map_err(storage)?,parent.to_string(),position]).map_err(storage)?;

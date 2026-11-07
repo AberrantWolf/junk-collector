@@ -618,6 +618,114 @@ mod tests {
     }
 
     #[test]
+    fn start_preparation_freezes_more_than_one_page_without_reading_album_details() {
+        use collector_app::{
+            BulkLibraryState, LibrarySelection, MetadataCareQuery, StartLibraryPreparation,
+        };
+
+        let (root, store, actor, service, saved) = fixture();
+        for index in 0..64 {
+            let mut album = saved.clone();
+            album.id = ItemId::new();
+            album.title = format!("Recorded album {index:02}");
+            Catalog::save(&*store, album, Revision(0)).unwrap();
+        }
+        let mut other = saved.clone();
+        other.id = ItemId::new();
+        other.title = "Outside the search".into();
+        Catalog::save(&*store, other, Revision(0)).unwrap();
+        let viewer = store
+            .create_user("batch-viewer", "a long viewer password", false)
+            .unwrap();
+        Catalog::grant(&*store, saved.collection_id, viewer, Role::Viewer).unwrap();
+        drain(&service);
+        deny_details(&store);
+        assert!(matches!(
+            service.start_library_preparation(
+                &Principal {
+                    user_id: viewer,
+                    administrator: false,
+                    device_id: None
+                },
+                StartLibraryPreparation {
+                    profile: ConversionProfile::Opus { bitrate_kbps: 128 },
+                    selection: LibrarySelection::Explicit {
+                        items: vec![saved.id]
+                    },
+                    sources: Default::default(),
+                },
+                &CommandContext::new("viewer-cannot-prepare").unwrap(),
+            ),
+            Err(Error::Forbidden)
+        ));
+        let receipt = CommandContext::new("prepare-all-with-compact-rows").unwrap();
+        let request = StartLibraryPreparation {
+            profile: ConversionProfile::Opus { bitrate_kbps: 128 },
+            selection: LibrarySelection::AllMatching {
+                query: MetadataCareQuery {
+                    collection_id: Some(saved.collection_id),
+                    search: "recorded".into(),
+                    reason: None,
+                    needs_attention: true,
+                    cursor: None,
+                    limit: Some(50),
+                },
+                exclusions: vec![saved.id],
+            },
+            sources: Default::default(),
+        };
+        let batch = service
+            .start_library_preparation(&actor, request.clone(), &receipt)
+            .unwrap();
+        assert_eq!(batch.state, BulkLibraryState::Accepted);
+        assert_eq!(batch.selected, 64);
+        assert_eq!(batch.pending, 64);
+        assert_eq!(batch.tracks, 0);
+        assert_eq!(
+            service
+                .start_library_preparation(&actor, request, &receipt)
+                .unwrap()
+                .id,
+            batch.id
+        );
+        let members = service
+            .bulk_library_members(&actor, batch.id, None, 100)
+            .unwrap()
+            .items;
+        assert_eq!(members.len(), 64);
+        assert!(
+            members
+                .iter()
+                .all(|member| member.item_id != saved.id && member.job_id.is_none())
+        );
+        allow_details(&store);
+        drop(service);
+        drop(store);
+        let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+        let claim = reopened
+            .claim_job("resumed-preparation", 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claim.id, batch.id);
+        assert_eq!(claim.user_id, actor.user_id);
+
+        // Ready members can appear just before the worker commits completion.
+        reopened
+            .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
+            .unwrap();
+        collector_app::BulkLibraryPort::reconcile_bulk_library(&reopened, actor.user_id, batch.id)
+            .unwrap();
+        assert_eq!(
+            reopened
+                .claim_job("wake-coordinator", 30)
+                .unwrap()
+                .unwrap()
+                .id,
+            batch.id
+        );
+    }
+
+    #[test]
     fn cold_warm_and_invalidated_library_never_read_item_or_track_payloads() {
         use collector_app::LibrarySummaryState as State;
         let (root, store, actor, service, saved) = fixture();

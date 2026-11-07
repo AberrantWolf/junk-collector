@@ -66,3 +66,37 @@ real FLAC checks. Strict workspace Clippy, architecture and link checks,
 formatting, web build and model checks, API contracts, and tooling checks passed.
 The full Chrome integration journey passed on a standalone retry after a
 browser shutdown timeout and a separate checkout's fixture port conflict.
+
+## Direct batch submission
+
+The Chrome journey selected 54 of 55 matching albums from a 50-row list.
+The local Start request reached response headers in 165 and 276 ms on two
+runs, with the full selected count and before track planning. The background job
+reported the missing originals and the results page showed all 54 outcomes
+across two pages. A separate two-album batch encoded with real opusenc and
+verified an encoder failure followed by a successful retry. The timing is
+local to this fixture without the live archive or network.
+
+The storage regression submits 64 matching albums with detailed album,
+capture, observation and recipe reads denied. It also checks the search,
+exclusion, viewer denial, command replay and coordinator recovery after
+reopening the archive. The archive batch tests cover cancellation, inventory
+changes after submission, shared requests and retry after admission failure.
+
+The Chrome smoke, full integration with real FLAC preparation, and CD settings
+journeys passed. The Rust workspace ran 640 passing tests with five ignored.
+A separate workspace doctest run passed after the first run lost a build
+artifact. Strict Clippy and the audio API contract checks passed.
+
+## Direct batch review follow-up
+
+Chrome verified that a cancelled bulk batch reaches its terminal state in the
+open panel and that an album opened from Activity keeps the batch's bitrate.
+The real encoder failure and retry still pass. The 54-album submission
+reached response headers in 268 ms on the isolated review run.
+
+Rust checks cover retry retaining the original album job, bounded background
+admission, and a coordinator waking after completion with ready members.
+The focused archive tests, compact selection regression, strict workspace
+Clippy, web checks, API contracts, and Chrome smoke passed on the audio-only
+source.

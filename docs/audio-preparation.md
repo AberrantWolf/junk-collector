@@ -23,10 +23,17 @@ VBR. **Albums needing Opus** uses the selected bitrate. An album with a ready
 96 kbps copy still appears when you ask for 128 kbps.
 
 Open an album to choose its sources and prepare missing tracks, or select
-albums and preview a batch before starting it. If a disc has alternate
-captures, open the album and choose the original to use. You can review,
-cancel or retry preparation in the album or batch history. The list updates
-as imports and jobs change. While the server is rebuilding summaries, results
+albums and choose **Start preparation**. **Select all matching results**
+includes albums on later pages, up to 10,000 per batch. Uncheck an album to
+exclude it. If a disc has alternate captures, open the album and choose the
+original to use before starting. The batch saves the selected albums and
+source choices immediately. Track counts appear as albums are planned in the
+background. You can leave the page and follow, cancel or retry preparation in
+**Activity**. Retrying a batch returns failed albums to the background queue.
+Opening an album from a batch keeps that batch's preparation profile. Albums
+that need a source choice or whose inventory was edited after submission are
+flagged for review. The list updates as imports and jobs
+change. While the server is rebuilding summaries, results
 filtered by readiness may be incomplete. An album with incomplete recorded
 track coverage stays in the filter, and its row counts only known tracks.
 

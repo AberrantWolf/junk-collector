@@ -4,7 +4,7 @@ import {root,serverBinary,spawn,spawnSync,stopProcess,waitForServer,fixturePort}
 import {mkdtemp,writeFile,readFile,rm,unlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {randomBytes,createHash} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const opus=process.env.COLLECTOR_OPUS||spawnSync('which',['opusenc'],{encoding:'utf8'}).stdout?.trim();
@@ -174,12 +174,15 @@ opus = "${wrapper}"
  await expect(digitalRow).toBeVisible();await expect(cdRow).toBeVisible();
  assert.equal(detailReads,0,'Prepare audio list opened album detail or plans');
  await preparation.getByRole('button',{name:'Select all matching results'}).click();
- await preparation.getByRole('button',{name:'Preview Opus 128 kbps preparation'}).click();
- const batch=preparation.getByRole('region',{name:'Review batch'});
- await expect(batch.getByText('4 selected tracks · 0 already ready')).toBeVisible();
  await writeFile(refuse,'refuse');
- await batch.getByRole('button',{name:'Start Opus 128 kbps preparation'}).click();
+ const accepted=page.waitForResponse(response=>response.url().endsWith('/api/v1/bulk-library/music-preparation')&&response.request().method()==='POST');
+ await preparation.getByRole('button',{name:'Start Opus 128 kbps preparation'}).click();
+ const queued=await (await accepted).json();
+ assert.equal(queued.selected,2);
+ assert.equal(queued.tracks,0,'Submission should return before track planning');
+ const batch=preparation.getByRole('region',{name:'Review batch'});
  await expect(batch.getByText(/0 successful · 2 need attention · 0 pending/)).toBeVisible({timeout:45000});
+ await expect(batch.getByText('4 tracks planned · 0 already ready')).toBeVisible();
  const failedBatch=(await request(page,`/items/${digital}/music-preparation-batches`)).find(batch=>batch.profile.bitrate_kbps===128);
  assert.ok(failedBatch.members.every(track=>/opusenc conversion failed: fixture encoder refusal/.test(track.error)));
  await unlink(refuse);
@@ -189,7 +192,19 @@ opus = "${wrapper}"
  await expect(preparation.getByText('No albums match these preparation filters.')).toBeVisible();
 
  // A different preset stays independently eligible in the single-album workflow.
+ await page.goto(`${origin}/activity?collection=${collection}&batch=${queued.id}`);
+ await page.getByRole('region',{name:'Review batch'}).getByRole('button',{name:'Open album preparation'}).first().click();
+ await expect(preparation.getByText('All album tracks are ready as Opus 128 kbps.',{exact:false})).toBeVisible();
+ await preparation.getByRole('button',{name:'Back to preparation results'}).click();
  await bitrate.selectOption('192');
+ await unlink(gate);
+ await preparation.getByRole('checkbox',{name:'Select Renamed CD fixture'}).check();
+ await preparation.getByRole('button',{name:'Start Opus 192 kbps preparation'}).click();
+ await expect(batch.getByText('1 tracks planned · 0 already ready')).toBeVisible({timeout:45000});
+ await batch.getByRole('button',{name:'Cancel remaining work'}).click();
+ await expect(batch.getByRole('heading',{name:/Opus 192 kbps preparation · Cancelled/i})).toBeVisible({timeout:45000});
+ await preparation.getByRole('button',{name:'Back to preparation results'}).click();
+ await writeFile(gate,'ready');
  await digitalRow.click();
  const album=preparation.getByRole('region',{name:'Album preparation'});
  await expect(album.getByRole('heading',{name:'Prepare album as Opus 192 kbps'})).toBeVisible();
@@ -225,10 +240,40 @@ opus = "${wrapper}"
  assert.equal(retained.captures[0].representations.length,1);
  assert.equal(retained.captures[0].representations[0].files[0].digest.hex,createHash('sha256').update(brokenBytes).digest('hex'));
 
+ // Select all from the first page. Only compact membership is submitted;
+ // albums without originals must surface an actionable background outcome.
+ const scaleAlbums=55;
+ for(let index=0;index<scaleAlbums;index++){
+  await request(intakePage,`/items/${randomUUID()}`,{
+   expected_revision:0,edit:{collection_id:collection,title:`Scale fixture ${String(index).padStart(2,'0')}`,subtitle:'',
+    identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{}},
+    identity:'unidentified',translations:[],identifiers:[],wishlist:false},
+  },'PUT');
+ }
+ await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128&search=Scale%20fixture`);
+ const selectAll=preparation.getByRole('button',{name:'Select all matching results'});
+ await expect(selectAll).toBeEnabled({timeout:45000});
+ await expect(preparation.getByRole('checkbox',{name:/^Select Scale fixture/})).toHaveCount(50);
+ await selectAll.click();
+ await preparation.getByRole('checkbox',{name:'Select Scale fixture 00'}).uncheck();
+ const scaleResponse=page.waitForResponse(response=>response.url().endsWith('/api/v1/bulk-library/music-preparation')&&response.request().method()==='POST');
+ await preparation.getByRole('button',{name:'Start Opus 128 kbps preparation'}).click();
+ const response=await scaleResponse;
+ const scale=await response.json();
+ assert.equal(scale.selected,scaleAlbums-1);
+ assert.equal(scale.tracks,0);
+ const scaleBatch=preparation.getByRole('region',{name:'Review batch'});
+ await expect(scaleBatch.getByText(/54 need attention · 0 pending/)).toBeVisible({timeout:45000});
+ await scaleBatch.getByRole('button',{name:'Next album results'}).click();
+ await expect(scaleBatch.getByRole('button',{name:'Open album preparation'})).toHaveCount(4);
+ await scaleBatch.getByRole('button',{name:'Previous album results'}).click();
+ await expect(scaleBatch.getByRole('button',{name:'Open album preparation'})).toHaveCount(50);
+ console.log(`54-album Start request reached response headers in ${Math.round(response.request().timing().responseStart)} ms (local fixture).`);
+
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  assert.deepEqual(errors,[]);
- console.log('Opus UI passed: persisted digital default, override, active import, exact originals, live cached list, bitrate filters, two-album batch and downloadable single-album output.');
+ console.log('Opus UI passed: persisted digital default, override, active import, exact originals, live cached list, bitrate filters, two-album encoding batch, 54-album submission and downloadable single-album output.');
 }catch(error){
  console.error(logs);
  if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));

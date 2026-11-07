@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-library/music-preparation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["start_library_preparation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-library/preview": {
         parameters: {
             query?: never;
@@ -3139,6 +3155,8 @@ export interface components {
             kind: components["schemas"]["BulkLibraryKind"];
             /** Format: int32 */
             pending: number;
+            /** @description Track totals are filled in as the worker plans individual albums. */
+            plans_during_admission?: boolean;
             profile?: components["schemas"]["ConversionProfile"];
             /** Format: int32 */
             selected: number;
@@ -5101,6 +5119,8 @@ export interface components {
                 kind: components["schemas"]["BulkLibraryKind"];
                 /** Format: int32 */
                 pending: number;
+                /** @description Track totals are filled in as the worker plans individual albums. */
+                plans_during_admission?: boolean;
                 profile?: components["schemas"]["ConversionProfile"];
                 /** Format: int32 */
                 selected: number;
@@ -6014,6 +6034,13 @@ export interface components {
         };
         StartIntake: {
             expected_revision: components["schemas"]["Revision"];
+        };
+        StartLibraryPreparation: {
+            profile: components["schemas"]["ConversionProfile"];
+            selection: components["schemas"]["LibrarySelection"];
+            sources?: {
+                [key: string]: components["schemas"]["RepresentationId"][];
+            };
         };
         StartLoan: {
             command: components["schemas"]["StartLoanCommand"];
@@ -7427,6 +7454,46 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_library_preparation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartLibraryPreparation"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLibrarySummary"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

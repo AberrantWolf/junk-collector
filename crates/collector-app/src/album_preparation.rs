@@ -282,6 +282,19 @@ impl CollectionService {
         profile: &ConversionProfile,
         batch_id: JobId,
     ) -> Result<FrozenDerivativeBatchJob> {
+        self.freeze_music_album_batch_with_selection(user_id, item, profile, batch_id, |_| {
+            Ok(selected_sources.to_vec())
+        })
+    }
+
+    pub(crate) fn freeze_music_album_batch_with_selection(
+        &self,
+        user_id: collector_core::UserId,
+        item: &collector_core::Item,
+        profile: &ConversionProfile,
+        batch_id: JobId,
+        select: impl FnOnce(&MusicAlbumPreparationPlan) -> Result<Vec<RepresentationId>>,
+    ) -> Result<FrozenDerivativeBatchJob> {
         let eligibility = self.content_write_eligibility_for_job(
             user_id,
             Some(item.collection_id),
@@ -295,12 +308,13 @@ impl CollectionService {
         let rows = self.music_track_availability_for_item(user_id, item)?;
         profile.validate()?;
         let plan = album_plan_for_item(item, &rows, profile);
+        let selected_sources = select(&plan)?;
         let selected = selected_sources
             .iter()
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
         let mut selected_capture = std::collections::BTreeSet::new();
-        for source in selected_sources {
+        for source in &selected_sources {
             let matches = plan
                 .discs
                 .iter()

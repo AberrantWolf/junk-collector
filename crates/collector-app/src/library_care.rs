@@ -103,6 +103,14 @@ pub trait LibraryCarePort: Send + Sync {
         namespace: &str,
         language: &str,
     ) -> Result<PreparationCarePage>;
+    fn preparation_batch_selection(
+        &self,
+        user: UserId,
+        selection: &crate::LibrarySelection,
+        profile: &ConversionProfile,
+        namespace: &str,
+        language: &str,
+    ) -> Result<Vec<crate::PreparationBatchEntry>>;
     fn metadata_preferences(&self, user: UserId) -> Result<MetadataPreferences>;
     fn save_metadata_preferences(
         &self,

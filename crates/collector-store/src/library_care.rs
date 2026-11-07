@@ -20,6 +20,21 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)?;
     Ok(())
 }
+const PREPARATION_ROWS: &str = "FROM items i
+            JOIN browse_items b ON b.id=i.id
+            JOIN library_entry_basics basic ON basic.item_id=i.id
+            JOIN library_entry_versions v ON v.item_id=i.id
+            LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=:display
+            JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=:user AND g.role>=1
+            JOIN private.users u ON u.id=g.user_id AND u.enabled=1
+            LEFT JOIN private.library_dirty dirty ON dirty.item_id=i.id
+            LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=:namespace AND c.language=:language AND c.role=g.role AND dirty.item_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
+            LEFT JOIN library_entry_attempts a ON a.item_id=i.id AND a.token=v.token AND a.namespace=:namespace AND a.language=:language AND a.role=g.role AND dirty.item_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
+            WHERE i.deleted=0 AND basic.listening=1 AND (:collection IS NULL OR i.collection_id=:collection)
+            AND (:search='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(:search))>0)";
+
 impl LibraryCarePort for Store {
     fn metadata_item_scope(&self, item: ItemId) -> Result<CollectionId> {
         let raw: Option<String> = self
@@ -557,20 +572,7 @@ impl LibraryCarePort for Store {
             None
         };
 
-        let from = "FROM items i
-            JOIN browse_items b ON b.id=i.id
-            JOIN library_entry_basics basic ON basic.item_id=i.id
-            JOIN library_entry_versions v ON v.item_id=i.id
-            LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=:display
-            JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=:user AND g.role>=1
-            JOIN private.users u ON u.id=g.user_id AND u.enabled=1
-            LEFT JOIN private.library_dirty dirty ON dirty.item_id=i.id
-            LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=:namespace AND c.language=:language AND c.role=g.role AND dirty.item_id IS NULL
-                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
-            LEFT JOIN library_entry_attempts a ON a.item_id=i.id AND a.token=v.token AND a.namespace=:namespace AND a.language=:language AND a.role=g.role AND dirty.item_id IS NULL
-                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
-            WHERE i.deleted=0 AND basic.listening=1 AND (:collection IS NULL OR i.collection_id=:collection)
-            AND (:search='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(:search))>0)";
+        let from = PREPARATION_ROWS;
         let collection = query.collection_id.map(|id| id.to_string());
         let user = user.to_string();
         let common = rusqlite::named_params! {":display":display_language,":user":user,":namespace":namespace,":language":language,":collection":collection,":search":query.search};
@@ -625,6 +627,109 @@ impl LibraryCarePort for Store {
             catalog_revision: revision,
             summary_state: preparation_summary_state(state),
         })
+    }
+    fn preparation_batch_selection(
+        &self,
+        user: UserId,
+        selection: &collector_app::LibrarySelection,
+        profile: &ConversionProfile,
+        namespace: &str,
+        language: &str,
+    ) -> Result<Vec<collector_app::PreparationBatchEntry>> {
+        let (query, explicit, exclusions) = match selection {
+            collector_app::LibrarySelection::Explicit { items } => (None, Some(items), &[][..]),
+            collector_app::LibrarySelection::AllMatching { query, exclusions } => {
+                (Some(query), None, exclusions.as_slice())
+            }
+        };
+        let display = language
+            .split('-')
+            .next()
+            .unwrap_or("en")
+            .to_ascii_lowercase();
+        let profile_index = ConversionProfile::PRESETS
+            .iter()
+            .position(|p| p == profile)
+            .ok_or_else(|| Error::Invalid("Unsupported audio preparation profile".into()))?;
+        let path = format!("$.preparation[{profile_index}].needs_attention");
+        let db = self.db.read_lock()?;
+        let snapshot = db.unchecked_transaction().map_err(storage)?;
+        let scope = format!(
+            "{PREPARATION_ROWS}
+            AND i.id NOT IN (SELECT value FROM json_each(:exclusions))"
+        );
+        let collection = query.and_then(|q| q.collection_id).map(|id| id.to_string());
+        let user = user.to_string();
+        let exclusions = serde_json::to_string(exclusions).map_err(storage)?;
+        let common = rusqlite::named_params! {
+            ":display":display,":user":user,":namespace":namespace,":language":language,
+            ":collection":collection,":search":query.map_or("", |q| q.search.as_str()),":exclusions":exclusions
+        };
+        let attention = query.is_some_and(|q| q.needs_attention);
+        if attention
+            && snapshot
+                .query_row(
+                    &format!("SELECT EXISTS(SELECT 1 {scope} AND c.item_id IS NULL)"),
+                    common,
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(storage)?
+        {
+            return Err(Error::Unavailable(
+                "Preparation summaries are still updating. Try again once the results are current."
+                    .into(),
+            ));
+        }
+
+        // Use the ID index for explicit selection and freeze all matching IDs
+        // from a single read snapshot instead of re-running readiness per page.
+        let explicit_sql = if explicit.is_some() {
+            "AND i.id IN (SELECT value FROM json_each(:items))"
+        } else {
+            ""
+        };
+        let mut stmt = snapshot.prepare(&format!(
+            "SELECT i.id,i.collection_id,i.revision,COALESCE(d.title,i.title),
+                    COALESCE(json_extract(c.record,'$.artwork.id'),json_extract(basic.record,'$.artwork.id'))
+             {scope} {explicit_sql} AND (:attention=0 OR json_extract(c.record,:profile)=1)
+             ORDER BY i.id LIMIT 10001"
+        )).map_err(storage)?;
+        let mut parameters = common.to_vec();
+        parameters.extend(rusqlite::named_params! {":attention":attention,":profile":path});
+        let ids = explicit
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(storage)?;
+        if let Some(ids) = &ids {
+            parameters.push((":items", ids));
+        }
+        let mut rows = stmt.query(parameters.as_slice()).map_err(storage)?;
+        let mut entries = Vec::new();
+        while let Some(row) = rows.next().map_err(storage)? {
+            entries.push(collector_app::PreparationBatchEntry {
+                item_id: row
+                    .get::<_, String>(0)
+                    .map_err(storage)?
+                    .parse()
+                    .map_err(storage)?,
+                collection_id: row
+                    .get::<_, String>(1)
+                    .map_err(storage)?
+                    .parse()
+                    .map_err(storage)?,
+                revision: Revision(row.get(2).map_err(storage)?),
+                title: row.get(3).map_err(storage)?,
+                artwork_asset_id: row
+                    .get::<_, Option<String>>(4)
+                    .map_err(storage)?
+                    .map(|value| value.parse().map_err(storage))
+                    .transpose()?,
+            });
+        }
+        if explicit.is_some_and(|items| items.len() != entries.len()) {
+            return Err(Error::Forbidden);
+        }
+        Ok(entries)
     }
     fn metadata_preferences(&self, user: UserId) -> Result<MetadataPreferences> {
         let db = lock(&self.db)?;

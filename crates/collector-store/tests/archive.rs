@@ -19581,9 +19581,24 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
         preview.id
     );
     std::fs::write(damaged, original).unwrap();
-    service
+    let retry = service
         .change_bulk_library(&actor, preview.id, false, &command())
         .unwrap();
+    assert_eq!(retry.pending, 1);
+    assert_eq!(retry.succeeded, 1);
+    let retry_members = service
+        .bulk_library_members(&actor, preview.id, None, 20)
+        .unwrap();
+    let waiting = retry_members
+        .items
+        .iter()
+        .find(|member| member.state == collector_app::BulkMemberState::Ready)
+        .unwrap();
+    assert_eq!(waiting.item_id, albums[1].id);
+    assert!(
+        waiting.job_id.is_some(),
+        "Retry must reuse the original album job"
+    );
     for _ in 0..40 {
         while service.run_next_job("bulk-retry").unwrap() {}
         service.resume_bulk_library().unwrap();
@@ -19632,7 +19647,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
 
 #[test]
 fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_inventory_are_fenced() {
-    use collector_app::{BulkLibraryKind, BulkLibraryState, LibrarySelection, PreviewBulkLibrary};
+    use collector_app::{BulkLibraryState, LibrarySelection, StartLibraryPreparation};
     let (_root, store, actor, service, collection) = setup();
     let inventory = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let imported = derivative_import(&service, &actor, collection.id);
@@ -19642,11 +19657,10 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
     store.save_capture(capture, rev).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let preview = service
-        .preview_bulk_library(
+        .start_library_preparation(
             &actor,
-            PreviewBulkLibrary {
+            StartLibraryPreparation {
                 profile: collector_core::ConversionProfile::Flac,
-                kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![inventory.id],
                 },
@@ -19654,9 +19668,6 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
             },
             &command(),
         )
-        .unwrap();
-    service
-        .start_bulk_library(&actor, preview.id, &command())
         .unwrap();
     service
         .change_bulk_library(&actor, preview.id, true, &command())
@@ -19672,11 +19683,10 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
         Err(Error::Conflict) | Err(Error::Invalid(_))
     ));
     let next = service
-        .preview_bulk_library(
+        .start_library_preparation(
             &actor,
-            PreviewBulkLibrary {
+            StartLibraryPreparation {
                 profile: collector_core::ConversionProfile::Flac,
-                kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![inventory.id],
                 },
@@ -19687,11 +19697,8 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
         .unwrap();
     let mut edited = store.item(inventory.id).unwrap();
     let rev = edited.revision;
-    edited.title = "Changed after preview".into();
+    edited.title = "Changed after submission".into();
     save_inventory(&service, &actor, edited, rev).unwrap();
-    service
-        .start_bulk_library(&actor, next.id, &command())
-        .unwrap();
     assert!(service.run_next_job("changed-frozen-inventory").unwrap());
     service.resume_bulk_library().unwrap();
     assert_eq!(service.bulk_library(&actor, next.id).unwrap().failed, 1);
@@ -20554,7 +20561,7 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
 
 #[test]
 fn bulk_parent_cancellation_preserves_later_direct_and_other_batch_requests() {
-    use collector_app::{BulkLibraryKind, LibrarySelection, PreviewBulkLibrary};
+    use collector_app::{LibrarySelection, StartLibraryPreparation};
     let clock = Arc::new(TestClock::new(chrono::Utc::now().timestamp()));
     let (_root, store, actor, service, collection) = setup_with_clock(Some(clock.clone()));
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
@@ -20564,26 +20571,19 @@ fn bulk_parent_cancellation_preserves_later_direct_and_other_batch_requests() {
     capture.association.item_id = Some(saved.id);
     store.save_capture(capture, revision).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
-    let request = PreviewBulkLibrary {
+    let request = StartLibraryPreparation {
         profile: collector_core::ConversionProfile::Flac,
-        kind: BulkLibraryKind::MusicPreparation,
         selection: LibrarySelection::Explicit {
             items: vec![saved.id],
         },
         sources: Default::default(),
     };
     let first = service
-        .preview_bulk_library(&actor, request.clone(), &command())
-        .unwrap();
-    service
-        .start_bulk_library(&actor, first.id, &command())
+        .start_library_preparation(&actor, request.clone(), &command())
         .unwrap();
     clock.advance(1);
     let second = service
-        .preview_bulk_library(&actor, request, &command())
-        .unwrap();
-    service
-        .start_bulk_library(&actor, second.id, &command())
+        .start_library_preparation(&actor, request, &command())
         .unwrap();
     // Both bulk roots precede their album children; both album children precede
     // their track children. Advancing time defeats accidental timestamp equality.
@@ -20660,7 +20660,7 @@ fn bulk_parent_cancellation_preserves_later_direct_and_other_batch_requests() {
 
 #[test]
 fn bulk_failed_parent_admission_is_actionable_and_retries_without_losing_members() {
-    use collector_app::{BulkLibraryKind, LibrarySelection, PreviewBulkLibrary};
+    use collector_app::{LibrarySelection, StartLibraryPreparation};
     let (_root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let imported = derivative_import(&service, &actor, collection.id);
@@ -20670,11 +20670,10 @@ fn bulk_failed_parent_admission_is_actionable_and_retries_without_losing_members
     store.save_capture(capture, revision).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let preview = service
-        .preview_bulk_library(
+        .start_library_preparation(
             &actor,
-            PreviewBulkLibrary {
+            StartLibraryPreparation {
                 profile: collector_core::ConversionProfile::Flac,
-                kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![saved.id],
                 },
@@ -20682,9 +20681,6 @@ fn bulk_failed_parent_admission_is_actionable_and_retries_without_losing_members
             },
             &command(),
         )
-        .unwrap();
-    service
-        .start_bulk_library(&actor, preview.id, &command())
         .unwrap();
     let claim = store
         .claim_job("interrupted-admission", 30)

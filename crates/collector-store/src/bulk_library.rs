@@ -38,10 +38,47 @@ fn write(db: &Connection, record: &PrivateBulkLibrary) -> Result<()> {
     .map_err(storage)?;
     Ok(())
 }
-fn allowed(db: &Connection, user: UserId, collection: CollectionId) -> Result<()> {
+pub(crate) fn ensure_curator(
+    db: &Connection,
+    user: UserId,
+    collection: CollectionId,
+) -> Result<()> {
     let yes:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM private.users u JOIN private.grants g ON g.user_id=u.id WHERE u.id=? AND u.enabled=1 AND g.collection_id=? AND g.role>=1)",params![user.to_string(),collection.to_string()],|r|r.get(0)).map_err(storage)?;
     if yes { Ok(()) } else { Err(Error::Forbidden) }
 }
+pub(crate) fn add_planned_tracks(
+    db: &Connection,
+    user: UserId,
+    parent: JobId,
+    member: &collector_app::BulkLibraryMemberView,
+) -> Result<()> {
+    let mut record = read(db, user, parent)?;
+    record.summary.tracks += u32::from(member.tracks);
+    record.summary.already_ready += u32::from(member.already_ready);
+    write(db, &record)
+}
+
+fn queue_parent(db: &Connection, record: &PrivateBulkLibrary, now: i64) -> Result<()> {
+    let id = record.summary.id;
+    db.execute("INSERT INTO private.jobs(id,user_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,request,cancellation_requested) VALUES(?,?,'bulk_library','queued','queued',0,?,1,?,?,?,0)",params![id.to_string(),record.user_id.to_string(),record.summary.selected,now,now,serde_json::json!({"bulk_id":id}).to_string()]).map_err(storage)?;
+    Ok(())
+}
+
+// A retry can arrive just after a running coordinator checks for more work.
+fn wake_bulk_parent(db: &Connection, id: JobId, user: UserId, now: i64) -> Result<()> {
+    db.execute(
+        "UPDATE private.jobs SET state='queued',phase='queued',updated_at=?3
+         WHERE id=?1 AND user_id=?2 AND cancellation_requested=0 AND
+           ((state='queued' AND phase='waiting_capacity') OR
+            (state='completed' AND EXISTS(
+                SELECT 1 FROM private.bulk_library_members WHERE batch_id=?1 AND state='ready'
+            )))",
+        params![id.to_string(), user.to_string(), now],
+    )
+    .map_err(storage)?;
+    Ok(())
+}
+
 fn limit(value: u16) -> Result<u16> {
     if (1..=200).contains(&value) {
         Ok(value)
@@ -55,10 +92,14 @@ impl BulkLibraryPort for Store {
         record: PrivateBulkLibrary,
         members: Vec<FrozenBulkLibraryMember>,
     ) -> Result<BulkLibrarySummary> {
-        let _writer = lock(&self.writer)?;
-        for member in &members {
-            if serde_json::to_value(self.item(member.item.id)?).map_err(storage)?
-                != serde_json::to_value(&member.item).map_err(storage)?
+        let _writer = if record.summary.plans_during_admission {
+            None
+        } else {
+            Some(lock(&self.writer)?)
+        };
+        for item in members.iter().filter_map(|member| member.item.as_ref()) {
+            if serde_json::to_value(self.item(item.id)?).map_err(storage)?
+                != serde_json::to_value(item).map_err(storage)?
             {
                 return Err(Error::Conflict);
             }
@@ -75,26 +116,35 @@ impl BulkLibraryPort for Store {
             ],
         )
         .map_err(storage)?;
-        for member in members {
-            if serde_json::to_vec(&member).map_err(storage)?.len() > 12 * 1024 * 1024 {
-                return Err(Error::Invalid(
-                    "An album exceeds the 12 MiB frozen manifest limit. Select fewer disc sources."
-                        .into(),
-                ));
+        let mut checked = std::collections::BTreeSet::new();
+        {
+            let mut insert = tx
+                .prepare("INSERT INTO private.bulk_library_members VALUES(?,?,?,?,?,NULL,?)")
+                .map_err(storage)?;
+            for member in members {
+                let raw = serde_json::to_string(&member).map_err(storage)?;
+                if raw.len() > 12 * 1024 * 1024 {
+                    return Err(Error::Invalid(
+                        "An album exceeds the 12 MiB frozen manifest limit. Select fewer disc sources.".into(),
+                    ));
+                }
+                if checked.insert(member.view.collection_id) {
+                    ensure_curator(&tx, record.user_id, member.view.collection_id)?;
+                }
+                insert
+                    .execute(params![
+                        record.summary.id.to_string(),
+                        member.view.position,
+                        member.view.collection_id.to_string(),
+                        member.view.item_id.to_string(),
+                        label(member.view.state)?,
+                        raw
+                    ])
+                    .map_err(storage)?;
             }
-            allowed(&tx, record.user_id, member.item.collection_id)?;
-            tx.execute(
-                "INSERT INTO private.bulk_library_members VALUES(?,?,?,?,?,NULL,?)",
-                params![
-                    record.summary.id.to_string(),
-                    member.view.position,
-                    member.item.collection_id.to_string(),
-                    member.item.id.to_string(),
-                    label(member.view.state)?,
-                    serde_json::to_string(&member).map_err(storage)?
-                ],
-            )
-            .map_err(storage)?;
+        }
+        if record.summary.state == BulkLibraryState::Accepted {
+            queue_parent(&tx, &record, self.clock.now().timestamp())?;
         }
         self.record_command(&tx, &record.summary)?;
         tx.commit().map_err(storage)?;
@@ -154,24 +204,21 @@ impl BulkLibraryPort for Store {
         let page_limit = limit(page_limit)?;
         let db = lock(&self.db)?;
         read(&db, user, id)?;
-        let mut stmt=db.prepare("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND (? IS NULL OR position>?) AND (?='all' OR ?='selected' AND state!='excluded' OR ?='admission' AND state='ready' OR ?='unsettled' AND state IN ('queued','running')) ORDER BY position LIMIT ?").map_err(storage)?;
-        let filter = match filter {
-            BulkMemberFilter::All => "all",
-            BulkMemberFilter::Selected => "selected",
-            BulkMemberFilter::Admission => "admission",
-            BulkMemberFilter::Unsettled => "unsettled",
+        let predicate = match filter {
+            BulkMemberFilter::All => "",
+            BulkMemberFilter::Selected => "AND state!='excluded'",
+            BulkMemberFilter::Admission => "AND state='ready'",
+            BulkMemberFilter::Unsettled => "AND state IN ('queued','running')",
         };
+        let mut stmt = db
+            .prepare(&format!(
+                "SELECT record FROM private.bulk_library_members
+             WHERE batch_id=? AND position>COALESCE(?,-1) {predicate}
+             ORDER BY position LIMIT ?"
+            ))
+            .map_err(storage)?;
         let mut rows = stmt
-            .query(params![
-                id.to_string(),
-                after,
-                after,
-                filter,
-                filter,
-                filter,
-                filter,
-                u32::from(page_limit) + 1
-            ])
+            .query(params![id.to_string(), after, u32::from(page_limit) + 1])
             .map_err(storage)?;
         let mut items = Vec::new();
         let mut bytes = 0usize;
@@ -198,7 +245,7 @@ impl BulkLibraryPort for Store {
             None
         };
         for member in &mut items {
-            let denied = match allowed(&db, user, member.item.collection_id) {
+            let denied = match ensure_curator(&db, user, member.view.collection_id) {
                 Ok(()) => false,
                 Err(Error::Forbidden | Error::NotFound) => true,
                 Err(error) => return Err(error),
@@ -231,10 +278,9 @@ impl BulkLibraryPort for Store {
             .map_err(storage)?;
         drop(stmt);
         for collection in collections {
-            allowed(&tx, user, collection.parse().map_err(storage)?)?;
+            ensure_curator(&tx, user, collection.parse().map_err(storage)?)?;
         }
-        let now = self.clock.now().timestamp();
-        tx.execute("INSERT INTO private.jobs(id,user_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,request,cancellation_requested) VALUES(?,?,'bulk_library','queued','queued',0,?,1,?,?,?,0)",params![id.to_string(),user.to_string(),record.summary.selected,now,now,serde_json::json!({"bulk_id":id}).to_string()]).map_err(storage)?;
+        queue_parent(&tx, &record, self.clock.now().timestamp())?;
         record.summary.state = BulkLibraryState::Accepted;
         record.summary.can_start = false;
         record.summary.can_cancel = true;
@@ -248,6 +294,7 @@ impl BulkLibraryPort for Store {
         &self,
         claim: &JobClaim,
         position: u32,
+        item: &Item,
         spec: JobSpec,
     ) -> Result<JobId> {
         let _writer = lock(&self.writer)?;
@@ -256,12 +303,18 @@ impl BulkLibraryPort for Store {
             let raw:String=db.query_row("SELECT record FROM private.bulk_library_members WHERE batch_id=? AND position=?",params![claim.id.to_string(),position],|r|r.get(0)).map_err(storage)?;
             serde_json::from_str::<FrozenBulkLibraryMember>(&raw).map_err(storage)?
         };
-        if serde_json::to_value(self.item(member.item.id)?).map_err(storage)?
-            != serde_json::to_value(&member.item).map_err(storage)?
-            || serde_json::to_value(&spec.frozen_input).map_err(storage)?
-                != serde_json::to_value(&member.input).map_err(storage)?
+        if serde_json::to_value(self.item(item.id)?).map_err(storage)?
+            != serde_json::to_value(item).map_err(storage)?
         {
             return Err(Error::Conflict);
+        }
+        match &member.preparation {
+            Some(selection)
+                if selection.revision == item.revision
+                    && matches!(&spec.frozen_input, Some(FrozenJobInput::DerivativeBatch(_))) => {}
+            None if serde_json::to_value(&spec.frozen_input).map_err(storage)?
+                == serde_json::to_value(&member.input).map_err(storage)? => {}
+            _ => return Err(Error::Conflict),
         }
         self.enqueue_job_record_with_owners(
             spec,
@@ -269,6 +322,39 @@ impl BulkLibraryPort for Store {
             Some((claim.id, &claim.claim_token, position)),
         )
     }
+    fn retry_bulk_preparation_member(&self, claim: &JobClaim, position: u32) -> Result<()> {
+        let _publication_gate = lock(&self.job_publication_gate)?;
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        let now = self.clock.now().timestamp();
+        let row: Option<(String, String)> = tx.query_row(
+            "SELECT m.job_id,m.collection_id
+             FROM private.bulk_library_members m
+             JOIN private.bulk_library b ON b.id=m.batch_id
+             JOIN private.jobs j ON j.id=b.id
+             WHERE b.id=? AND b.user_id=? AND b.state='accepted'
+               AND j.claim_token=? AND j.lease_expires>? AND j.state='running'
+               AND j.cancellation_requested=0 AND m.position=? AND m.state='ready' AND m.job_id IS NOT NULL",
+            params![claim.id.to_string(),claim.user_id.to_string(),claim.claim_token,now,position],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional().map_err(storage)?;
+        let (job, collection) = row.ok_or(Error::JobCancelled)?;
+        ensure_curator(&tx, claim.user_id, collection.parse().map_err(storage)?)?;
+        Self::retry_preparation_batch_in_tx(
+            &tx,
+            job.parse().map_err(storage)?,
+            claim.user_id,
+            now,
+        )?;
+        tx.execute(
+            "UPDATE private.bulk_library_members SET state='queued',record=json_set(record,'$.view.state','queued','$.view.reason',NULL)
+             WHERE batch_id=? AND position=?",
+            params![claim.id.to_string(),position],
+        ).map_err(storage)?;
+        tx.commit().map_err(storage)?;
+        Ok(())
+    }
+
     fn bulk_library_capacity(&self, user: UserId, kind: BulkLibraryKind) -> Result<u32> {
         let db = lock(&self.db)?;
         let count: u32 = if kind == BulkLibraryKind::AccurateRip {
@@ -300,21 +386,28 @@ impl BulkLibraryPort for Store {
         position: u32,
         state: BulkMemberState,
         reason: Option<String>,
+        claim_token: Option<&str>,
     ) -> Result<()> {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         read(&tx, user, id)?;
-        let raw: String = tx
-            .query_row(
-                "SELECT record FROM private.bulk_library_members WHERE batch_id=? AND position=?",
-                params![id.to_string(), position],
-                |r| r.get(0),
-            )
-            .map_err(storage)?;
-        let mut member: FrozenBulkLibraryMember = serde_json::from_str(&raw).map_err(storage)?;
-        member.view.state = state;
-        member.view.reason = reason;
-        tx.execute("UPDATE private.bulk_library_members SET state=?,record=? WHERE batch_id=? AND position=?",params![label(state)?,serde_json::to_string(&member).map_err(storage)?,id.to_string(),position]).map_err(storage)?;
+        if let Some(token) = claim_token {
+            let current: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM private.jobs j JOIN private.bulk_library_members m ON m.batch_id=j.id WHERE j.id=? AND j.claim_token=? AND j.lease_expires>? AND j.state='running' AND j.cancellation_requested=0 AND m.position=? AND m.state='ready')",params![id.to_string(),token,self.clock.now().timestamp(),position],|r|r.get(0)).map_err(storage)?;
+            if !current {
+                return Err(Error::JobCancelled);
+            }
+        }
+        tx.execute(
+            "UPDATE private.bulk_library_members AS m SET state=?1,record=json_set(record,'$.view.state',?1,'$.view.reason',?2)
+             WHERE batch_id=?3 AND position=?4 AND
+               (?5 OR (m.state IN ('queued','running') AND NOT EXISTS(
+                 SELECT 1 FROM private.jobs j WHERE j.state IN ('queued','running','cancel_requested')
+                 AND (j.id=m.job_id OR j.id IN (
+                   SELECT job_id FROM private.preparation_members WHERE batch_id=m.job_id
+                 ))
+               )))",
+            params![label(state)?,reason,id.to_string(),position,claim_token.is_some()],
+        ).map_err(storage)?;
         tx.commit().map_err(storage)?;
         Ok(())
     }
@@ -342,6 +435,12 @@ impl BulkLibraryPort for Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let mut record = read(&tx, user, id)?;
+        if !matches!(
+            record.summary.state,
+            BulkLibraryState::Accepted | BulkLibraryState::Cancelling
+        ) {
+            return Ok(record.summary);
+        }
         let (pending,success,failed):(u32,u32,u32)=tx.query_row("SELECT COALESCE(SUM(state IN ('ready','queued','running')),0),COALESCE(SUM(state='succeeded'),0),COALESCE(SUM(state IN ('failed','review')),0) FROM private.bulk_library_members WHERE batch_id=?",[id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(storage)?;
         record.summary.pending = pending;
         record.summary.succeeded = success;
@@ -367,7 +466,9 @@ impl BulkLibraryPort for Store {
             };
             record.summary.can_cancel = false;
         }
-        tx.execute("UPDATE private.jobs SET phase='queued',updated_at=? WHERE id=? AND state='queued' AND phase='waiting_capacity' AND cancellation_requested=0",params![self.clock.now().timestamp(),id.to_string()]).map_err(storage)?;
+        if record.summary.state == BulkLibraryState::Accepted {
+            wake_bulk_parent(&tx, id, user, self.clock.now().timestamp())?;
+        }
         record.summary.updated_at = self.clock.now();
         write(&tx, &record)?;
         tx.commit().map_err(storage)?;
@@ -391,16 +492,26 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         let mut record = read(&tx, user, id)?;
-        if record.summary.state == BulkLibraryState::Preview
-            || (!cancel && !record.summary.can_retry)
-        {
+        if (cancel && !record.summary.can_cancel) || (!cancel && !record.summary.can_retry) {
             return Err(Error::Conflict);
         }
-        let mut stmt=tx.prepare("SELECT position,record FROM private.bulk_library_members WHERE batch_id=? ORDER BY position").map_err(storage)?;
+        if cancel {
+            tx.execute("UPDATE private.bulk_library_members SET state='cancelled',record=json_set(record,'$.view.state','cancelled') WHERE batch_id=? AND state='ready'",[id.to_string()]).map_err(storage)?;
+        }
+        let retry_in_worker = !cancel && record.summary.kind == BulkLibraryKind::MusicPreparation;
+        if retry_in_worker {
+            tx.execute(
+                "UPDATE private.bulk_library_members SET state='ready',record=json_set(record,'$.view.state','ready','$.view.reason',NULL)
+                 WHERE batch_id=? AND state='failed' AND job_id IS NOT NULL",
+                [id.to_string()],
+            ).map_err(storage)?;
+        }
+        let mut stmt=tx.prepare("SELECT position,record FROM private.bulk_library_members WHERE batch_id=? AND ((? AND state IN ('queued','running')) OR (? AND state='failed')) ORDER BY position").map_err(storage)?;
         let rows = stmt
-            .query_map([id.to_string()], |r| {
-                Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?))
-            })
+            .query_map(
+                params![id.to_string(), cancel, !cancel && !retry_in_worker],
+                |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)),
+            )
             .map_err(storage)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(storage)?;
@@ -421,27 +532,14 @@ impl Store {
                         tx.execute("UPDATE private.jobs SET cancellation_requested=1,state=CASE WHEN state='running' THEN 'cancel_requested' WHEN state='queued' THEN 'cancelled' ELSE state END WHERE id=? AND user_id=?",params![job.to_string(),user.to_string()]).map_err(storage)?;
                     }
                 }
-                if member.view.state == BulkMemberState::Ready {
-                    member.view.state = BulkMemberState::Cancelled;
-                }
             } else if matches!(member.view.state, BulkMemberState::Failed) {
-                allowed(&tx, user, member.item.collection_id)?;
-                if member.input.is_none() {
+                ensure_curator(&tx, user, member.view.collection_id)?;
+                if member.input.is_none() && member.view.job_id.is_none() {
                     continue;
                 }
                 if let Some(job) = member.view.job_id {
-                    if record.summary.kind == BulkLibraryKind::MusicPreparation {
-                        Self::retry_preparation_batch_in_tx(
-                            &tx,
-                            job,
-                            user,
-                            self.clock.now().timestamp(),
-                        )?;
-                        member.view.state = BulkMemberState::Queued;
-                    } else {
-                        self.retry_failed_job_in_tx(&tx, job, user)?;
-                        member.view.state = BulkMemberState::Queued;
-                    }
+                    self.retry_failed_job_in_tx(&tx, job, user)?;
+                    member.view.state = BulkMemberState::Queued;
                 } else {
                     member.view.state = BulkMemberState::Ready;
                 }
@@ -449,6 +547,14 @@ impl Store {
             }
             tx.execute("UPDATE private.bulk_library_members SET state=?,record=? WHERE batch_id=? AND position=?",params![label(member.view.state)?,serde_json::to_string(&member).map_err(storage)?,id.to_string(),position]).map_err(storage)?;
         }
+        let (pending, failed): (u32, u32) = tx.query_row(
+            "SELECT COALESCE(SUM(state IN ('ready','queued','running')),0),COALESCE(SUM(state IN ('failed','review')),0)
+             FROM private.bulk_library_members WHERE batch_id=?",
+            [id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(storage)?;
+        record.summary.pending = pending;
+        record.summary.failed = failed;
         record.summary.state = if cancel {
             BulkLibraryState::Cancelling
         } else {
@@ -461,7 +567,11 @@ impl Store {
             record.summary.admission_error = None;
         }
         write(&tx, &record)?;
-        tx.execute("UPDATE private.jobs SET cancellation_requested=?,state=CASE WHEN ?=1 THEN CASE WHEN state='running' THEN 'cancel_requested' WHEN state='queued' THEN 'cancelled' ELSE state END ELSE 'queued' END,phase=CASE WHEN ?=1 THEN phase ELSE 'queued' END,claim_token=CASE WHEN ?=1 THEN claim_token ELSE NULL END,worker_instance=CASE WHEN ?=1 THEN worker_instance ELSE NULL END,lease_expires=CASE WHEN ?=1 THEN lease_expires ELSE NULL END WHERE id=? AND user_id=?",params![cancel,cancel,cancel,cancel,cancel,cancel,id.to_string(),user.to_string()]).map_err(storage)?;
+        if cancel {
+            tx.execute("UPDATE private.jobs SET cancellation_requested=1,state=CASE state WHEN 'running' THEN 'cancel_requested' WHEN 'queued' THEN 'cancelled' ELSE state END WHERE id=? AND user_id=?",params![id.to_string(),user.to_string()]).map_err(storage)?;
+        } else {
+            wake_bulk_parent(&tx, id, user, self.clock.now().timestamp())?;
+        }
         if summary_receipt {
             self.record_command(&tx, &record.summary)?;
         } else {

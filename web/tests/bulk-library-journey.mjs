@@ -79,10 +79,9 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   await nav.getByRole('button',{name:'Prepare audio',exact:true}).click();
   const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
   const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
-  await preparation.getByRole('button',{name:'Preview FLAC preparation',exact:true}).click();
+  await preparation.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
   const batch=page.getByRole('region',{name:'Review batch'});
-  await batch.getByText('2 selected tracks · 0 already ready',{exact:true}).waitFor();
-  await batch.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
+  await batch.getByText('2 tracks planned · 0 already ready',{exact:true}).waitFor();
   const batchId=new URL(page.url()).searchParams.get('batch');assert.ok(batchId);
   await nav.getByRole('button',{name:'Activity',exact:true}).click();
   await page.getByRole('region',{name:'Activity workspace'}).getByRole('button',{name:/FLAC preparation · 1 albums/}).click();

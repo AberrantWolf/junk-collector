@@ -797,6 +797,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
         .routes(routes!(intake_discovery_page))
         .routes(routes!(preview_bulk_library))
+        .routes(routes!(start_library_preparation))
         .routes(routes!(bulk_library_page))
         .routes(routes!(bulk_library_detail))
         .routes(routes!(bulk_library_members))
@@ -3437,6 +3438,23 @@ async fn preview_bulk_library(
             state
                 .service
                 .preview_bulk_library(&actor, command, &context)
+        })
+        .await?,
+    ))
+}
+#[utoipa::path(post,path="/api/v1/bulk-library/music-preparation",params(("Idempotency-Key"=String,Header)),request_body=collector_app::StartLibraryPreparation,responses((status=200,body=collector_app::BulkLibrarySummary),(status=403),(status=409)))]
+async fn start_library_preparation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::StartLibraryPreparation>,
+) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
+    let actor = principal(&state, &headers)?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .start_library_preparation(&actor, command, &context)
         })
         .await?,
     ))

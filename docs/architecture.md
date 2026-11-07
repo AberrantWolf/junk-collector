@@ -1413,8 +1413,13 @@ frozen batch and its derivative requests. The library worker publishes compact
 readiness counts for each preset from recorded track coordinates, source-bound
 recipes and active derivative jobs. The Prepare audio list reads those counts
 with the current cache generation, collection grants and title search before
-pagination. It follows the library revision while open. Detailed plans are
-resolved for album and batch operations. The worker invalidates derivative
+pagination. It follows the library revision while open. Batch submission uses
+a single compact selection snapshot and atomically commits the selected album
+IDs, inventory revisions, source choices, coordinator Job, and command receipt.
+The worker resolves detailed plans in bounded groups with current grants and
+the frozen inventory revision. It commits each child with its parent claim and
+updates track totals in that same transaction. Detailed album views still
+resolve plans on demand. The worker invalidates derivative
 readiness by resolving job Capture IDs to current Item associations. Prepared
 recipes can describe known tracks when no full layout is recorded. Those rows
 retain an incomplete-coverage flag and stay in the readiness filter.

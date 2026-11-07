@@ -30,6 +30,11 @@ and readiness applied before pagination. The open list refreshes as source
 records, derivative jobs and published outputs change. Incomplete recorded track
 coverage stays in the filter, with counts limited to known tracks.
 
+Batch Start uses the cached selection, including matches beyond the visible
+page and explicit exclusions. It opens a durable batch immediately. Albums
+are planned in the background with per-album outcomes, progressive counts
+and cancellation through Activity.
+
 Music collections can default to Opus on CD imports or on CD and digital album
 imports. Import review submits the displayed default or an explicit override. The durable
 workflow freezes the choice, preserves originals and reports preparation

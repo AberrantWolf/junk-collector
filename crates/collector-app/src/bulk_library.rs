@@ -1,4 +1,4 @@
-//! Frozen library selections and rolling admission for metadata and FLAC care.
+//! Frozen library selections and rolling admission for library care.
 use crate::*;
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -28,6 +28,22 @@ pub struct PreviewBulkLibrary {
     pub selection: LibrarySelection,
     #[serde(default)]
     pub sources: BTreeMap<ItemId, Vec<RepresentationId>>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartLibraryPreparation {
+    pub profile: ConversionProfile,
+    pub selection: LibrarySelection,
+    #[serde(default)]
+    pub sources: BTreeMap<ItemId, Vec<RepresentationId>>,
+}
+
+pub struct PreparationBatchEntry {
+    pub item_id: ItemId,
+    pub collection_id: CollectionId,
+    pub revision: Revision,
+    pub title: String,
+    pub artwork_asset_id: Option<AssetId>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -65,6 +81,9 @@ pub struct BulkLibrarySummary {
     pub failed: u32,
     pub pending: u32,
     pub source_bytes: ByteLength,
+    /// Track totals are filled in as the worker plans individual albums.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plans_during_admission: bool,
     pub can_start: bool,
     pub can_cancel: bool,
     pub can_retry: bool,
@@ -88,8 +107,16 @@ pub struct BulkLibraryMemberView {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrozenBulkLibraryMember {
     pub view: BulkLibraryMemberView,
-    pub item: Item,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<Item>,
     pub input: Option<FrozenJobInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation: Option<FrozenBulkPreparation>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FrozenBulkPreparation {
+    pub revision: Revision,
+    pub sources: Vec<RepresentationId>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrivateBulkLibrary {
@@ -130,8 +157,10 @@ pub trait BulkLibraryPort: Send + Sync {
         &self,
         claim: &JobClaim,
         position: u32,
+        item: &Item,
         spec: JobSpec,
     ) -> Result<JobId>;
+    fn retry_bulk_preparation_member(&self, claim: &JobClaim, position: u32) -> Result<()>;
     fn bulk_library_capacity(&self, user: UserId, kind: BulkLibraryKind) -> Result<u32>;
     fn yield_bulk_library(&self, claim: &JobClaim) -> Result<()>;
     fn change_bulk_library(
@@ -147,6 +176,7 @@ pub trait BulkLibraryPort: Send + Sync {
         position: u32,
         state: BulkMemberState,
         reason: Option<String>,
+        claim_token: Option<&str>,
     ) -> Result<()>;
     fn unfinished_bulk_library(
         &self,
@@ -156,6 +186,100 @@ pub trait BulkLibraryPort: Send + Sync {
     fn reconcile_bulk_library(&self, user: UserId, id: JobId) -> Result<BulkLibrarySummary>;
 }
 impl CollectionService {
+    pub fn start_library_preparation(
+        &self,
+        actor: &Principal,
+        command: StartLibraryPreparation,
+        context: &CommandContext,
+    ) -> Result<BulkLibrarySummary> {
+        self.execute_command(
+            actor,
+            context,
+            "library.preparation.start",
+            &command,
+            |effects| {
+                command.profile.validate()?;
+                match &command.selection {
+                    LibrarySelection::Explicit { items } => {
+                        if items.is_empty() || items.len() > 10_000 {
+                            return Err(Error::Invalid("Select 1–10,000 albums.".into()));
+                        }
+                        if items.iter().collect::<BTreeSet<_>>().len() != items.len() {
+                            return Err(Error::Invalid("Duplicate selected album.".into()));
+                        }
+                    }
+                    LibrarySelection::AllMatching { query, exclusions } => {
+                        if query.cursor.is_some() || query.search.len() > 256 || exclusions.len() > 10_000 {
+                            return Err(Error::Invalid("Use a search of at most 256 characters, with at most 10,000 exclusions and no cursor.".into()));
+                        }
+                        if let Some(collection) = query.collection_id {
+                            self.authorize(actor, collection, Action::Curate)?;
+                        }
+                    }
+                }
+                if command.sources.len() > 10_000 || command.sources.values().any(|ids| ids.len() > 256) {
+                    return Err(Error::Invalid("Select at most 256 sources per album.".into()));
+                }
+                let entries = self.care.preparation_batch_selection(
+                    actor.user_id,
+                    &command.selection,
+                    &command.profile,
+                    &self.library_namespace()?,
+                    &self.metadata_language(actor.user_id)?,
+                )?;
+                if entries.is_empty() {
+                    return Err(Error::Invalid("No albums match this selection.".into()));
+                }
+                if entries.len() > 10_000 {
+                    return Err(Error::Invalid("This selection exceeds 10,000 albums. Narrow the collection or search and start another batch.".into()));
+                }
+                let now = self.authentication.now();
+                let summary = BulkLibrarySummary {
+                    id: deterministic_job_id(actor.user_id, "library.preparation.start", context.key()),
+                    kind: BulkLibraryKind::MusicPreparation,
+                    profile: command.profile.clone(),
+                    state: BulkLibraryState::Accepted,
+                    selected: entries.len() as u32,
+                    pending: entries.len() as u32,
+                    tracks: 0,
+                    already_ready: 0,
+                    excluded: 0,
+                    succeeded: 0,
+                    failed: 0,
+                    source_bytes: ByteLength(0),
+                    plans_during_admission: true,
+                    can_start: false,
+                    can_cancel: true,
+                    can_retry: false,
+                    admission_error: None,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let members = entries.into_iter().enumerate().map(|(position, entry)| FrozenBulkLibraryMember {
+                    view: BulkLibraryMemberView {
+                        position: position as u32,
+                        item_id: entry.item_id,
+                        collection_id: entry.collection_id,
+                        title: entry.title,
+                        artwork_asset_id: entry.artwork_asset_id,
+                        state: BulkMemberState::Ready,
+                        reason: None,
+                        job_id: None,
+                        tracks: 0,
+                        already_ready: 0,
+                    },
+                    item: None,
+                    input: None,
+                    preparation: Some(FrozenBulkPreparation {
+                        revision: entry.revision,
+                        sources: command.sources.get(&entry.item_id).cloned().unwrap_or_default(),
+                    }),
+                }).collect();
+                effects.freeze_bulk_library(PrivateBulkLibrary {user_id:actor.user_id, summary}, members)
+            },
+        )
+    }
+
     pub fn preview_bulk_library(
         &self,
         actor: &Principal,
@@ -201,7 +325,7 @@ impl CollectionService {
             }
             if items.is_empty(){return Err(Error::Invalid("No entries match this selection.".into()));}
             let now=self.authentication.now();
-            let mut summary=BulkLibrarySummary{id,kind:command.kind,profile:command.profile.clone(),state:BulkLibraryState::Preview,selected:items.len() as u32,tracks:0,already_ready:0,excluded:0,succeeded:0,failed:0,pending:0,source_bytes:ByteLength(0),can_start:false,can_cancel:false,can_retry:false,admission_error:None,created_at:now,updated_at:now};
+            let mut summary=BulkLibrarySummary{id,kind:command.kind,profile:command.profile.clone(),state:BulkLibraryState::Preview,selected:items.len() as u32,tracks:0,already_ready:0,excluded:0,succeeded:0,failed:0,pending:0,source_bytes:ByteLength(0),plans_during_admission:false,can_start:false,can_cancel:false,can_retry:false,admission_error:None,created_at:now,updated_at:now};
             let mut members=Vec::new();let mut manifest_bytes=0usize;
             for (position,(selected_id,selected_revision)) in items.into_iter().enumerate() {
                 let item=self.reader.item(selected_id)?;
@@ -214,7 +338,7 @@ impl CollectionService {
                 if input.is_none(){summary.excluded+=1;}else{summary.pending+=1;}
                 if input.is_some(){for file in item.captures.iter().flat_map(|c|&c.representations).filter(|r|r.role==RepresentationRole::PreservationMaster).flat_map(|r|&r.files){summary.source_bytes.0=summary.source_bytes.0.saturating_add(file.bytes.0);}}
                 let presented=self.item_presented(actor,item.id)?;
-                let member=FrozenBulkLibraryMember {view:BulkLibraryMemberView{position:position as u32,item_id:item.id,collection_id:item.collection_id,title:presented.title,artwork_asset_id:presented.primary_artwork,state:if input.is_some(){BulkMemberState::Ready}else{BulkMemberState::Excluded},reason,job_id:None,tracks,already_ready:ready},item,input};
+                let member=FrozenBulkLibraryMember {view:BulkLibraryMemberView{position:position as u32,item_id:item.id,collection_id:item.collection_id,title:presented.title,artwork_asset_id:presented.primary_artwork,state:if input.is_some(){BulkMemberState::Ready}else{BulkMemberState::Excluded},reason,job_id:None,tracks,already_ready:ready},item:Some(item),input,preparation:None};
                 manifest_bytes=manifest_bytes.saturating_add(serde_json::to_vec(&member).map_err(|e|Error::Invalid(e.to_string()))?.len());
                 if manifest_bytes>256*1024*1024{return Err(Error::Invalid("This frozen selection exceeds 256 MiB of inventory and processing metadata. Submit smaller batches; no work has been started.".into()));}
                 members.push(member);
@@ -238,60 +362,24 @@ impl CollectionService {
             BulkLibraryKind::AccurateRip => Ok(FrozenJobInput::AccurateRip(
                 self.freeze_accuraterip_check(actor.user_id, item, child, None, true)?,
             )),
-            BulkLibraryKind::MusicPreparation => {
-                let plan = self.music_album_preparation_plan(actor, item.id, &command.profile)?;
-                let chosen = command.sources.get(&item.id);
-                let sources = plan
-                    .discs
-                    .iter()
-                    .flat_map(|disc| {
-                        let explicit = disc
-                            .sources
-                            .iter()
-                            .filter(|source| {
-                                chosen.is_some_and(|ids| {
-                                    ids.contains(&source.source_representation_id)
-                                })
-                            })
-                            .map(|source| source.source_representation_id)
-                            .collect::<Vec<_>>();
-                        if explicit.is_empty() {
-                            disc.sources
-                                .iter()
-                                .filter(|source| source.default_selected)
-                                .map(|source| source.source_representation_id)
-                                .collect()
-                        } else {
-                            explicit
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                if chosen.is_some_and(|ids| ids.iter().any(|id| !sources.contains(id))) {
-                    return Err(Error::Invalid(
-                        "A selected source is no longer available for this album.".into(),
-                    ));
-                }
-                if plan.discs.iter().any(|disc| {
-                    disc.ambiguous
-                        && !disc
-                            .sources
-                            .iter()
-                            .any(|source| sources.contains(&source.source_representation_id))
-                }) {
-                    return Err(Error::Unavailable(
-                        "Choose a preservation source for every disc with alternatives.".into(),
-                    ));
-                }
-                Ok(FrozenJobInput::DerivativeBatch(
-                    self.freeze_music_album_batch(
-                        actor.user_id,
-                        item,
-                        &sources,
-                        &command.profile,
-                        child,
-                    )?,
-                ))
-            }
+            BulkLibraryKind::MusicPreparation => Ok(FrozenJobInput::DerivativeBatch(
+                self.freeze_music_album_batch_with_selection(
+                    actor.user_id,
+                    item,
+                    &command.profile,
+                    child,
+                    |plan| {
+                        select_bulk_sources(
+                            plan,
+                            command
+                                .sources
+                                .get(&item.id)
+                                .map(Vec::as_slice)
+                                .unwrap_or_default(),
+                        )
+                    },
+                )?,
+            )),
             BulkLibraryKind::Metadata => {
                 if item.domain.module.0 == "org.junk.games" {
                     return self.freeze_existing_dat_metadata(actor.user_id, item, child);
@@ -427,16 +515,50 @@ impl CollectionService {
             BulkMemberFilter::Admission,
         )?;
         for member in page.items {
+            if self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                return Err(Error::JobCancelled);
+            }
             let outcome = (|| -> Result<()> {
-                let item = self.reader.item(member.item.id)?;
-                self.content_write_eligibility_for_user(claim.user_id, item.collection_id)?;
-                if serde_json::to_value(&item).map_err(|e| Error::Storage(e.to_string()))?
-                    != serde_json::to_value(&member.item)
-                        .map_err(|e| Error::Storage(e.to_string()))?
-                {
+                let item = self.reader.item(member.view.item_id)?;
+                if item.deleted || item.collection_id != member.view.collection_id {
                     return Err(Error::Conflict);
                 }
-                let input = member.input.ok_or(Error::Conflict)?;
+                self.content_write_eligibility_for_user(claim.user_id, item.collection_id)?;
+                if record.summary.kind == BulkLibraryKind::MusicPreparation
+                    && member.view.job_id.is_some()
+                {
+                    return self
+                        .bulk_port
+                        .retry_bulk_preparation_member(claim, member.view.position);
+                }
+                let input = if let Some(selection) = member.preparation {
+                    if item.revision != selection.revision {
+                        return Err(Error::Invalid("The album changed after selection. Open it to review and prepare again.".into()));
+                    }
+                    let child = deterministic_job_id(
+                        claim.user_id,
+                        "library.bulk.member",
+                        &format!("{}:{}", claim.id, member.view.position),
+                    );
+                    FrozenJobInput::DerivativeBatch(self.freeze_music_album_batch_with_selection(
+                        claim.user_id,
+                        &item,
+                        &record.summary.profile,
+                        child,
+                        |plan| select_bulk_sources(plan, &selection.sources),
+                    )?)
+                } else {
+                    if serde_json::to_value(&item).map_err(|e| Error::Storage(e.to_string()))?
+                        != serde_json::to_value(&member.item)
+                            .map_err(|e| Error::Storage(e.to_string()))?
+                    {
+                        return Err(Error::Conflict);
+                    }
+                    member.input.ok_or(Error::Conflict)?
+                };
                 let (id, kind, units) = match &input {
                     FrozenJobInput::AccurateRip(v) => (v.job_id, "accuraterip_check", 0),
                     FrozenJobInput::DerivativeBatch(v) => {
@@ -455,6 +577,7 @@ impl CollectionService {
                 self.bulk_port.admit_bulk_library_member(
                     claim,
                     member.view.position,
+                    &item,
                     JobSpec {
                         id,
                         user_id: claim.user_id,
@@ -470,14 +593,18 @@ impl CollectionService {
                 Ok(())
             })();
             if let Err(error) = outcome {
-                if matches!(error, Error::JobCancelled) {
+                if matches!(
+                    error,
+                    Error::JobCancelled | Error::Storage(_) | Error::CatalogBusy
+                ) {
                     return Err(error);
                 }
-                if matches!(error, Error::Unavailable(_))
-                    && self
-                        .bulk_port
-                        .bulk_library_capacity(claim.user_id, record.summary.kind)?
-                        == 0
+                if matches!(error, Error::CommandInProgress)
+                    || matches!(error, Error::Unavailable(_))
+                        && self
+                            .bulk_port
+                            .bulk_library_capacity(claim.user_id, record.summary.kind)?
+                            == 0
                 {
                     break;
                 }
@@ -487,6 +614,7 @@ impl CollectionService {
                     member.view.position,
                     BulkMemberState::Review,
                     Some(error.to_string()),
+                    Some(&claim.claim_token),
                 )?;
             }
         }
@@ -536,7 +664,21 @@ impl CollectionService {
                                 let state = if record.summary.kind
                                     == BulkLibraryKind::MusicPreparation
                                 {
-                                    let view = self.music_preparation_batch(&actor, job)?;
+                                    let view = match self.music_preparation_batch(&actor, job) {
+                                        Ok(view) => view,
+                                        Err(Error::Forbidden | Error::NotFound) => {
+                                            self.bulk_port.settle_bulk_library_member(
+                                                record.user_id,
+                                                record.summary.id,
+                                                member.view.position,
+                                                BulkMemberState::Review,
+                                                Some("The album is no longer accessible.".into()),
+                                                None,
+                                            )?;
+                                            continue;
+                                        }
+                                        Err(error) => return Err(error),
+                                    };
                                     if view.queued + view.running > 0
                                         || matches!(
                                             view.admission_state,
@@ -546,7 +688,11 @@ impl CollectionService {
                                         )
                                     {
                                         None
-                                    } else if view.failed + view.ineligible > 0 {
+                                    } else if view.cancelled_by_user {
+                                        Some((BulkMemberState::Cancelled, None))
+                                    } else if view.failed + view.ineligible > 0
+                                        || view.admission_error.is_some()
+                                    {
                                         Some((BulkMemberState::Failed,view.admission_error.or(Some("Some tracks could not be prepared. Open this album for individual results.".into()))))
                                     } else if view.cancelled > 0 {
                                         Some((BulkMemberState::Cancelled, None))
@@ -616,6 +762,7 @@ impl CollectionService {
                                         member.view.position,
                                         state,
                                         reason,
+                                        None,
                                     )?;
                                 }
                             }
@@ -644,4 +791,53 @@ impl CollectionService {
         }
         Ok(())
     }
+}
+
+fn select_bulk_sources(
+    plan: &MusicAlbumPreparationPlan,
+    chosen: &[RepresentationId],
+) -> Result<Vec<RepresentationId>> {
+    let sources = plan
+        .discs
+        .iter()
+        .flat_map(|disc| {
+            let explicit = disc
+                .sources
+                .iter()
+                .filter(|source| chosen.contains(&source.source_representation_id))
+                .map(|source| source.source_representation_id)
+                .collect::<Vec<_>>();
+            if explicit.is_empty() {
+                disc.sources
+                    .iter()
+                    .filter(|source| source.default_selected)
+                    .map(|source| source.source_representation_id)
+                    .collect()
+            } else {
+                explicit
+            }
+        })
+        .collect::<Vec<_>>();
+    if chosen.iter().any(|id| !sources.contains(id)) {
+        return Err(Error::Invalid(
+            "A selected source is no longer available for this album.".into(),
+        ));
+    }
+    if plan.discs.is_empty() {
+        return Err(Error::Unavailable(
+            "No supported preservation sources are available for this album.".into(),
+        ));
+    }
+    if plan.discs.iter().any(|disc| {
+        disc.ambiguous
+            && !disc
+                .sources
+                .iter()
+                .any(|source| sources.contains(&source.source_representation_id))
+    }) {
+        return Err(Error::Unavailable(
+            "Choose a preservation source for every disc with alternatives.".into(),
+        ));
+    }
+    Ok(sources)
 }

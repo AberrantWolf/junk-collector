@@ -1243,6 +1243,50 @@
         }
       }
     },
+    "/api/v1/bulk-library/music-preparation": {
+      "post": {
+        "operationId": "start_library_preparation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLibraryPreparation"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLibrarySummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
     "/api/v1/bulk-library/preview": {
       "post": {
         "operationId": "preview_bulk_library",
@@ -10547,6 +10591,10 @@
             "format": "int32",
             "minimum": 0
           },
+          "plans_during_admission": {
+            "type": "boolean",
+            "description": "Track totals are filled in as the worker plans individual albums."
+          },
           "profile": {
             "$ref": "#/components/schemas/ConversionProfile"
           },
@@ -18741,6 +18789,10 @@
                   "format": "int32",
                   "minimum": 0
                 },
+                "plans_during_admission": {
+                  "type": "boolean",
+                  "description": "Track totals are filled in as the worker plans individual albums."
+                },
                 "profile": {
                   "$ref": "#/components/schemas/ConversionProfile"
                 },
@@ -22777,6 +22829,35 @@
         "properties": {
           "expected_revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartLibraryPreparation": {
+        "type": "object",
+        "required": [
+          "profile",
+          "selection"
+        ],
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/LibrarySelection"
+          },
+          "sources": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/RepresentationId"
+              }
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         "additionalProperties": false

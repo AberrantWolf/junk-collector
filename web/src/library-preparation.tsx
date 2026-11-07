@@ -24,11 +24,11 @@ export default function Preparation({pages,onMore,userId,collection,search,atten
  const [error,setError]=useState('');
  const [listError,setListError]=useState('');
  const [loading,setLoading]=useState(true);
- const [previewing,setPreviewing]=useState(false);
+ const [starting,setStarting]=useState(false);
  const [reload,setReload]=useState(0);
  const lastRevision=useRef('');
- const previewRequest=useRef<AbortController|null>(null);
- const previewReceipt=useRef<{body:string;key:string}|undefined>(undefined);
+ const startRequest=useRef<AbortController|null>(null);
+ const startReceipt=useRef<{body:string;key:string}|undefined>(undefined);
  const callbacks=useRef({onSessionExpired,onChanged,onQuery});callbacks.current={onSessionExpired,onChanged,onQuery};
  const profile=conversionProfile(preset);
  const label=profileLabel(profile);
@@ -48,7 +48,7 @@ export default function Preparation({pages,onMore,userId,collection,search,atten
    setDraft(saved?.key===scope?saved:{key:scope,value:{...emptySelection,sources:saved?.value?.sources||{}}});
   }catch{setDraft({key:scope,value:emptySelection});}
  },[scope,draftKey]);
- useEffect(()=>()=>previewRequest.current?.abort(),[scope,itemId,batchId]);
+ useEffect(()=>()=>startRequest.current?.abort(),[scope,itemId,batchId]);
  useEffect(()=>{
   if(draft?.key===scope)try{sessionStorage.setItem(draftKey,JSON.stringify(draft));}catch{}
  },[draft,draftKey,scope]);
@@ -114,44 +114,46 @@ export default function Preparation({pages,onMore,userId,collection,search,atten
   if(itemId||batchId)document.querySelector<HTMLElement>('.care-review')?.focus({preventScroll:true});
  },[itemId,batchId]);
 
- async function preview(){
-  const controller=new AbortController();previewRequest.current=controller;
-  setPreviewing(true);setError('');
+ async function start(){
+  const controller=new AbortController();startRequest.current=controller;
+  setStarting(true);setError('');
   const query={collection_id:collection||null,search,needs_attention:attention,reason:null,cursor:null,limit:null};
-  const body=JSON.stringify({kind:'music_preparation',profile,selection:selection.all?{selection:'all_matching',query,exclusions:selection.exclusions}:{selection:'explicit',items:selection.selected},sources:selection.sources});
-  if(previewReceipt.current?.body!==body)previewReceipt.current={body,key:crypto.randomUUID()};
+  const sources=selection.all?selection.sources:Object.fromEntries(selection.selected.flatMap(id=>selection.sources[id]?.length?[[id,selection.sources[id]]]:[]));
+  const body=JSON.stringify({profile,selection:selection.all?{selection:'all_matching',query,exclusions:selection.exclusions}:{selection:'explicit',items:selection.selected},sources});
+  if(startReceipt.current?.body!==body)startReceipt.current={body,key:crypto.randomUUID()};
   try{
-   const result=await api<Summary>('/bulk-library/preview',{method:'POST',signal:controller.signal,headers:{'Idempotency-Key':previewReceipt.current.key},body});
-   if(!controller.signal.aborted){previewReceipt.current=undefined;callbacks.current.onQuery({batch:result.id,item:''});}
+   const result=await api<Summary>('/bulk-library/music-preparation',{method:'POST',signal:controller.signal,headers:{'Idempotency-Key':startReceipt.current.key},body});
+   if(!controller.signal.aborted){startReceipt.current=undefined;callbacks.current.onQuery({batch:result.id,item:''});}
   }catch(e){if(!controller.signal.aborted)fail(e);}
-  finally{if(previewRequest.current===controller)setPreviewing(false);}
+  finally{if(startRequest.current===controller)setStarting(false);}
  }
  function toggle(id:string,on:boolean){
   updateSelection(value=>value.all?{...value,exclusions:on?value.exclusions.filter(x=>x!==id):[...value.exclusions,id]}:{...value,selected:on?[...value.selected,id]:value.selected.filter(x=>x!==id)});
  }
  return <section className={`care-workspace ${itemId||batchId?'care-review-open':''}`} aria-label="Prepare audio workspace">
   <div className="care-list">
-   {!itemId&&<PreparationFormat value={preset} disabled={previewing} onChange={preparationPreset=>onQuery({preparationPreset,item:'',batch:''})}/>}
-   <label>Show<select aria-label="Show" value={attention?'missing':'all'} disabled={previewing} onChange={e=>onQuery({attention:e.target.value==='missing',item:'',batch:''})}>
+   {!itemId&&<PreparationFormat value={preset} disabled={starting} onChange={preparationPreset=>onQuery({preparationPreset,item:'',batch:''})}/>}
+   <label>Show<select aria-label="Show" value={attention?'missing':'all'} disabled={starting} onChange={e=>onQuery({attention:e.target.value==='missing',item:'',batch:''})}>
     <option value="missing">Albums needing {profile.codec==='opus'?'Opus':'FLAC'}</option><option value="all">All music albums</option>
    </select></label>
-   <p>Prepare {label} files for your albums.</p>
-   {(error||listError)&&<p role="alert" className="notice error">{error||listError} <button onClick={()=>setReload(v=>v+1)}>Retry loading albums</button></p>}
+   <p>Prepare {label} files for your albums. You can follow or cancel the batch in Activity.</p>
+   {error&&<p role="alert" className="notice error">{error}</p>}
+   {listError&&<p role="alert" className="notice error">{listError} <button onClick={()=>setReload(v=>v+1)}>Retry loading albums</button></p>}
    <div className="care-selection">
     <strong>{selection.all?'All matching results':`${selection.selected.length} albums selected`}{selection.all&&selection.exclusions.length?` · ${selection.exclusions.length} excluded`:''}</strong>
-    <button disabled={previewing||!rows.length||attention&&current?.state!=='ready'} onClick={()=>updateSelection(v=>({...v,all:true,selected:[],exclusions:[]}))}>Select all matching results</button>
-    <button disabled={previewing||loading||selection.all&&attention&&current?.state!=='ready'||!selection.all&&!selection.selected.length} className="primary" onClick={()=>void preview()}>Preview {label} preparation</button>
-    <button disabled={previewing} onClick={()=>updateSelection(v=>({...v,selected:[],all:false,exclusions:[]}))}>Clear selection</button>
+    <button disabled={starting||!rows.length||attention&&current?.state!=='ready'} onClick={()=>updateSelection(v=>({...v,all:true,selected:[],exclusions:[]}))}>Select all matching results</button>
+    <button disabled={starting||loading||selection.all&&attention&&current?.state!=='ready'||!selection.all&&!selection.selected.length} className="primary" onClick={()=>void start()}>{starting?'Starting preparation…':`Start ${label} preparation`}</button>
+    <button disabled={starting} onClick={()=>updateSelection(v=>({...v,selected:[],all:false,exclusions:[]}))}>Clear selection</button>
    </div>
    {rows.map(({item:i,readiness})=><div className="care-selectable-row" key={i.id}>
-    <input type="checkbox" aria-label={`Select ${i.title}`} checked={selection.all?!selection.exclusions.includes(i.id):selection.selected.includes(i.id)} disabled={previewing} onChange={e=>toggle(i.id,e.target.checked)}/>
+    <input type="checkbox" aria-label={`Select ${i.title}`} checked={selection.all?!selection.exclusions.includes(i.id):selection.selected.includes(i.id)} disabled={starting} onChange={e=>toggle(i.id,e.target.checked)}/>
     <button className="care-row" data-item-id={i.id} onClick={()=>onQuery({item:i.id,batch:''})}>
      {i.artwork?<img loading="lazy" src={`/api/v1/collections/${i.collection_id}/assets/${i.artwork.id}/thumbnail`} alt={i.artwork.alt_text||`${i.title} artwork`}/>:<span className="care-cover-empty">◇</span>}
      <span><strong>{i.title}</strong>{readiness?<small>{readiness.tracks} {readiness.incomplete_coverage?'known ':''}tracks · {readiness.ready} ready{readiness.incomplete_coverage?' · Track coverage incomplete':''}{readiness.preparing>0?` · ${readiness.preparing} preparing`:''}</small>:<small>Updating readiness…</small>}</span>
     </button>
    </div>)}
    {!rows.length&&!loading&&!error&&!listError&&current?.state==='ready'&&<p>No albums match these preparation filters.</p>}
-   {current?.cursor&&<MoreButton loading={loading} loadingText="Loading albums…" disabled={previewing} onClick={onMore}>More albums</MoreButton>}
+   {current?.cursor&&<MoreButton loading={loading} loadingText="Loading albums…" disabled={starting} onClick={onMore}>More albums</MoreButton>}
    {loading&&<p role="status">Loading preparation…</p>}
    {!loading&&current&&current.state!=='ready'&&<p role="status">{current.state==='retrying'?'Retrying preparation summaries…':'Updating preparation summaries…'}</p>}
   </div>
