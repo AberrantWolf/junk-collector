@@ -93,3 +93,17 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .album-import-status{display:inline-flex;align-items:center;gap:.35rem;color:var(--muted);font-size:.85rem;white-space:normal;overflow-wrap:anywhere}.album-import-status svg{width:1rem;height:1rem;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
 .administration-tasks{flex-wrap:wrap;overflow-x:visible}
+
+.page-spinner {
+  display: inline-block;
+  width: .85em;
+  height: .85em;
+  margin-inline-end: .55em;
+  border: .13em solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  vertical-align: -.1em;
+  animation: page-spin .8s linear infinite;
+}
+@keyframes page-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .page-spinner { animation: none; } }

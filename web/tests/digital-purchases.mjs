@@ -308,8 +308,108 @@ try{
  assert.ok(steamFiles.some(file=>file.name.endsWith('/Booklet/booklet.txt')&&file.visibility==='curators'));
  assert.ok(steamFiles.some(file=>file.name.endsWith('/cover.png')&&(file.visibility??'shared')==='shared'));
  assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');
+ // Use real cursor responses with small pages to exercise selection beyond the
+ // rendered rows without importing dozens of extra audio packages.
+ let releasePage;
+ const heldPage=new Promise(resolve=>{releasePage=resolve;});
+ let continuationRequests=0;
+ const shortMembers=async route=>{
+  const url=new URL(route.request().url());
+  url.searchParams.set('limit','1');
+  if(url.searchParams.get('cursor')==='0'&&continuationRequests++===0)await heldPage;
+  await route.fulfill({response:await route.fetch({url:url.href})});
+ };
+ await page.route(`**/api/v1/intakes/${steamIntake}/members?*`,shortMembers);
+ await page.reload();
+ const published=steamImports.locator('.intake-members .care-row');
+ const morePackages=steamImports.getByRole('button',{name:'More packages',exact:true});
+ await expect(published).toHaveCount(1);
+ await morePackages.click();
+ try{
+  const loading=steamImports.getByRole('button',{name:'Loading packages…',exact:true});
+  await expect(loading).toBeDisabled();
+  await expect(loading.locator('.page-spinner')).toBeVisible();
+  await expect.poll(()=>continuationRequests).toBe(1);
+ }finally{releasePage();}
+ await expect(published).toHaveCount(2);
+ const backgrounds=await published.evaluateAll(rows=>rows.map(row=>getComputedStyle(row).backgroundColor));
+ assert.notEqual(backgrounds[0],backgrounds[1],'Published rows should have alternating backgrounds');
+
+ const readMetadata=id=>page.evaluate(async id=>{
+  const response=await fetch(`/api/v1/items/${id}/metadata`);
+  if(!response.ok)throw Error(await response.text());
+  return response.json();
+ },id);
+ const initial=await Promise.all(steamMembers.map(member=>readMetadata(member.import.target_item_id)));
+ const remaining=steamMembers[2].import.target_item_id;
+ const putPath=`**/api/v1/items/${remaining}/metadata`;
+ const rejectOnce=async route=>{
+  if(route.request().method()!=='PUT')return route.fallback();
+  await page.unroute(putPath,rejectOnce);
+  await route.fulfill({status:409,json:{error:{code:'revision_conflict',message:'Album changed while saving'}}});
+ };
+ await page.route(putPath,rejectOnce);
+ await page.setViewportSize({width:390,height:844});
+ await steamImports.getByRole('checkbox',{name:'Select all imported albums'}).check();
+ await published.first().getByRole('checkbox').uncheck();
+ const editSelected=steamImports.getByRole('button',{name:'Edit selected',exact:true});
+ await editSelected.click();
+ const albumEditor=page.getByRole('dialog',{name:'Edit selected albums'});
+ const saveAlbums=albumEditor.getByRole('button',{name:'Save album changes'});
+ await expect(albumEditor).toContainText('overwrite for 2 albums');
+ await expect(saveAlbums).toBeDisabled();
+ await albumEditor.getByRole('checkbox',{name:'Overwrite digital source'}).check();
+ await albumEditor.getByRole('textbox',{name:'Digital source'}).fill('Steam');
+ await albumEditor.getByRole('checkbox',{name:'Overwrite album artist'}).check();
+ await albumEditor.getByRole('textbox',{name:'Album artist'}).fill('Steam soundtrack artists');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
+ await page.screenshot({path:path.join(scratch,'bulk-album-editor-mobile.png')});
+ await saveAlbums.click();
+ await expect(albumEditor.getByRole('status')).toContainText('1 album saved.');
+ await expect(albumEditor.getByRole('alert')).toContainText('Album changed while saving');
+ const updated=await readMetadata(steamMembers[1].import.target_item_id);
+ assert.equal(updated.display.domain_fields.digital_source.value,'Steam');
+ assert.equal(updated.display.subtitle.value,'Steam soundtrack artists');
+ assert.equal((await readMetadata(remaining)).revision,initial[2].revision);
+ await albumEditor.getByRole('button',{name:'Retry remaining albums'}).click();
+ await expect(albumEditor.getByRole('status')).toContainText('2 albums saved.');
+ await albumEditor.getByRole('button',{name:'Done',exact:true}).click();
+ await expect(editSelected).toBeFocused();
+ const final=await Promise.all(steamMembers.map(member=>readMetadata(member.import.target_item_id)));
+ assert.equal(final[0].revision,initial[0].revision,'Excluded album was changed');
+ assert.equal(final[1].revision,updated.revision,'Retry reapplied a saved album');
+ assert.equal(final[2].display.domain_fields.digital_source.value,'Steam','Selection missed an unloaded page');
+ for(let index=1;index<3;index++){
+  assert.equal(final[index].display.title.value,initial[index].display.title.value,'Unchecked title was changed');
+  assert.equal(final[index].display.artwork,initial[index].display.artwork,'Artwork changed');
+ }
+ await page.unroute(`**/api/v1/intakes/${steamIntake}/members?*`,shortMembers);
+ await page.setViewportSize({width:1440,height:1000});
+ let releaseSaved;
+ const heldSaved=new Promise(resolve=>{releaseSaved=resolve;});
+ const shortSaved=async route=>{
+  const url=new URL(route.request().url());
+  url.searchParams.set('limit','2');
+  if(url.searchParams.has('cursor'))await heldSaved;
+  await route.fulfill({response:await route.fetch({url:url.href})});
+ };
+ await page.route('**/api/v1/intakes?*',shortSaved);
+ await steamImports.getByRole('button',{name:'Back to imports',exact:true}).click();
+ const savedImports=steamImports.getByRole('region',{name:'Saved imports'});
+ await expect(savedImports.locator('button.collection-row').first()).toContainText('3 packages');
+ const savedRows=savedImports.locator('button.collection-row');
+ await expect(savedRows).toHaveCount(2);
+ assert.notEqual(...await savedRows.evaluateAll(rows=>rows.map(row=>getComputedStyle(row).backgroundColor)));
+ await savedImports.getByRole('button',{name:'More imports',exact:true}).click();
+ try{
+  const loading=savedImports.getByRole('button',{name:'Loading imports…',exact:true});
+  await expect(loading).toBeDisabled();
+  await expect(loading.locator('.page-spinner')).toBeVisible();
+ }finally{releaseSaved();}
+ await expect(savedRows).toHaveCount(4);
+ await page.unroute('**/api/v1/intakes?*',shortSaved);
  // Immediate Library refresh exposes the newly imported version and its track.
  await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
  await page.getByRole('region',{name:'Album tracks'}).getByText('1. FLAC original',{exact:true}).waitFor();
- assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery with disjoint encodings/parent companions and mobile layout. Artifacts: ${scratch}`);
+ assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery, paged bulk album metadata and failure recovery, striped rows, loading states and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}

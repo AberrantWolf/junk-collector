@@ -65,7 +65,21 @@ while True:
  await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  assert.equal(await page.locator('.collection-row').count(),50);assert.match(await page.locator('.collection-row').first().innerText(),/Album 000/);
  const nextPageRequests=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/api/v1/library')nextPageRequests.push(request.url());});
- await page.getByRole('button',{name:'Load more',exact:true}).click();await page.locator(`[data-item-id="${seed.ids[61]}"]`).waitFor();assert.equal(await page.locator('.collection-row').count(),62);assert.equal(nextPageRequests.length,1,'loading another page refetched earlier pages');assert.ok(new URL(nextPageRequests[0]).searchParams.has('cursor'));
+ let releaseNextPage;
+ const heldNextPage=new Promise(resolve=>{releaseNextPage=resolve;});
+ await page.route('**/api/v1/library?*',async route=>{
+  if(new URL(route.request().url()).searchParams.has('cursor'))await heldNextPage;
+  await route.continue();
+ });
+ await page.getByRole('button',{name:'Load more',exact:true}).click();
+ try{
+  const loading=page.getByRole('button',{name:'Loading entries…',exact:true});
+  await expect(loading).toBeDisabled();
+  await expect(loading.locator('.page-spinner')).toBeVisible();
+ }finally{releaseNextPage();}
+ await page.locator(`[data-item-id="${seed.ids[61]}"]`).waitFor();
+ assert.equal(await page.locator('.collection-row').count(),62);assert.equal(nextPageRequests.length,1,'loading another page refetched earlier pages');assert.ok(new URL(nextPageRequests[0]).searchParams.has('cursor'));
+ await page.unroute('**/api/v1/library?*');
  const row=page.locator(`[data-item-id="${seed.ids[55]}"]`);await row.scrollIntoViewIfNeeded();const scroll=await page.evaluate(()=>scrollY);await row.click();
  await page.getByLabel('Album 055 details',{exact:true}).waitFor();assert.ok(page.url().includes(seed.ids[55]));
  const bounds=await page.locator('.detail-view').boundingBox();assert.ok(bounds.y>=0&&bounds.y<1000,'desktop detail did not remain visible');

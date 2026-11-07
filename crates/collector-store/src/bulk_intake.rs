@@ -7,6 +7,14 @@ use collector_app::{
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.intake_discoveries(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,collection_id TEXT NOT NULL,record TEXT NOT NULL);CREATE TABLE IF NOT EXISTS private.intake_discovery_pages(id TEXT NOT NULL,kind TEXT NOT NULL,position INTEGER NOT NULL,record TEXT NOT NULL,PRIMARY KEY(id,kind,position));CREATE TABLE IF NOT EXISTS private.intake_sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,collection_id TEXT NOT NULL,state TEXT NOT NULL,record TEXT NOT NULL);CREATE INDEX IF NOT EXISTS private.intake_owner ON intake_sessions(user_id,collection_id,id);CREATE INDEX IF NOT EXISTS private.intake_unfinished ON intake_sessions(state,id);CREATE TABLE IF NOT EXISTS private.intake_members(intake_id TEXT NOT NULL,position INTEGER NOT NULL,file_count INTEGER NOT NULL,import_id TEXT UNIQUE,record TEXT NOT NULL,PRIMARY KEY(intake_id,position));CREATE INDEX IF NOT EXISTS private.intake_admission ON intake_members(intake_id,import_id,position);").map_err(storage)?;
+    // The durable UTC timestamp already exists in every session. Remove the
+    // trailing Z so whole seconds sort before their fractional successors.
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS private.intake_owner_recent ON intake_sessions(
+            user_id, rtrim(json_extract(record, '$.session.created_at'), 'Z') DESC, id DESC
+        );",
+    )
+    .map_err(storage)?;
     let columns = db
         .prepare("PRAGMA private.table_info(guided_ingest_intents)")
         .map_err(storage)?
@@ -308,14 +316,35 @@ impl BulkIntakePort for Store {
     ) -> Result<Page<IntakeSession>> {
         let limit = page_limit(limit)?;
         let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT s.record FROM private.intake_sessions s JOIN private.grants g ON g.collection_id=s.collection_id AND g.user_id=s.user_id AND g.role>=1 JOIN private.users u ON u.id=s.user_id AND u.enabled=1 WHERE s.user_id=? AND (? IS NULL OR s.collection_id=?) AND (? IS NULL OR s.id>?) ORDER BY s.id LIMIT ?").map_err(storage)?;
+        let boundary = after
+            .map(|id| {
+                let anchor = read_intake(&db, user, id)?.session;
+                if collection.is_some_and(|collection| collection != anchor.collection_id) {
+                    return Err(Error::Invalid(
+                        "intake cursor belongs to another collection".into(),
+                    ));
+                }
+                Ok(anchor
+                    .created_at
+                    .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
+            })
+            .transpose()?;
+        let mut stmt = db.prepare(
+            "SELECT s.record FROM private.intake_sessions s
+             JOIN private.grants g ON g.collection_id=s.collection_id AND g.user_id=s.user_id AND g.role>=1
+             JOIN private.users u ON u.id=s.user_id AND u.enabled=1
+             WHERE s.user_id=?1 AND (?2 IS NULL OR s.collection_id=?2)
+             AND (?3 IS NULL OR (rtrim(json_extract(s.record, '$.session.created_at'), 'Z'), s.id)
+                              < (rtrim(?3, 'Z'), ?4))
+             ORDER BY rtrim(json_extract(s.record, '$.session.created_at'), 'Z') DESC, s.id DESC
+             LIMIT ?5",
+        ).map_err(storage)?;
         let mut items = stmt
             .query_map(
                 params![
                     user.to_string(),
                     collection.map(|id| id.to_string()),
-                    collection.map(|id| id.to_string()),
-                    after.map(|id| id.to_string()),
+                    boundary,
                     after.map(|id| id.to_string()),
                     limit + 1
                 ],

@@ -9,7 +9,7 @@ pub use digital_matching::*;
 use std::io::{Read, SeekFrom};
 
 use collector_core::{
-    ByteLength, CdSector, CdTrackKind, CdTrackLayout, Digest, HashAlgorithm, ModuleData,
+    ByteLength, CdSector, CdTrackKind, CdTrackLayout, Digest, HashAlgorithm, ModuleData, ModuleId,
     PackageFileId, PackageInventory, PcmFrame, RawJson, RepresentationId, SampleFrame,
     StereoSampleFrameOffset,
 };
@@ -72,6 +72,19 @@ pub struct MusicMetadataOverrides {
     pub artist: Option<String>,
     #[serde(default)]
     pub disc_assignments: Vec<MusicDiscAssignment>,
+}
+
+/// Change only the storefront field while retaining the other saved overrides.
+pub fn set_digital_source(previous: Option<&ModuleData>, source: &str) -> ModuleResult<ModuleData> {
+    let empty = ModuleData {
+        module: ModuleId("org.junk.music".into()),
+        schema_version: 1,
+        payload: RawJson::from_value(serde_json::json!({})),
+    };
+    let current = previous.unwrap_or(&empty);
+    let mut object = raw_domain_object(current)?;
+    apply_patch_value(&mut object, "digital_source", PatchValue::Set(source))?;
+    module_data_from_raw_object(current, object)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]

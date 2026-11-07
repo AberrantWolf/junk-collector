@@ -94,6 +94,20 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 
 .administration-tasks{flex-wrap:wrap;overflow-x:visible}
 
+.page-spinner {
+  display: inline-block;
+  width: .85em;
+  height: .85em;
+  margin-inline-end: .55em;
+  border: .13em solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  vertical-align: -.1em;
+  animation: page-spin .8s linear infinite;
+}
+@keyframes page-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .page-spinner { animation: none; } }
+
 .art-placeholder {
   display: grid;
   place-items: center;
@@ -494,6 +508,33 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .bridge-confirmation input { flex: none; margin-top: .25rem; }
 
 .import-review .guided-ingest { margin-bottom: 0; }
+
+.striped-imports > :nth-child(even) {
+  background: color-mix(in srgb, var(--paper) 65%, var(--accent));
+}
+.striped-imports > button:hover { background: var(--accent); }
+.intake-members > .care-row { padding-inline: .75rem; }
+.intake-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-block: 1rem;
+}
+label.intake-select {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+}
+.intake-select input { width: auto; flex: none; margin: 0; }
+.intake-album-fields {
+  min-width: 0;
+  margin-block: 1rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+}
+.intake-album-fields > div + div { margin-top: .75rem; }
 
 .job-ledger {
   border-top: 1px solid var(--line);

@@ -16178,6 +16178,38 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "required": [
+              "change"
+            ],
+            "properties": {
+              "artist": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "change": {
+                "type": "string",
+                "enum": [
+                  "set_album_overrides"
+                ]
+              },
+              "digital_source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
           }
         ]
       },

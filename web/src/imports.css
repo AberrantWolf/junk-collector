@@ -298,3 +298,30 @@
 .bridge-confirmation input { flex: none; margin-top: .25rem; }
 
 .import-review .guided-ingest { margin-bottom: 0; }
+
+.striped-imports > :nth-child(even) {
+  background: color-mix(in srgb, var(--paper) 65%, var(--accent));
+}
+.striped-imports > button:hover { background: var(--accent); }
+.intake-members > .care-row { padding-inline: .75rem; }
+.intake-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem;
+  margin-block: 1rem;
+}
+label.intake-select {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+}
+.intake-select input { width: auto; flex: none; margin: 0; }
+.intake-album-fields {
+  min-width: 0;
+  margin-block: 1rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+}
+.intake-album-fields > div + div { margin-top: .75rem; }

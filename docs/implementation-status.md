@@ -1,3 +1,18 @@
+## GitHub #12–#15: Imports review and pagination — 2026-11-07
+
+Saved import groups page newest first by creation time. The stable cursor
+breaks ties by group ID. Package and group lists use alternating row
+backgrounds. Pagination in Imports and the Library album lists shows a
+loading indicator and disables the request button until the read settles.
+
+Open a saved group to select published music albums, including all eligible
+albums across its pages. Each album is edited once even if several packages
+point to it. The editor can overwrite the album title, album artist and
+digital source independently. Digital source applies to digital-only albums.
+The existing metadata authority saves the chosen fields together per album,
+reports failures per album and supports retrying the remaining selection. See
+[validation](validation/github-imports-2026-11-07.md).
+
 ## Beta.21 published and installed on Fi — 2026-11-04
 
 Signed source `280b04f` is published as beta.21 and installed on Fi. Full exact-source

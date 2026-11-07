@@ -1,3 +1,4 @@
+import MoreButton from './more-button';
 import React,{useEffect,useRef,useState,api,requestErrorMessage} from '@collector/runtime';
 
 type Page={items:string[];next_cursor:string|null};
@@ -14,6 +15,6 @@ export default function InboxPackageChooser({collectionId,label,selected,onSelec
   <div className="inbox-package-toolbar">{multiple&&rows.length>0&&<label className="inbox-package-option"><input ref={selectAll} type="checkbox" checked={allShown} disabled={disabled||loading} onChange={event=>onSelect(event.target.checked?[...new Set([...selected,...rows])]:selected.filter(name=>!rows.includes(name)))}/><span>Select all shown</span></label>}<span className="muted" role="status">{rows.length} shown{cursor?' · more available':''} · {selected.length} selected</span>{multiple&&selected.length>0&&<button type="button" disabled={disabled} onClick={()=>onSelect([])}>Clear selection</button>}</div>
   {loading&&!rows.length&&<p role="status">Searching packages…</p>}{error&&<p role="alert" className="notice error">{error} <button type="button" onClick={()=>setRevision(value=>value+1)}>Retry</button></p>}{!loading&&!error&&!rows.length&&<p>No matching packages.</p>}
   <div className="inbox-package-results">{rows.map(name=><label className="inbox-package-option" key={name}><input type={multiple?'checkbox':'radio'} name={multiple?undefined:'inbox-package'} checked={selected.includes(name)} disabled={disabled} onChange={e=>onSelect(multiple?(e.target.checked?[...selected,name]:selected.filter(value=>value!==name)):[name])}/><span>{name}</span></label>)}</div>
-  {cursor&&<button type="button" disabled={disabled||loading} onClick={()=>void more()}>More packages</button>}
+  {cursor&&<MoreButton loading={loading} loadingText="Loading packages…" disabled={disabled} onClick={()=>void more()}>More packages</MoreButton>}
  </section>;
 }

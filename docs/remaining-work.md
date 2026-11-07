@@ -1,3 +1,10 @@
+## GitHub #12–#15: Imports review and pagination — source delivery, 2026-11-07
+
+Saved import groups page newest first. Published album groups support scoped
+selection and manual title, artist and digital source edits, with per-album
+results. Import lists alternate row backgrounds, and pagination in Imports and
+Library shows an in-flight indicator. See [delivery and validation](validation/github-imports-2026-11-07.md).
+
 ## Beta.21 published and installed on Fi — 2026-11-04
 
 Signed source `280b04f` is published as beta.21 and installed on Fi. Full exact-source

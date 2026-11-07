@@ -19095,6 +19095,84 @@ fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admiss
 }
 
 #[test]
+fn saved_intakes_page_by_creation_time_with_a_stable_tie_breaker() {
+    use collector_app::{BulkIntakePort, IntakeSession, IntakeState, PrivateIntake};
+
+    let (_root, store, actor, service, collection) = setup();
+    let save = |id: &str, created_at: &str| {
+        let id = id.parse().unwrap();
+        store
+            .create_intake(PrivateIntake {
+                user_id: actor.user_id,
+                binding: collection.binding.clone(),
+                session: IntakeSession {
+                    id,
+                    collection_id: collection.id,
+                    revision: Revision(1),
+                    state: IntakeState::Draft,
+                    package_count: 0,
+                    file_count: 0,
+                    expected_packages: 1,
+                    expected_files: 1,
+                    admitted: 0,
+                    rejected: 0,
+                    preserved: 0,
+                    needs_attention: 0,
+                    automatic_metadata: true,
+                    prepare_music: false,
+                    created_at: created_at.parse().unwrap(),
+                    updated_at: "2026-11-07T00:00:30Z".parse().unwrap(),
+                },
+            })
+            .unwrap();
+        id
+    };
+    let whole_second = save(
+        "ffffffff-ffff-4fff-afff-ffffffffffff",
+        "2026-11-07T00:00:00Z",
+    );
+    let tied_first = save(
+        "22222222-2222-4222-a222-222222222222",
+        "2026-11-07T00:00:00.000000001Z",
+    );
+    let tied_second = save(
+        "11111111-1111-4111-a111-111111111111",
+        "2026-11-07T00:00:00.000000001Z",
+    );
+    let latest = save(
+        "00000000-0000-4000-a000-000000000000",
+        "2026-11-07T00:00:00.001Z",
+    );
+
+    let first = service
+        .intake_sessions(&actor, Some(collection.id), None, 2)
+        .unwrap();
+    assert_eq!(
+        first.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+        vec![latest, tied_first]
+    );
+
+    // A newer import created while the browser is paging does not shift the cursor.
+    save(
+        "33333333-3333-4333-a333-333333333333",
+        "2026-11-07T00:00:01Z",
+    );
+    let next = service
+        .intake_sessions(
+            &actor,
+            Some(collection.id),
+            first.next_cursor.map(|v| v.parse().unwrap()),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        next.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+        vec![tied_second, whole_second]
+    );
+    assert!(next.next_cursor.is_none());
+}
+
+#[test]
 fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     use collector_app::{
         AppendIntake, CreateIntake, IntakeDestination, IntakePackage, StartIntake,
@@ -28899,6 +28977,14 @@ fn digital_source_override_is_independent_validated_revision_fenced_and_reindexe
             },
         },
     };
+    let album_overrides = |revision, source: &str, artist| UpdateMetadataAuthorityCommand {
+        expected_revision: revision,
+        change: MetadataAuthorityChange::SetAlbumOverrides {
+            title: None,
+            artist,
+            digital_source: Some(source.into()),
+        },
+    };
     let oversized = "x".repeat(257);
     for invalid in ["", " Steam", "Steam\n", &oversized] {
         assert!(matches!(
@@ -28915,7 +29001,7 @@ fn digital_source_override_is_independent_validated_revision_fenced_and_reindexe
         .update_metadata_authority(
             &actor,
             id,
-            change(before.revision, Some("Steam")),
+            album_overrides(before.revision, "Steam", None),
             &command(),
         )
         .unwrap();
@@ -28923,7 +29009,7 @@ fn digital_source_override_is_independent_validated_revision_fenced_and_reindexe
         service.update_metadata_authority(
             &actor,
             id,
-            change(before.revision, Some("GOG")),
+            album_overrides(before.revision, "GOG", None),
             &command()
         ),
         Err(Error::Conflict)
@@ -28957,11 +29043,14 @@ fn digital_source_override_is_independent_validated_revision_fenced_and_reindexe
         service.update_metadata_authority(
             &actor,
             physical.id,
-            change(review.revision, Some("Steam")),
+            album_overrides(review.revision, "Steam", Some("Replacement".into())),
             &command()
         ),
         Err(Error::Invalid(_))
     ));
+    let unchanged = service.metadata_review(&actor, physical.id).unwrap();
+    assert_eq!(unchanged.revision, review.revision);
+    assert_eq!(unchanged.display.subtitle, review.display.subtitle);
 }
 
 #[test]

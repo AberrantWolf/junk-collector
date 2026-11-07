@@ -4487,6 +4487,12 @@ export interface components {
         } | {
             /** @enum {string} */
             change: "clear_domain_overrides";
+        } | {
+            artist?: string | null;
+            /** @enum {string} */
+            change: "set_album_overrides";
+            digital_source?: string | null;
+            title?: string | null;
         };
         MetadataCandidate: {
             id: string;

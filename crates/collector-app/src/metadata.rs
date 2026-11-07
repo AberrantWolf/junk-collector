@@ -66,6 +66,11 @@ pub enum MetadataAuthorityChange {
         overrides: ModuleData,
     },
     ClearDomainOverrides,
+    SetAlbumOverrides {
+        title: Option<String>,
+        artist: Option<String>,
+        digital_source: Option<String>,
+    },
 }
 
 // Internally tagged commands buffer their contents before variant decoding. Decode
@@ -1876,6 +1881,15 @@ impl CollectionService {
                     &mut candidates,
                     legacy.iter().flat_map(|value| &value.candidates),
                 )?;
+                if matches!(
+                    &command.change,
+                    MetadataAuthorityChange::SetAlbumOverrides { .. }
+                ) && item.domain.module.0 != "org.junk.music"
+                {
+                    return Err(Error::Invalid(
+                        "album overrides require a music album".into(),
+                    ));
+                }
                 apply_authority_change(&mut authority, &command.change, &candidates)?;
                 self.modules
                     .validate_metadata_authority(&eligibility.owner, &authority)
@@ -1883,6 +1897,10 @@ impl CollectionService {
                 if matches!(
                     &command.change,
                     MetadataAuthorityChange::SetDomainOverrides { .. }
+                        | MetadataAuthorityChange::SetAlbumOverrides {
+                            digital_source: Some(_),
+                            ..
+                        }
                 ) && item.domain.module.0 == "org.junk.music"
                 {
                     let next: collector_modules::music::MusicMetadataOverrides = authority
@@ -3175,14 +3193,7 @@ fn apply_authority_change(
             value,
             language,
         } => {
-            authority
-                .field_overrides
-                .retain(|entry| entry.field != *field);
-            authority.field_overrides.push(MetadataFieldOverride {
-                field: *field,
-                value: value.clone(),
-                language: language.clone(),
-            });
+            set_field_override(authority, *field, value, language.clone());
         }
         MetadataAuthorityChange::ClearFieldOverride { field } => {
             authority
@@ -3197,9 +3208,46 @@ fn apply_authority_change(
             authority.domain_overrides = Some(overrides.clone());
         }
         MetadataAuthorityChange::ClearDomainOverrides => authority.domain_overrides = None,
+        MetadataAuthorityChange::SetAlbumOverrides {
+            title,
+            artist,
+            digital_source,
+        } => {
+            if title.is_none() && artist.is_none() && digital_source.is_none() {
+                return Err(Error::Invalid("choose at least one album override".into()));
+            }
+            if let Some(title) = title {
+                set_field_override(authority, MetadataField::Title, title, None);
+            }
+            if let Some(artist) = artist {
+                set_field_override(authority, MetadataField::Subtitle, artist, None);
+            }
+            if let Some(source) = digital_source {
+                authority.domain_overrides = Some(collector_modules::music::set_digital_source(
+                    authority.domain_overrides.as_ref(),
+                    source,
+                )?);
+            }
+        }
     }
     authority.field_overrides.sort_by_key(|value| value.field);
     authority.validate()
+}
+
+fn set_field_override(
+    authority: &mut MetadataAuthority,
+    field: MetadataField,
+    value: &str,
+    language: Option<LanguageTag>,
+) {
+    authority
+        .field_overrides
+        .retain(|entry| entry.field != field);
+    authority.field_overrides.push(MetadataFieldOverride {
+        field,
+        value: value.into(),
+        language,
+    });
 }
 
 pub fn merge_metadata_candidates<'a>(
