@@ -44,3 +44,10 @@ and evidence tests passed. Web types, build, models, short browser smoke and
 the email purchase journey passed in the merged worktree. Opus selection was
 checked by the selector tests. The browser Opus journey requires opusenc,
 which was unavailable locally.
+
+The receipt reuse follow-up waits for same-source hosted checks even when a
+dispatch names journeys. For beta source plans it compares required commands
+across baselines. Exact commit, workflow, run attempt and artifact digest checks
+still apply. Text-only RC and stable candidates that borrow full qualification
+retain the baseline check. Local tests exercised acceptance and refusal, and a
+source plan naming Opus recovered the successful hosted branch receipt.

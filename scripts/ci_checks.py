@@ -14,6 +14,7 @@ import zipfile
 from check_changes import validate_report, covers_steps
 
 MAX_BYTES = 4 * 1024 * 1024
+CHECK_EVENTS = {'push', 'pull_request', 'workflow_dispatch'}
 
 
 def api(path):
@@ -25,7 +26,7 @@ def check_run(run, revision, repository_id, workflow_id):
         or run.get('head_repository', {}).get('id') != repository_id
         or run.get('workflow_id') != workflow_id or run.get('path') != '.github/workflows/check.yml'
         or run.get('status') != 'completed' or run.get('conclusion') != 'success'
-        or run.get('event') not in ('push', 'pull_request', 'workflow_dispatch')
+        or run.get('event') not in CHECK_EVENTS
         or type(run.get('run_attempt')) is not int or run['run_attempt'] < 1):
         raise ValueError('Source checks are not trusted successful exact-source evidence')
 
@@ -33,6 +34,8 @@ def check_run(run, revision, repository_id, workflow_id):
 def recover(repository, revision, destination, *, base=None, require_full=False, selected=None, required=None):
     if not re.fullmatch(r'[\w.-]+/[\w.-]+', repository) or not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise ValueError('Invalid repository or revision')
+    if required is not None and (required.get('revision') != revision or not required.get('steps')):
+        raise ValueError('Expected a nonempty check plan for the exact source revision')
     prefix = f'repos/{repository}'
     repository_id = api(prefix)['id']
     workflow_id = api(prefix + '/actions/workflows/check.yml')['id']
@@ -67,10 +70,12 @@ def recover(repository, revision, destination, *, base=None, require_full=False,
                     raise ValueError('Unexpected source-check artifact contents')
                 report = json.loads(archive.read(entries[0]))
             validate_report(report, revision, require_full)
-            if report['coverage'] != 'full' and (not base or report['base'] != base):
+            if required is not None and not covers_steps(report['steps'], required['steps']):
                 continue
-            if required:
-                if not covers_steps(report['steps'], required['steps']):
+            # With an exact-source plan, coverage is determined by its commands.
+            # Keep the baseline fence when borrowing a full qualification for a text-only release.
+            if report['coverage'] != 'full' and (required is None or require_full):
+                if not base or report['base'] != base:
                     continue
             current = api(prefix + '/actions/runs/' + str(run['id']))
             check_run(current, revision, repository_id, workflow_id)
@@ -79,9 +84,20 @@ def recover(repository, revision, destination, *, base=None, require_full=False,
             report['reused_from'] = dict(run_id=run['id'], attempt=run['run_attempt'], artifact_id=artifact['id'], artifact_digest=artifact['digest'])
             destination.write_text(json.dumps(report, indent=2) + '\n')
             return True
-        except (ValueError, KeyError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
+        except (ValueError, KeyError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
             print('Source evidence not reusable: ' + str(error), file=sys.stderr)
     return False
+
+
+def source_check_pending(repository, revision):
+    runs = api(f'repos/{repository}/actions/workflows/check.yml/runs?head_sha={revision}&per_page=100')['workflow_runs']
+    return any(
+        run.get('status') != 'completed'
+        and run.get('head_sha') == revision
+        and run.get('event') in CHECK_EVENTS
+        and (run.get('head_repository') or {}).get('full_name', '').casefold() == repository.casefold()
+        for run in runs
+    )
 
 
 def main():
@@ -89,16 +105,21 @@ def main():
     parser.add_argument('repository');parser.add_argument('revision');parser.add_argument('destination', type=Path)
     parser.add_argument('--wait-seconds', type=int, default=0);parser.add_argument('--plan', type=Path);parser.add_argument('--base');parser.add_argument('--full', action='store_true');parser.add_argument('--run-id')
     args = parser.parse_args()
+    required = json.loads(args.plan.read_text()) if args.plan else None
+
+    def recover_receipt():
+        return recover(args.repository, args.revision, args.destination, base=args.base,
+                       require_full=args.full, selected=args.run_id, required=required)
+
     until = time.monotonic() + min(max(args.wait_seconds, 0), 1800)
     while True:
-        if recover(args.repository, args.revision, args.destination, base=args.base, require_full=args.full,
-                   selected=args.run_id, required=json.loads(args.plan.read_text()) if args.plan else None):
+        if recover_receipt():
             return 0
         if time.monotonic() >= until:
             return 1
-        runs = api(f'repos/{args.repository}/actions/workflows/check.yml/runs?head_sha={args.revision}&per_page=100')['workflow_runs']
-        if not any(run.get('status') != 'completed' for run in runs):
-            return 1
+        if not source_check_pending(args.repository, args.revision):
+            # The run may have completed between recovery and the pending lookup.
+            return 0 if recover_receipt() else 1
         print('Waiting for already-running same-source checks rather than duplicating compilation.', flush=True)
         time.sleep(min(15, max(0, until - time.monotonic())))
 

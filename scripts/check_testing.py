@@ -234,10 +234,50 @@ class SourceReceiptTests(unittest.TestCase):
         self.assertFalse(recover(full=True))
         self.assertFalse(recover(rerun=True))
         self.assertFalse(recover(mutate=lambda r:r.update(revision='c'*40)))
-        self.assertFalse(recover(required=dict(steps=checks.select(['web/src/app.tsx'],'ui','beta')[1])))
+        candidate_steps = checks.container_source_steps(checks.select(['web/src/app.tsx'], 'ui-copy', 'beta')[1])
+        candidate = dict(revision='a'*40, steps=candidate_steps)
+        self.assertTrue(recover(base='c'*40, required=candidate))
+        self.assertFalse(recover(base='c'*40, required=candidate, rerun=True))
+        self.assertFalse(recover(base='c'*40, required=candidate,
+                                 mutate=lambda r:r['steps'][0].update(status='failed')))
+        named_steps = checks.select(['web/src/app.tsx'], 'ui', 'beta', journeys=['opus-preparation'])[1]
+        self.assertFalse(recover(base='c'*40, required=dict(revision='a'*40, steps=named_steps)))
+        with self.assertRaisesRegex(ValueError, 'exact source revision'):
+            recover(required=dict(candidate, revision='c'*40))
+
+        def borrow_full_baseline(receipt):
+            _, steps = checks.select(['Dockerfile'], 'infra', 'full')
+            receipt['baseline_qualification'] = dict(
+                receipt, revision='b'*40, classification='infra', level='full', paths=['Dockerfile'],
+                coverage='full', steps=[dict(step, status='passed') for step in steps],
+            )
+
+        self.assertTrue(recover(full=True, required=candidate, mutate=borrow_full_baseline))
+        self.assertFalse(recover(base='c'*40, full=True, required=candidate, mutate=borrow_full_baseline))
         for field,value in [('head_sha','c'*40),('workflow_id',20),('conclusion','cancelled'),('head_repository',dict(id=8))]:
             with self.subTest(field=field), self.assertRaises(ValueError):
                 ci_checks.check_run(dict(run,**{field:value}),'a'*40,7,19)
+
+    def test_wait_only_for_same_repository_and_revision(self):
+        revision = 'a' * 40
+        run = dict(status='in_progress', head_sha=revision, event='push',
+                   head_repository=dict(full_name='Owner/repo'))
+        irrelevant = [
+            dict(run, status='completed'),
+            dict(run, head_sha='b' * 40),
+            dict(run, head_repository=dict(full_name='Fork/repo')),
+            dict(run, event='workflow_call'),
+        ]
+        with patch.object(ci_checks, 'api', return_value=dict(workflow_runs=irrelevant)):
+            self.assertFalse(ci_checks.source_check_pending('Owner/repo', revision))
+            irrelevant.append(run)
+            self.assertTrue(ci_checks.source_check_pending('Owner/repo', revision))
+
+    def test_run_completing_during_pending_lookup_can_still_be_reused(self):
+        argv = ['ci_checks', 'Owner/repo', 'a' * 40, 'receipt.json', '--wait-seconds', '30']
+        with patch('sys.argv', argv), patch.object(ci_checks, 'recover', side_effect=[False, True]), \
+             patch.object(ci_checks, 'source_check_pending', return_value=False):
+            self.assertEqual(ci_checks.main(), 0)
 
 
 if __name__ == '__main__':

@@ -30,8 +30,9 @@ not rerun compilation, source tests or image builds.
    candidates without a usable baseline and packaged deployment changes also
    run the extended native checks. For another beta, request them explicitly
    with `-f qualify_runtime=true`. The source job can reuse a
-   successful same-SHA Checks receipt only when its workflow, baseline, required
-   commands, current attempt and immutable artifact digest qualify.
+   successful same-SHA Checks receipt only when its workflow, required
+   commands, current attempt and immutable artifact digest qualify. The
+   candidate's published baseline still determines the required checks.
    Wait for the entire run to succeed, including both native architectures and
    container verification. Record its run ID. No candidate changes after this
    point: even a documentation commit requires fresh exact-source validation.

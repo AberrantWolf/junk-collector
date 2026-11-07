@@ -83,10 +83,11 @@ trailer after you review the **whole push diff**. An optional `Check-Base: vVERS
 trailer supplies a validated baseline for a new branch. Without a reviewed trailer,
 CI conservatively infers behavior from changed paths. Contradictory paths or an
 unknown classification fail; missing release baselines still require broader checks.
-Candidate dispatch inputs take precedence over push trailers. Cheap copy-only
-checks and candidates with explicit journeys can reuse completed compatible
-receipts without waiting for an in-flight push run. Release tag pushes do not
-start a second Checks run.
+Candidate dispatch inputs take precedence over push trailers. Container
+qualification can wait up to 30 minutes for an in-flight Checks run in the
+same repository at the same commit, including when the dispatch names
+journeys. Cheap plans without Rust tests or browser journeys check only
+completed runs. Release tag pushes do not start a second Checks run.
 
 ```sh
 git commit -m "Clarify metadata guidance" -m "Check-Classification: ui-copy
@@ -190,9 +191,12 @@ gh workflow run container-release.yml --ref codex/your-candidate -f base_ref=v0.
 ```
 
 The source-check job reuses an applicable successful same-SHA Checks receipt when
-workflow/repository, baseline, required commands, run attempt and immutable artifact
-digest agree. A successful broader browser/workspace result can cover a narrower requested
-subset. Otherwise it runs the required checks. Container validation runs short
+workflow, repository, required commands, run attempt and immutable artifact
+digest agree. The full candidate diff still determines the required commands.
+A broader browser or workspace result can satisfy those requirements even
+when its own change selection used a different baseline. Text-only RC or
+stable qualification that borrows a full receipt still requires the same
+baseline. Otherwise the job runs the required checks. Container validation runs short
 browser smoke once, against the actual AMD64 release image. Selected feature
 journeys can still need debug fixtures. Full qualification retains those suites.
 

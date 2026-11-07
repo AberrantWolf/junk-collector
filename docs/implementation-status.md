@@ -19,6 +19,8 @@ and [local validation record](validation/fi-beta-update-checks-2026-11-07.md).
 
 Change checks v3 separates browser selection from Rust workspace coverage,
 selects changed browser journeys and verifies published release baselines.
+Container qualification reuses successful hosted checks at the same commit
+when their executed commands cover the release plan.
 Routine native beta image checks cover the shipped Compose core and isolated
 media runtime. Full qualification retains the longer Compose and browser
 journeys. AMD64 short browser smoke runs once against the release image.

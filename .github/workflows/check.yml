@@ -92,8 +92,8 @@ jobs:
           Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
           reused = False
           if os.environ['REUSE_CHECKS'] == 'true':
-              # A push job does not receive dispatch-only journey selections.
-              wait = '1800' if not report['journeys'] and any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'
+              # A push job may already cover explicitly requested journeys.
+              wait = '1800' if any(step['name'] in ('workspace-tests','affected-tests','browser') for step in report['steps']) else '0'
               command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',wait,'--plan','/tmp/check-plan.json']
               if base: command += ['--base', base]
               if level == 'full': command += ['--full']

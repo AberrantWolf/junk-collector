@@ -21,6 +21,8 @@ Live qualification remains pending the next authorized Fi update. See the
 Workspace Rust coverage and browser journeys are selected separately. Release
 image validation uses shorter native and browser smoke checks for routine betas,
 with extended native coverage for deployment changes and full qualification.
+Container qualification can reuse hosted results that cover the complete
+source plan at the same commit, including named browser journeys.
 Beta.22, catalog v15 and private state v23 establish the supported direct
 upgrade baseline. See [testing policy](testing.md) and the
 [delivery record](validation/release-check-scope-2026-11-07.md) for validation
