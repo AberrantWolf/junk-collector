@@ -10,7 +10,7 @@ import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY = 'change-checks-v1'
+POLICY = 'change-checks-v2'
 POLICY_DOCS = {'docs/architecture.md', 'docs/release-requirements.md', 'docs/release-toolchain.md', 'docs/container-release-pipeline.md', 'docs/testing-and-packaging-plan.md', 'docs/testing.md'}
 KINDS = ('auto', 'docs', 'ui-copy', 'cli-copy', 'style', 'ui', 'rust', 'infra')
 BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapshots', 'actions',
@@ -18,6 +18,9 @@ BROWSER = ('smoke', 'integration', 'browse', 'audio-checks', 'accuraterip-snapsh
            'accounts', 'pair', 'navigation', 'certificate', 'numeric-ip', 'game-catalog',
            'email-purchases', 'digital-matching', 'purchases', 'intake-review', 'game-audio', 'documents', 'backup-reminder', 'remote-media', 'storage')
 FIXTURE = {'audio-checks', 'accuraterip-snapshots', 'actions', 'lists'}
+CHROME = {'integration', 'fx05', 'local-playback', 'digital-matching', 'purchases',
+          'game-audio', 'documents', 'remote-media'}
+VERSION_FILES = {'Cargo.toml', 'Cargo.lock'}
 SENSITIVE = ('crates/collector-core/', 'crates/collector-api-types/', 'crates/collector-store/',
              'crates/collector-client/', '.github/', 'scripts/', 'deploy/')
 
@@ -33,6 +36,26 @@ def changed(base=None, root=ROOT):
     paths = set(filter(None, git('diff', '--name-only', '-z', revision, '--', root=root, strip=False).split('\0')))
     paths.update(filter(None, git('ls-files', '--others', '--exclude-standard', '-z', root=root, strip=False).split('\0')))
     return revision, sorted(paths)
+
+
+def release_version_only(base, paths, root=ROOT):
+    if not VERSION_FILES.issubset(paths) or not all((root / path).is_file() for path in VERSION_FILES):
+        return False
+    try:
+        previous = tomllib.loads(git('show', f'{base}:Cargo.toml', root=root))
+        previous_lock = tomllib.loads(git('show', f'{base}:Cargo.lock', root=root))
+    except subprocess.CalledProcessError:
+        return False
+    current = tomllib.loads((root / 'Cargo.toml').read_text())
+    old = previous.get('workspace', {}).get('package', {}).pop('version', None)
+    new = current.get('workspace', {}).get('package', {}).pop('version', None)
+    if not old or not new or old == new or previous != current:
+        return False
+    current_lock = tomllib.loads((root / 'Cargo.lock').read_text())
+    for package in previous_lock['package']:
+        if 'source' not in package and package['version'] == old:
+            package['version'] = new
+    return previous_lock == current_lock
 
 
 def automatic(paths):
@@ -84,7 +107,15 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
     kind = classify(paths, kind)
     if not base_known:
         kind = 'infra'
-    full = kind == 'infra' or level == 'full' and kind not in ('docs', 'ui-copy', 'cli-copy')
+    full = not base_known or (level == 'full' and kind not in ('docs', 'ui-copy', 'cli-copy'))
+    workspace = full or kind == 'infra'
+    web_behavior = kind == 'ui' or (
+        kind == 'infra' and any(
+            path.startswith(('web/src/', 'web/tests/'))
+            and not path.startswith('web/src/generated/') and not path.endswith('.css')
+            for path in paths
+        )
+    )
     steps = []
     def add(name, command):
         steps.append(dict(name=name, command=command))
@@ -96,7 +127,7 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
     if kind not in ('cli-copy', 'rust') or full or journeys:
         add('web-types', ['npm', '--prefix', 'web', 'run', 'check'])
         add('web-build', ['npm', '--prefix', 'web', 'run', 'build'])
-    if full:
+    if workspace:
         add('tooling', ['python3', '-B', 'scripts/check_testing.py'])
         add('container-tools', ['python3', '-B', 'scripts/check_container_tools.py'])
         add('release-policy', ['python3', '-B', 'scripts/check_container_release.py'])
@@ -118,16 +149,15 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
             raise ValueError('Rust classification needs an affected crate')
         add('affected-tests', ['cargo', 'test', '--locked', *flags])
         add('affected-clippy', ['cargo', 'clippy', '--locked', *flags, '--all-targets', '--', '-D', 'warnings'])
-    if full or kind == 'ui':
+    if workspace or web_behavior:
         add('web-models', ['npm', '--prefix', 'web', 'run', 'test:models'])
     if kind == 'cli-copy':
         add('cli-build', ['cargo', 'build', '--locked', '-p', 'collector-server', *(['--release'] if level != 'local' else [])])
     if full:
         selected = list(BROWSER)
-    elif kind == 'ui' and not journeys:
-        selected = list(BROWSER)
-    elif kind in ('ui-copy', 'style', 'ui'):
-        selected = list(dict.fromkeys(['smoke', *journeys]))
+    elif kind in ('ui-copy', 'style', 'ui', 'infra'):
+        feature_journeys = journeys or (('integration',) if web_behavior else ())
+        selected = list(dict.fromkeys(['smoke', *feature_journeys]))
     else:
         selected = list(journeys)
     if selected:
@@ -137,12 +167,27 @@ def select(paths, kind='auto', level='local', base_known=True, journeys=(), exte
     return kind, steps
 
 
-def container_source_steps(kind, steps, journeys=()):
-    # The image build supplies the release executable, including CLI-only edits.
-    omitted = {'cli-build'}
-    if kind in ('docs', 'ui-copy', 'style', 'cli-copy') and not journeys:
-        omitted |= {'browser-server', 'browser'}
-    return [step for step in steps if step['name'] not in omitted]
+def container_source_steps(steps):
+    # The image build supplies the CLI and runs the same short browser smoke.
+    browser = next((step for step in steps if step['name'] == 'browser'), None)
+    journeys = [name for name in browser['command'][2:] if name != 'smoke'] if browser else []
+    result = []
+    for step in steps:
+        if step['name'] == 'browser' and journeys:
+            result.append(dict(step, command=[*step['command'][:2], *journeys]))
+        elif step['name'] == 'browser-server' and any(name not in FIXTURE for name in journeys):
+            result.append(step)
+        elif step['name'] not in ('browser', 'browser-server', 'cli-build'):
+            result.append(step)
+    return result
+
+
+def qualification_coverage(steps, source_only):
+    browser = next((step['command'][2:] for step in steps if step['name'] == 'browser'), [])
+    required = set(BROWSER) - ({'smoke'} if source_only else set())
+    return 'full' if required.issubset(browser) and any(
+        step['name'] == 'workspace-tests' for step in steps
+    ) else 'changed'
 
 
 def covers_steps(actual_steps, required_steps):
@@ -171,14 +216,21 @@ def validate_report(report, revision=None, require_full=False):
             raise ValueError('RC/stable requires full functional qualification or an applicable full baseline for text-only edits')
         validate_report(baseline, report.get('base'), True)
     steps = report.get('steps', [])
-    _, expected = select(report.get('paths', []), report.get('classification', 'auto'), report.get('level', 'local'), journeys=report.get('journeys', []), external_server=report.get('external_server', False))
+    paths = report.get('paths', [])
+    if report.get('release_version_only'):
+        if not VERSION_FILES.issubset(paths):
+            raise ValueError('Version-only workspace change requires both manifest and lockfile')
+        paths = [path for path in paths if path not in VERSION_FILES]
+    _, expected = select(
+        paths, report.get('classification', 'auto'), report.get('level', 'local'),
+        base_known=report.get('base_known', True), journeys=report.get('journeys', []),
+        external_server=report.get('external_server', False),
+    )
     if report.get('source_only'):
-        expected = container_source_steps(report.get('classification'), expected, report.get('journeys', []))
+        expected = container_source_steps(expected)
     actual_names = {s.get('name') for s in steps}
-    if report.get('coverage') not in ('changed', 'full'):
-        raise ValueError('Unknown qualification coverage')
-    if report.get('coverage') == 'full' and not any(s['name'] == 'workspace-tests' for s in expected):
-        raise ValueError('Full coverage is inconsistent with selected scope')
+    if report.get('coverage') != qualification_coverage(expected, report.get('source_only', False)):
+        raise ValueError('Reported coverage is inconsistent with selected scope')
     if actual_names != {s['name'] for s in expected} or len(steps) != len(expected):
         raise ValueError('Check evidence omits required checks for its declared scope')
     for required in expected:
@@ -204,13 +256,24 @@ def main():
     args = parser.parse_args()
     try:
         base, paths = changed(args.base)
-        kind, steps = select(paths, args.classification, args.level, args.base is not None or args.level == 'local', args.journey, bool(os.environ.get('COLLECTOR_TEST_ORIGIN') or os.environ.get('COLLECTOR_SERVER_BINARY')))
+        revision = git('rev-parse', 'HEAD')
+        base_known = args.base is not None or args.level == 'local'
+        if args.source_only and (base == revision or subprocess.run(
+            ['git', 'merge-base', '--is-ancestor', base, revision], cwd=ROOT
+        ).returncode):
+            base_known = False
+        version_only = release_version_only(base, paths)
+        effective_paths = [path for path in paths if path not in VERSION_FILES] if version_only else paths
+        external_server = bool(os.environ.get('COLLECTOR_TEST_ORIGIN') or os.environ.get('COLLECTOR_SERVER_BINARY'))
+        kind, steps = select(
+            effective_paths, args.classification, args.level, base_known, args.journey, external_server,
+        )
         if args.source_only:
-            steps = container_source_steps(kind, steps, args.journey)
-        report = dict(policy=POLICY, revision=git('rev-parse', 'HEAD'), base=base,
+            steps = container_source_steps(steps)
+        report = dict(policy=POLICY, revision=revision, base=base, base_known=base_known, release_version_only=version_only,
                       dirty=bool(git('status', '--porcelain')), classification=kind,
-                      level=args.level, coverage='full' if any(s['name'] == 'workspace-tests' for s in steps) else 'changed',
-                      paths=paths, steps=steps, source_only=args.source_only, journeys=args.journey, external_server=bool(os.environ.get('COLLECTOR_TEST_ORIGIN') or os.environ.get('COLLECTOR_SERVER_BINARY')), status='planned')
+                      level=args.level, coverage=qualification_coverage(steps, args.source_only),
+                      paths=paths, steps=steps, source_only=args.source_only, journeys=args.journey, external_server=external_server, status='planned')
         if args.baseline_report:
             baseline_report = json.loads(args.baseline_report.read_text())
             validate_report(baseline_report, base, True)

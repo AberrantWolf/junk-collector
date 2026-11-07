@@ -195,9 +195,12 @@ def check_qualification(expected, checks, platforms):
     validate_report(checks, expected['revision'], require_full)
     if set(platforms) != {'amd64', 'arm64'}:
         raise ValueError('Missing native runtime qualification')
+    allowed_scopes = {'full'} if require_full else {'full', 'smoke'}
     for architecture, result in platforms.items():
         if result.get('runtime') != 'passed' or result.get('browser') != ('passed' if architecture == 'amd64' else 'covered-on-amd64'):
             raise ValueError('Missing runtime/browser prerequisite')
+        if result.get('runtime_scope') not in allowed_scopes:
+            raise ValueError('Missing or insufficient native runtime scope')
 
 
 def seal(expected, image, archive, run_id, attempt, checks, platform_checks):

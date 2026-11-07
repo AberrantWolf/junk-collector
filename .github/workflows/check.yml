@@ -1,6 +1,7 @@
 name: Checks
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -54,6 +55,7 @@ jobs:
           python3 - <<'PYTHON'
           import json, os, re, subprocess, tomllib
           from pathlib import Path
+          from scripts.check_changes import CHROME
           revision = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
           base = os.environ.get('BASE_REF', '')
           classification = os.environ['CLASSIFICATION']
@@ -75,23 +77,27 @@ jobs:
           if os.environ['REUSE_CHECKS'] == 'true': arguments += ['--source-only']
           subprocess.run(['python3','scripts/check_changes.py',*arguments,'--dry-run','--report','/tmp/check-plan.json'],check=True)
           report = json.loads(Path('/tmp/check-plan.json').read_text())
-          if base and level == 'full' and report['classification'] in ('docs','ui-copy','cli-copy'):
+          if report['base_known'] and base and level == 'full' and report['classification'] in ('docs','ui-copy','cli-copy'):
               subprocess.run(['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],base,'/tmp/baseline-check-report.json','--full'],check=True)
               arguments += ['--baseline-report','/tmp/baseline-check-report.json']
           Path('/tmp/check-arguments.json').write_text(json.dumps(arguments))
           reused = False
           if os.environ['REUSE_CHECKS'] == 'true':
-              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',('1800' if any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'),'--plan','/tmp/check-plan.json']
+              # A push job does not receive dispatch-only journey selections.
+              wait = '1800' if not report['journeys'] and any(step['name'] in ('workspace-tests','affected-tests','browser-server') for step in report['steps']) else '0'
+              command = ['python3','scripts/ci_checks.py',os.environ['GITHUB_REPOSITORY'],revision,'/tmp/check-report.json','--wait-seconds',wait,'--plan','/tmp/check-plan.json']
               if base: command += ['--base', base]
               if level == 'full': command += ['--full']
               reused = subprocess.run(command).returncode == 0
           if reused: report = json.loads(Path('/tmp/check-report.json').read_text())
           names = {step['name'] for step in report['steps']}
+          browsers = next((step['command'][2:] for step in report['steps'] if step['name'] == 'browser'), [])
           with open(os.environ['GITHUB_OUTPUT'],'a') as output:
               output.write(f'reused={str(reused).lower()}\n')
               output.write(f'rust={str(bool(names & {"format","workspace-tests","affected-tests","cli-build","browser-server"})).lower()}\n')
               output.write(f'web={str("web-build" in names).lower()}\n')
-              output.write(f'browser={str("browser" in names).lower()}\n')
+              browsers_to_install = (['chromium'] if set(browsers) - CHROME else []) + (['chrome'] if set(browsers) & CHROME else [])
+              output.write(f'browsers={" ".join(browsers_to_install)}\n')
           PYTHON
       - uses: dtolnay/rust-toolchain@stable
         if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
@@ -126,8 +132,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev flac opus-tools
       - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
         run: npm --prefix web ci
-      - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.browser == 'true'
-        run: npm --prefix web exec -- playwright install --with-deps chromium chrome
+      - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.browsers != ''
+        env:
+          BROWSERS: ${{ steps.scope.outputs.browsers }}
+        run: |
+          read -r -a browsers <<< "$BROWSERS"
+          npm --prefix web exec -- playwright install --with-deps "${browsers[@]}"
       - name: Execute selected checks
         if: steps.scope.outputs.reused != 'true'
         run: |

@@ -1,3 +1,13 @@
+## Beta release checks and upgrade baseline — source delivery, 2026-11-07
+
+Workspace Rust coverage and browser journeys are selected separately. Release
+image validation uses shorter native and browser smoke checks for routine betas,
+with extended native coverage for deployment changes and full qualification.
+Beta.22, catalog v15 and private state v23 establish the supported direct
+upgrade baseline. See [testing policy](testing.md) and the
+[delivery record](validation/release-check-scope-2026-11-07.md) for validation
+limits. Production deployment procedures are separate.
+
 ## Proton Bridge folder picker — source delivery, 2026-11-07
 
 **Find mail folders** lists selectable folders during Bridge setup and while

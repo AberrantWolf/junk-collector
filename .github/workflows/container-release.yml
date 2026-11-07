@@ -27,6 +27,10 @@ on:
         required: false
         default: ''
         type: string
+      qualify_runtime:
+        description: Run the extended Compose and media proxy qualification on both platforms
+        default: false
+        type: boolean
       retry_release_tag:
         description: Existing published release tag to retry using exact-source validated images
         required: false
@@ -59,10 +63,12 @@ jobs:
       publish: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' }}
       reuse: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' || inputs.validation_run_id != '' }}
       tag: ${{ github.event.release.tag_name || inputs.retry_release_tag }}
+      runtime_scope: ${{ steps.runtime.outputs.scope }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.retry_release_tag && format('refs/tags/{0}', inputs.retry_release_tag) || github.sha }}
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && inputs.retry_release_tag == '' && inputs.validation_run_id == '' && '0' || '1' }}
       - name: Select version and stable or preview channel
         id: release
         env:
@@ -83,6 +89,27 @@ jobs:
           else
             python3 scripts/container_release.py plan
           fi
+      - name: Select native runtime coverage
+        id: runtime
+        if: github.event_name == 'workflow_dispatch' && inputs.retry_release_tag == '' && inputs.validation_run_id == ''
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          CHECK_LEVEL: ${{ inputs.check_level }}
+          QUALIFY_RUNTIME: ${{ inputs.qualify_runtime }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          scope=smoke
+          if [[ "$CHECK_LEVEL" == full || "$QUALIFY_RUNTIME" == true || ! "$RELEASE_VERSION" =~ -(alpha|beta)(\.|$) ]] ||
+             [[ -z "$BASE_REF" ]] ||
+             ! base=$(git rev-parse --verify --end-of-options "$BASE_REF^{commit}") ||
+             [[ "$base" == "$(git rev-parse HEAD)" ]] ||
+             ! git merge-base --is-ancestor "$base" HEAD ||
+             ! git diff --quiet "$base" HEAD -- Dockerfile .dockerignore deploy/container/ \
+               scripts/check_container.py scripts/check_media_container.py scripts/inbox_cleanup_qualification.py \
+               .github/workflows/container-release.yml ':(exclude,glob)deploy/container/**/*.md'; then
+            scope=full
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: release-plan-${{ github.run_attempt }}
@@ -136,12 +163,22 @@ jobs:
       - name: Smoke the runtime from that exact export
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
+          RUNTIME_SCOPE: ${{ needs.plan.outputs.runtime_scope }}
         run: |
           sudo apt-get update && sudo apt-get install -y skopeo
           skopeo copy --override-os linux --override-arch "$ARCHITECTURE" "oci-archive:/tmp/collector-$ARCHITECTURE.oci.tar" docker-daemon:junk-collector:release-smoke
           python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
-          python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
-          python3 scripts/check_media_container.py junk-collector:release-smoke --proxy
+          case "$RUNTIME_SCOPE" in
+            smoke)
+              python3 scripts/check_container.py junk-collector:release-smoke --smoke
+              python3 scripts/check_media_container.py junk-collector:release-smoke
+              ;;
+            full)
+              python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
+              python3 scripts/check_media_container.py junk-collector:release-smoke --proxy
+              ;;
+            *) echo "Missing runtime qualification scope" >&2; exit 1 ;;
+          esac
       - uses: actions/setup-node@v4
         if: matrix.architecture == 'amd64'
         with:
@@ -158,6 +195,7 @@ jobs:
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
           BUILD_DIGEST: ${{ steps.image.outputs.digest }}
+          RUNTIME_SCOPE: ${{ needs.plan.outputs.runtime_scope }}
         run: |
           mkdir -p "/tmp/platform-$ARCHITECTURE"
           python3 - <<'PYTHON'
@@ -166,7 +204,7 @@ jobs:
           digest = os.environ['BUILD_DIGEST']
           if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
               raise ValueError('Missing platform build digest')
-          Path('/tmp/platform-' + os.environ['ARCHITECTURE'] + '/' + os.environ['ARCHITECTURE'] + '.json').write_text(json.dumps(dict(digest=digest, runtime='passed', browser='passed' if os.environ['ARCHITECTURE'] == 'amd64' else 'covered-on-amd64')))
+          Path('/tmp/platform-' + os.environ['ARCHITECTURE'] + '/' + os.environ['ARCHITECTURE'] + '.json').write_text(json.dumps(dict(digest=digest, runtime='passed', runtime_scope=os.environ['RUNTIME_SCOPE'], browser='passed' if os.environ['ARCHITECTURE'] == 'amd64' else 'covered-on-amd64')))
           PYTHON
           if [ -f "/tmp/collector-$ARCHITECTURE.oci.tar" ]; then
             mv "/tmp/collector-$ARCHITECTURE.oci.tar" "/tmp/platform-$ARCHITECTURE/"
@@ -207,7 +245,10 @@ jobs:
           path: /tmp/source-checks
       - run: sudo apt-get update && sudo apt-get install -y skopeo
       - name: Check rootless OCI transport before consuming exports
-        run: python3 -B scripts/check_container_validation.py
+        if: needs.plan.outputs.reuse != 'true'
+        env:
+          COLLECTOR_TEST_ROOTLESS_OCI: '1'
+        run: python3 -B scripts/check_container_validation.py ValidationTests.test_rootless_oci_transport_preserves_merged_digest_and_both_platforms
       - uses: docker/setup-buildx-action@v3
       - name: Assemble exports from accepted native smoke jobs
         if: needs.plan.outputs.reuse != 'true'

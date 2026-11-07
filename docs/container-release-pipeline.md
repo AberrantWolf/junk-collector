@@ -7,8 +7,9 @@ Release tooling stays in the existing **Container release** workflow. Validation
 selects [change-based repository checks](testing.md), builds each native architecture
 in parallel with source qualification, imports the
 runtime from its labelled OCI export into Docker, checks its config identity and
-runs the actual native proxy/inbox/recovery smokes plus short browser acceptance
-on the AMD64 release image. There is no extra discarded standalone release build. It verifies both exports and
+runs native Compose and media isolation checks on both platforms, plus short
+browser acceptance on the AMD64 release image. Extended native qualification
+adds proxy, inbox, restart and backup/restore coverage. It verifies both exports and
 stores the merged archive plus `validation.json` as an immutable Actions artifact.
 Publication copies that validated archive, preserving all image digests. It does
 not rerun compilation, source tests or image builds.
@@ -21,7 +22,11 @@ not rerun compilation, source tests or image builds.
    They require full source coverage because no validated baseline was supplied.
    For a reviewed UI copy-only beta, add `-f base_ref=vPREVIOUS_VERSION -f
    classification=ui-copy`; see [selection and evidence](testing.md). Use
-   `-f check_level=full` for RC/stable qualification. The source job can reuse a
+   `-f journeys=JOURNEY,OTHER` for focused browser acceptance and
+   `-f check_level=full` for RC/stable qualification. Full qualification,
+   candidates without a usable baseline and packaged deployment changes also
+   run the extended native checks. For another beta, request them explicitly
+   with `-f qualify_runtime=true`. The source job can reuse a
    successful same-SHA Checks receipt only when its workflow, baseline, required
    commands, current attempt and immutable artifact digest qualify.
    Wait for the entire run to succeed, including both native architectures and
@@ -38,7 +43,8 @@ not rerun compilation, source tests or image builds.
    A rehearsal is never accepted as a validation run.
 3. After validation and the normal release approval, create/verify the signed
    `vVERSION` tag at that exact candidate and publish the GitHub release. The
-   release event discovers the successful exact-source validation automatically;
+   tag push skips branch source checks. The release event discovers the
+   successful exact-source validation automatically;
    the newest matching validation run must be usable. It restores/reverifies
    its archive before logging in to GHCR. Anonymous version pulls on both
    platforms precede moving-channel promotion and pinned release assets.
@@ -78,8 +84,8 @@ publication, a NAS deployment or a new installed Trash Amp version.
 Validation schema 2 binds source-check scope/results and native/browser outcomes to
 the existing exact-source archive evidence. Failed, skipped or cancelled required
 checks cannot seal a candidate. Beta coverage cannot qualify RC/stable functional
-changes. Text-only RC/stable changes may cite a verified full baseline. Old schema-1
-exports need a fresh validation run; this changes no published image or user data.
+changes. Text-only RC/stable changes may cite a verified full baseline. Current
+receipts identify whether the native checks ran in smoke or extended mode.
 Rust source checks use a dependency cache; Docker dependency recipes are ordinary
 exported layers that survive web-only edits and fresh hosted runners. Record cold
 and warm measurements in delivery evidence rather than assuming a cache hit.

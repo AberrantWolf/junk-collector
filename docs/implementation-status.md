@@ -1,3 +1,12 @@
+## Beta release checks and upgrade baseline — source delivery, 2026-11-07
+
+Change checks v2 separates browser selection from Rust workspace coverage.
+Routine native beta image checks cover the shipped Compose core and isolated
+media runtime. Full qualification retains the longer Compose and browser
+journeys. AMD64 short browser smoke runs once against the release image.
+Beta.22 is the supported direct upgrade floor, with catalog v15 and private
+state v23. See the [delivery and verification record](validation/release-check-scope-2026-11-07.md).
+
 ## Beta.22 published and installed on Fi — 2026-11-07
 
 Signed source `6faa8cd` is published as beta.22 and installed on Fi. Exact-source

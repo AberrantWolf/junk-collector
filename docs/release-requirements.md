@@ -2,6 +2,11 @@
 
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
+Beta.22 is the oldest supported direct upgrade source. Qualify durable changes
+from that release using catalog schema v15 and private schema v23 as the storage
+baseline. Older records inside a supported archive remain subject to the
+preservation rules.
+
 The user revised the target on 2026-10-09 toward a clean, useful home-lab tool,
 with proportional public-Internet security, reassessed contracts and meaningful
 provenance. Phono Junk is no longer a target. This explicit direction supersedes

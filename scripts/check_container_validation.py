@@ -73,7 +73,7 @@ class ValidationTests(unittest.TestCase):
         self.checks = dict(policy=check_changes.POLICY, revision='a'*40, dirty=False, source_unchanged=True, status='passed',
                            classification='infra', level='full', coverage='full', paths=['Dockerfile'],
                            steps=[dict(step, status='passed') for step in check_changes.select(['Dockerfile'], 'infra', 'full')[1]])
-        self.platform_checks = {arch:dict(runtime='passed',browser='passed' if arch == 'amd64' else 'covered-on-amd64') for arch in ('amd64','arm64')}
+        self.platform_checks = {arch:dict(runtime='passed',runtime_scope='full',browser='passed' if arch == 'amd64' else 'covered-on-amd64') for arch in ('amd64','arm64')}
         self.evidence = validation.seal(self.expected, self.image, self.archive, '123', '2', self.checks, self.platform_checks)
 
     def test_release_level_and_native_browser_prerequisites_are_enforced(self):
@@ -82,7 +82,7 @@ class ValidationTests(unittest.TestCase):
                 validation.seal(self.expected, self.image, self.archive, '123', '2',
                                 dict(self.checks, **{field:value}), self.platform_checks)
         for architecture in ('amd64','arm64'):
-            for field in ('runtime','browser'):
+            for field in ('runtime','runtime_scope','browser'):
                 results = copy.deepcopy(self.platform_checks);results[architecture][field]='skipped'
                 with self.assertRaises(ValueError):
                     validation.seal(self.expected, self.image, self.archive, '123', '2', self.checks, results)
@@ -92,6 +92,11 @@ class ValidationTests(unittest.TestCase):
         # Beta accepts an explicitly reviewed copy-only scope. RC/stable require
         # applicable full functional evidence; a successful beta run is insufficient.
         validation.check_qualification(self.expected, changed, self.platform_checks)
+        smoke = {arch: dict(result, runtime_scope='smoke') for arch, result in self.platform_checks.items()}
+        # A beta may reuse broader source evidence without expanding its image checks.
+        validation.check_qualification(self.expected, self.checks, smoke)
+        with self.assertRaisesRegex(ValueError, 'native runtime scope'):
+            validation.check_qualification(dict(self.expected, version='0.1.0'), self.checks, smoke)
         for version in ('0.1.0-rc.1','0.1.0'):
             with self.assertRaises(ValueError):
                 validation.check_qualification(dict(self.expected,version=version), changed, self.platform_checks)
@@ -199,8 +204,10 @@ class ValidationTests(unittest.TestCase):
                 if payload != config_bytes:
                     self.assertNotEqual(validation.saved_config_digest(saved), config)
 
-    @unittest.skipUnless(shutil.which('skopeo') and os.geteuid() != 0, 'requires rootless skopeo')
+    @unittest.skipUnless(os.environ.get('COLLECTOR_TEST_ROOTLESS_OCI') == '1', 'runs during native artifact assembly')
     def test_rootless_oci_transport_preserves_merged_digest_and_both_platforms(self):
+        self.assertIsNotNone(shutil.which('skopeo'), 'OCI transport qualification requires skopeo')
+        self.assertNotEqual(os.geteuid(), 0, 'OCI transport must be exercised as a non-root user')
         expected = {}
         for architecture in ('amd64', 'arm64'):
             index, runtime, _ = fixture(self.root / ('collector-' + architecture + '.oci.tar'), architecture)

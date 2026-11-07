@@ -26,6 +26,7 @@ import uuid
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
+    parser.add_argument("--smoke", action="store_true", help="Check native Compose setup, runtime and shutdown only")
     parser.add_argument("--update-from", help="Existing image used before candidate update")
     parser.add_argument("--data-parent", type=Path, help="Existing writable parent on the intended filesystem")
     parser.add_argument("--port-base", type=int, default=9841)
@@ -46,6 +47,13 @@ def main():
     parser.add_argument("--storage-full", action="store_true", help="Qualify ENOSPC in a dedicated bounded 96 MiB tmpfs archive, with real restart/retry/recovery")
     parser.add_argument("--authentication-limits", action="store_true", help="Qualify actual Linux TCP account/peer/global login limits and restart reset")
     args = parser.parse_args()
+    if args.smoke and any((args.update_from, args.proxy, args.inbox, args.inbox_cleanup,
+                           args.provider_user_agent_file, args.browser_host, args.private_ip,
+                           args.browser_handoff, args.snapshot_tool_image, args.snapshot_handoff,
+                           args.portainer_image, args.portainer_keep_companion, args.preparation_faults,
+                           args.audio_oracles, args.storage_permissions, args.storage_full,
+                           args.authentication_limits)):
+        parser.error("--smoke cannot be combined with longer qualification options")
     if bool(args.snapshot_tool_image) != bool(args.snapshot_handoff):
         parser.error("Snapshot qualification requires both tools image and independent-storage handoff")
     if args.snapshot_tool_image and not args.update_from:
@@ -83,6 +91,8 @@ def main():
         env = dict(os.environ, COLLECTOR_IMAGE=args.update_from or args.image,
                    COLLECTOR_DATA=str(original_root), COLLECTOR_HOST="localhost",
                    COLLECTOR_PRIVATE_IP="127.0.0.1")
+        for key in ("COLLECTOR_CONFIG", "COLLECTOR_ARCHIVE", "COLLECTOR_STATE", "COLLECTOR_BACKUPS"):
+            env.pop(key, None)
         command = ["docker", "compose", "-p", f"collector-smoke-{os.getpid()}-{secrets.token_hex(4)}", "-f", str(compose)]
         cue = b'FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n'
         pcm = b'\0' * (2352 * 225)
@@ -279,8 +289,9 @@ def main():
                 capacity.new_archive()
             run("run", "--rm", "initialize", capture_output=True)
             initial = read_file("/data/config/collector.toml")
-            run("run", "--rm", "initialize", capture_output=True)
-            assert initial == read_file("/data/config/collector.toml"), "initialize replaced config"
+            if not args.smoke:
+                run("run", "--rm", "initialize", capture_output=True)
+                assert initial == read_file("/data/config/collector.toml"), "initialize replaced config"
             config = (project_root / "deploy/container/collector.proxy.toml.example").read_text() if args.proxy else initial.decode()
             for offset in range(4):
                 config = config.replace(f":{9841+offset}", f":{args.port_base+offset}")
@@ -306,32 +317,48 @@ def main():
             # Fresh config transport comes from the candidate, before the old-image account exists.
             env["COLLECTOR_IMAGE"] = args.image
             run("run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli", input=config.encode(), capture_output=True)
-            copied = read_file("/data/config/collector.toml")
-            assert copied == config.encode(), "proxy config transport changed bytes"
-            empty = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"", capture_output=True, timeout=120)
-            assert empty.returncode != 0 and read_file("/data/config/collector.toml") == copied
-            root_tool("touch", "/data/archive/config-guard-fixture")
-            guarded = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
-            assert guarded.returncode != 0 and read_file("/data/config/collector.toml") == copied
-            assert read_file("/data/archive/config-guard-fixture") == b""
-            root_tool("rm", "/data/archive/config-guard-fixture")
-            root_tool("touch", "/data/state/unknown-private-fixture")
-            guarded = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
-            assert guarded.returncode != 0 and read_file("/data/config/collector.toml") == copied
-            assert read_file("/data/state/unknown-private-fixture") == b""
-            root_tool("rm", "/data/state/unknown-private-fixture")
-            if faults:
-                faults.install()
+            if not args.smoke:
+                copied = read_file("/data/config/collector.toml")
+                assert copied == config.encode(), "proxy config transport changed bytes"
+                empty = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"", capture_output=True, timeout=120)
+                assert empty.returncode != 0 and read_file("/data/config/collector.toml") == copied
+                root_tool("touch", "/data/archive/config-guard-fixture")
+                guarded = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
+                assert guarded.returncode != 0 and read_file("/data/config/collector.toml") == copied
+                assert read_file("/data/archive/config-guard-fixture") == b""
+                root_tool("rm", "/data/archive/config-guard-fixture")
+                root_tool("touch", "/data/state/unknown-private-fixture")
+                guarded = subprocess.run(command + ["run", "--rm", "-T", "--entrypoint", "collector-install-proxy-config", "cli"], env=env, input=b"invalid replacement", capture_output=True, timeout=120)
+                assert guarded.returncode != 0 and read_file("/data/config/collector.toml") == copied
+                assert read_file("/data/state/unknown-private-fixture") == b""
+                root_tool("rm", "/data/state/unknown-private-fixture")
+                if faults:
+                    faults.install()
             env["COLLECTOR_IMAGE"] = initial_image
             run("run", "--rm", "-T", "cli", "setup", input=(password + "\n").encode(), capture_output=True)
-            run("run", "--rm", "cli", "doctor", capture_output=True)
-            saved_config = read_file("/data/config/collector.toml")
-            certificate = hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
-            for tool in ("flac", "opusenc"):
-                run("run", "--rm", "--entrypoint", tool, "cli", "--version", capture_output=True)
+            if not args.smoke:
+                run("run", "--rm", "cli", "doctor", capture_output=True)
+                saved_config = read_file("/data/config/collector.toml")
+                certificate = hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
+            run("run", "--rm", "--entrypoint", "/bin/sh", "cli", "-ec",
+                "flac --version && opusenc --version", capture_output=True)
             up()
             ready()
             cookie = login()
+            if args.smoke:
+                with urllib.request.urlopen(origin + "/healthz", timeout=5) as health:
+                    assert health.status == 200
+                assert request("/identity")["server_id"]
+                assert request("/me", cookie=cookie)["user_id"]
+                runtime = json.loads(subprocess.check_output(["docker", "inspect", container_id()], timeout=15))[0]
+                assert runtime["Image"] == candidate_image_id
+                assert runtime["Config"]["User"] == "10001:10001" and runtime["HostConfig"]["ReadonlyRootfs"]
+                mounts = {mount["Destination"]: mount["RW"] for mount in runtime["Mounts"]}
+                assert mounts.get("/data/config") is False
+                assert all(mounts.get(path) is True for path in ("/data/archive", "/data/state"))
+                stop()
+                print("Native Compose smoke passed: setup, tools, health, identity, sign-in, mounts and SIGTERM", flush=True)
+                return
             original_cookie = cookie
             if args.browser_host == args.private_ip and args.browser_host:
                 features = request("/features", cookie=cookie)

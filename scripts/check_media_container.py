@@ -28,7 +28,8 @@ def main():
     name = "collector-media-check-" + secrets.token_hex(6)
     with tempfile.TemporaryDirectory(prefix=name + "-", dir="/tmp") as directory:
         fixture = Path(directory)
-        env = dict(os.environ, COLLECTOR_IMAGE=args.image, COLLECTOR_DATA=directory,
+        env = dict(os.environ, COLLECTOR_IMAGE=args.image, COLLECTOR_MEDIA_IMAGE=args.image,
+                   COLLECTOR_DATA=directory, COLLECTOR_ARCHIVE=str(fixture / "archive"),
                    COLLECTOR_CONTROL_ORIGIN="https://control.example", COLLECTOR_MEDIA_HOST="media.example",
                    COLLECTOR_MEDIA_BIND_IP="127.0.0.1")
         compose = ["docker", "compose", "-p", name, "-f", str(project / "deploy/container/compose.yaml"),

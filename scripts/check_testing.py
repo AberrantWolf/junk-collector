@@ -48,6 +48,48 @@ class SelectionTests(unittest.TestCase):
         self.assertIn('collector-server', command)
         self.assertNotIn('collector-client', command)
 
+    def test_workspace_and_browser_scopes_are_independent(self):
+        paths = ['crates/collector-store/src/lib.rs', 'web/src/mail-connection.tsx']
+        for level, known, journeys, expected in [
+            ('beta', True, ('email-purchases',), {'smoke', 'email-purchases'}),
+            ('beta', True, (), {'smoke', 'integration'}),
+            ('full', True, ('email-purchases',), set(checks.BROWSER)),
+            ('beta', False, ('email-purchases',), set(checks.BROWSER)),
+        ]:
+            with self.subTest(level=level, known=known, journeys=journeys):
+                kind, steps = checks.select(paths, level=level, base_known=known, journeys=journeys)
+                self.assertIn('workspace-tests', {step['name'] for step in steps})
+                browser = next(step['command'][2:] for step in steps if step['name'] == 'browser')
+                self.assertEqual(set(browser), expected)
+                source = checks.container_source_steps(steps)
+                browser = next(step['command'][2:] for step in source if step['name'] == 'browser')
+                self.assertEqual(set(browser), expected - {'smoke'})
+                coverage = 'full' if level == 'full' or not known else 'changed'
+                self.assertEqual(checks.qualification_coverage(source, True), coverage)
+                report = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True,
+                              paths=paths, classification=kind, level=level, base_known=known,
+                              journeys=journeys, source_only=True, coverage=coverage,
+                              steps=[dict(step, status='passed') for step in source])
+                checks.validate_report(report)
+                if coverage == 'changed':
+                    with self.assertRaises(ValueError):
+                        checks.validate_report(dict(report, coverage='full'))
+        _, steps = checks.select(['crates/collector-store/src/lib.rs'], level='beta')
+        self.assertNotIn('browser-server', {step['name'] for step in checks.container_source_steps(steps)})
+
+    def test_workspace_version_bump_does_not_hide_dependency_changes(self):
+        manifest = '[workspace.package]\nversion = "1.0.0"\n'
+        lock = '[[package]]\nname = "collector"\nversion = "1.0.0"\n'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'Cargo.toml').write_text(manifest.replace('1.0.0', '1.0.1'))
+            (root / 'Cargo.lock').write_text(lock.replace('1.0.0', '1.0.1'))
+            with patch.object(checks, 'git', side_effect=lambda *args, **kw: manifest if args[1].endswith('toml') else lock):
+                self.assertTrue(checks.release_version_only('base', checks.VERSION_FILES, root))
+                with (root / 'Cargo.lock').open('a') as file:
+                    file.write('dependencies = ["different"]\n')
+                self.assertFalse(checks.release_version_only('base', checks.VERSION_FILES, root))
+
     def test_text_rc_reuses_full_baseline_but_cannot_inflate_coverage(self):
         base = dict(policy=checks.POLICY, status='passed', dirty=False, source_unchanged=True, revision='b'*40,
                     coverage='full', classification='infra', level='full', paths=['Dockerfile'],
@@ -68,7 +110,7 @@ class SelectionTests(unittest.TestCase):
     def test_container_copy_does_not_compile_a_second_deployment_binary(self):
         for kind, paths in [('cli-copy',['crates/collector-server/src/main.rs']), ('ui-copy',['web/src/app.tsx'])]:
             _, local = checks.select(paths, kind, 'beta')
-            selected = checks.container_source_steps(kind, local)
+            selected = checks.container_source_steps(local)
             self.assertFalse({'cli-build','browser-server','browser'} & {step['name'] for step in selected})
             self.assertIn('cli-build' if kind == 'cli-copy' else 'browser-server', {step['name'] for step in local})
 

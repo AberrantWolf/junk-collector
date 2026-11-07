@@ -11,8 +11,19 @@ API migration notes. It does not change product scope or preservation guarantees
 
 ## Compatibility policy
 
-Until an explicit supported-release baseline is declared, Rust interfaces, JSON
-APIs, private databases, catalog projections and archive schemas may change together.
+**Supported upgrade baseline (2026-11-07).** Junk Collector v0.1.0-beta.22 is
+the oldest supported direct upgrade source. Its rebuildable catalog is schema
+v15 and its private database is schema v23. Qualify changes to durable state
+against this baseline, including unfinished work and preserved access. Future
+catalog changes can rebuild older supported projections from the archive.
+Earlier installation versions and catalog schemas are outside routine upgrade
+qualification. Existing readers and conversion paths remain available for
+recovery, including older records inside a supported archive. Keep a matched
+backup before a conversion or update.
+
+Rust interfaces, JSON APIs, private databases, catalog projections and archive
+schemas may change together before stable release, subject to the storage
+upgrade and preservation requirements above.
 A wave/checkpoint is not a supported release. Keep useful format/version markers
 for detection; do not allocate a new version or a permanent reader/adapter merely
 because another child ticket is complete. Coordinate changes against the actual
@@ -83,6 +94,5 @@ projections/APIs with corresponding client changes.
 Wave 6: R01 retains real Retro Junk import compatibility and original-source
 preservation. R02/R03 document supported deployment/backup formats and run the
 current release acceptance suite. Completion of these waves does not automatically
-freeze the backend. Declare a supported baseline explicitly when sustained external
-use/release readiness warrants it; record versions, upgrade support, backup/restore
-rules and unsupported-format behavior at that point, then enforce that promise.
+freeze the backend. Record future changes to the supported baseline,
+backup/restore rules and unsupported-format behavior explicitly.

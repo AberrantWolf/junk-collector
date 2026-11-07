@@ -2,7 +2,7 @@
 
 Choose checks from the complete change. Text-only changes do not require unit
 tests. The selector records what ran and why; release images are always optimized
-release builds. Current policy is `change-checks-v1`.
+release builds. Current policy is `change-checks-v2`.
 
 ## Everyday commands
 
@@ -32,6 +32,15 @@ rendering. UI behavior also runs the queue/context/label model checks. Rust edit
 select affected crate tests and transitive in-repository consumers, with Clippy.
 Storage, authentication, contracts, dependencies, toolchain, build/release tooling,
 policy behavior changes and unknown paths select broader workspace coverage.
+Browser selection is independent of workspace coverage. Local and beta checks
+use the short smoke and any named journeys for UI and infrastructure changes.
+When a behavioral web change has no named journey, the broad integration
+journey is the fallback. Name the affected journeys whenever a browser workflow
+changes, including backend-only changes. Full functional qualification and
+beta qualification without a usable baseline retain the complete browser
+suite. An isolated workspace
+version bump with matching lockfile version updates adds no source test
+requirements. Dependency and other manifest changes keep their normal coverage.
 Automatic selection treats policy documents conservatively; an explicitly reviewed
 `--classification docs` may exempt a prose-only correction in `AGENTS.md` or a
 policy document when its instructions and behavior are unchanged.
@@ -45,12 +54,14 @@ handler in the same candidate are UI behavior, not a copy-only change.
 For a candidate, select the actual validated baseline rather than the last commit:
 
 ```sh
-python3 scripts/check_changes.py --base v0.1.0-beta.8 --level beta --classification ui-copy --journey fx04-review
+python3 scripts/check_changes.py --base v0.1.0-beta.22 --level beta --source-only --journey opus-preparation --journey email-purchases
 ```
 
 Local defaults compare HEAD with the whole working tree. An explicit `--base`
-also includes every committed change after that baseline. A missing release
-baseline requires broad checks. Full functional qualification is explicit:
+also includes every committed change after that baseline. For release source
+checks, choose the actual previously qualified ref. It must be a strict ancestor
+of the candidate. A missing or unsuitable baseline requires broad checks. To
+request full functional qualification, run
 
 ```sh
 python3 scripts/check_changes.py --level full --classification infra
@@ -70,11 +81,13 @@ trailer supplies a validated baseline for a new branch. Without a reviewed trail
 CI conservatively infers behavior from changed paths. Contradictory paths or an
 unknown classification fail; missing release baselines still require broader checks.
 Candidate dispatch inputs take precedence over push trailers. Cheap copy-only
-candidate checks do not wait for an unrelated broader push run to finish.
+checks and candidates with explicit journeys can reuse completed compatible
+receipts without waiting for an in-flight push run. Release tag pushes do not
+start a second Checks run.
 
 ```sh
 git commit -m "Clarify metadata guidance" -m "Check-Classification: ui-copy
-Check-Base: v0.1.0-beta.8"
+Check-Base: v0.1.0-beta.22"
 ```
 
 Keep classification and baseline trailers together in the final paragraph. A blank
@@ -136,8 +149,9 @@ node web/tests/run-suite.mjs storage # isolated archive loss, visible 503, resta
 npm --prefix web run test:scale        # optional 3,000-entry/import qualification
 ```
 
-Short smoke covers login, artwork beside rows, search/detail navigation, a
-management bundle, viewer denial, mobile overflow and current served assets.
+Short smoke covers login, artwork beside rows, search/detail navigation,
+management bundles, viewer controls, mobile overflow and current served assets.
+Worker settings and CD defaults use their dedicated checks.
 Preparation, slow providers/encoders, restart/reindex and long playback remain in
 named integration journeys. Pagination uses 102 entries/imports to cross both page boundaries; the optional
 scale mode retains the original 3,000-entry/import workload. No meaningful
@@ -163,28 +177,30 @@ also exercises assertion failure and interruption with real browser processes.
 
 The existing Container release workflow remains the only publication pipeline.
 Dispatch validation with `base_ref`, `classification`, optional comma-separated
-`journeys`, and `check_level=beta|full`. No release tag means no publication.
+`journeys`, and `check_level=beta|full`. Use `qualify_runtime=true` to request
+the extended native Compose and media proxy checks for a beta. Publication
+requires a release tag.
 For example, after pushing the candidate:
 
 ```sh
-gh workflow run container-release.yml --ref codex/your-candidate -f base_ref=v0.1.0-beta.8 -f classification=ui-copy
+gh workflow run container-release.yml --ref codex/your-candidate -f base_ref=v0.1.0-beta.22 -f journeys=opus-preparation,email-purchases
 ```
 
 The source-check job reuses an applicable successful same-SHA Checks receipt when
 workflow/repository, baseline, required commands, run attempt and immutable artifact
 digest agree. A successful broader browser/workspace result can cover a narrower requested
-subset. Otherwise it runs the required checks. Copy/layout-only container validation without explicit feature journeys
-uses the actual release image for its short browser acceptance and does not require
-a separate debug build. Explicit feature journeys still run and may need debug
-fixtures. UI behavior without named affected journeys conservatively runs the
-complete browser suite; specify the affected journeys for faster focused coverage.
-Full qualification retains the broad debug-fixture suites.
+subset. Otherwise it runs the required checks. Container validation runs short
+browser smoke once, against the actual AMD64 release image. Selected feature
+journeys can still need debug fixtures. Full qualification retains those suites.
 
-Source checks and native AMD64/ARM64 builds run concurrently. Both native runtime
-smokes and AMD64 release-image browser acceptance must succeed before validation
-is sealed. CI no longer compiles discarded standalone release binaries, including for
-CLI-only text edits; their source-format checks and image CLI acceptance remain. Requested
-standalone deliverables still need their own release build.
+Source checks and native AMD64/ARM64 builds run concurrently. Both native
+runtime checks and AMD64 release-image browser acceptance must succeed before
+validation is sealed. Routine native checks cover Compose setup, packaged tools,
+health, sign-in, mounts, clean shutdown and media isolation. Extended checks add
+proxy, inbox, restart and backup/restore coverage on both platforms for full
+qualification, changes to the packaged deployment, candidates without a usable
+baseline, or an explicit request. The image CLI covers container release
+acceptance. Requested standalone deliverables still need their own release build.
 
 Source checks cache Rust dependencies and workspace outputs by
 toolchain/platform/profile/input keys, including after an unrelated browser test
@@ -195,11 +211,12 @@ exported with BuildKit `mode=max`; unchanged dependencies survive web-only edits
 and hosted-runner replacement. Source/assets/lockfile/toolchain changes still
 invalidate their corresponding outputs. A cold cache remains a full build.
 
-Validation schema 2 records selected source checks and native/browser outcomes.
+Validation schema 2 records selected source checks and native/browser outcomes,
+including the native runtime scope for this policy.
 The consumer rejects failed/skipped checks, wrong source, stale attempts, corrupt
 archives and insufficient RC/stable functional qualification. Text-only RC/stable
-qualification may cite its verified full baseline. Old schema-1 validation exports
-need fresh validation; their published images and installed user data are untouched.
+qualification may cite its verified full baseline. Establish a full baseline
+under the current policy before reusing it for a text-only RC or stable candidate.
 Publication continues to copy the exact accepted exports without recompilation.
 
 See [container publication](container-release-pipeline.md) for artifact recovery,
