@@ -204,16 +204,19 @@ pub struct PreparationReadiness {
     pub ready: u32,
     pub preparing: u32,
     pub needs_attention: bool,
+    #[serde(default)]
+    pub incomplete_coverage: bool,
 }
 
-impl From<&MusicAlbumPreparationPlan> for PreparationReadiness {
-    fn from(plan: &MusicAlbumPreparationPlan) -> Self {
+impl PreparationReadiness {
+    pub(crate) fn from_plan(plan: &MusicAlbumPreparationPlan, incomplete_coverage: bool) -> Self {
         let mut summary = Self {
             discs: plan.discs.len().try_into().unwrap_or(u16::MAX),
             tracks: 0,
             ready: 0,
             preparing: 0,
-            needs_attention: plan.discs.is_empty(),
+            needs_attention: incomplete_coverage || plan.discs.is_empty(),
+            incomplete_coverage,
         };
         for disc in &plan.discs {
             // Alternatives represent the same disc. Prefer a complete source,

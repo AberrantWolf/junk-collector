@@ -578,9 +578,18 @@ impl CollectionService {
             && !command.prepare_music
             && command.audio_preparation.is_none()
         {
-            self.care
-                .cd_settings(command.plan.collection_id)?
-                .opus_import
+            // The submitted review already carries its displayed policy.
+            // Older requests without one resolve the collection default here.
+            let reviewed = match command.plan.opus_import {
+                Some(reviewed) => reviewed,
+                None => {
+                    self.care
+                        .cd_settings(command.plan.collection_id)?
+                        .opus_import
+                }
+            };
+            reviewed.validate()?;
+            reviewed
         } else {
             OpusImportDefault::default()
         };

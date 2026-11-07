@@ -27,6 +27,13 @@ impl Default for OpusImportDefault {
 }
 
 impl OpusImportDefault {
+    pub(crate) fn validate(self) -> Result<()> {
+        ConversionProfile::Opus {
+            bitrate_kbps: self.bitrate_kbps,
+        }
+        .validate()
+    }
+
     pub(crate) fn for_package(self, package: &IngestPlanPackage) -> ImportAudioPreparation {
         if package.music_actions_available
             && match self.scope {
@@ -85,10 +92,7 @@ impl Default for CdLibrarySettings {
 }
 impl CdLibrarySettings {
     pub fn validate(&self) -> Result<()> {
-        ConversionProfile::Opus {
-            bitrate_kbps: self.opus_import.bitrate_kbps,
-        }
-        .validate()?;
+        self.opus_import.validate()?;
         if !(0..=2939).contains(&self.maximum_offset) {
             return Err(Error::Invalid(
                 "Maximum AccurateRip offset must be between 0 and 2939 stereo sample frames".into(),

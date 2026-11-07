@@ -1415,10 +1415,12 @@ recipes and active derivative jobs. The Prepare audio list reads those counts
 with the current cache generation, collection grants and title search before
 pagination. It follows the library revision while open. Detailed plans are
 resolved for album and batch operations. The worker invalidates derivative
-readiness by resolving job Capture IDs to current Item associations.
+readiness by resolving job Capture IDs to current Item associations. Prepared
+recipes can describe known tracks when no full layout is recorded. Those rows
+retain an incomplete-coverage flag and stay in the readiness filter.
 
-Guided imports and intake sessions freeze the chosen Opus policy or explicit
-override when admitted. Optional Opus preparation uses the imported source
+Guided imports and intake sessions bind the reviewed Opus policy or explicit
+override to the submission and freeze it when admitted. Optional Opus preparation uses the imported source
 through the existing durable album coordinator after originals are preserved.
 Digital conversion uses shared FLAC, MP3 and WAV decoding and streaming PCM
 adaptation in `junk-libs-pcm` before the configured Opus encoder. Existing CD

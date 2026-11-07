@@ -19,10 +19,11 @@ Prepare audio supports FLAC and the three existing Opus VBR presets for albums
 and durable batches. The readiness filter uses the exact selected preset. The
 list reads compact generation-fenced summaries with collection access, search
 and readiness applied before pagination. The open list refreshes as source
-records, derivative jobs and published outputs change.
+records, derivative jobs and published outputs change. Incomplete recorded track
+coverage stays in the filter, with counts limited to known tracks.
 
 Music collections can default to Opus on CD imports or on CD and digital album
-imports. Import review shows the default and allows an override. The durable
+imports. Import review submits the displayed default or an explicit override. The durable
 workflow freezes the choice, preserves originals and reports preparation
 through settlement. Digital preparation uses shared decoding for analyzed FLAC,
 MP3 and supported PCM WAV sources. See [user workflow](audio-preparation.md) and

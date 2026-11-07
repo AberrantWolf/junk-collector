@@ -147,7 +147,7 @@ export default function Preparation({pages,onMore,userId,collection,search,atten
     <input type="checkbox" aria-label={`Select ${i.title}`} checked={selection.all?!selection.exclusions.includes(i.id):selection.selected.includes(i.id)} disabled={previewing} onChange={e=>toggle(i.id,e.target.checked)}/>
     <button className="care-row" data-item-id={i.id} onClick={()=>onQuery({item:i.id,batch:''})}>
      {i.artwork?<img loading="lazy" src={`/api/v1/collections/${i.collection_id}/assets/${i.artwork.id}/thumbnail`} alt={i.artwork.alt_text||`${i.title} artwork`}/>:<span className="care-cover-empty">◇</span>}
-     <span><strong>{i.title}</strong>{readiness?<small>{readiness.tracks} tracks · {readiness.ready} ready{readiness.preparing>0?` · ${readiness.preparing} preparing`:''}</small>:<small>Updating readiness…</small>}</span>
+     <span><strong>{i.title}</strong>{readiness?<small>{readiness.tracks} {readiness.incomplete_coverage?'known ':''}tracks · {readiness.ready} ready{readiness.incomplete_coverage?' · Track coverage incomplete':''}{readiness.preparing>0?` · ${readiness.preparing} preparing`:''}</small>:<small>Updating readiness…</small>}</span>
     </button>
    </div>)}
    {!rows.length&&!loading&&!error&&!listError&&current?.state==='ready'&&<p>No albums match these preparation filters.</p>}

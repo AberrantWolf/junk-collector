@@ -3516,6 +3516,7 @@ export interface components {
             /** Format: int32 */
             expected_packages: number;
             prepare_music?: boolean;
+            reviewed_opus_import?: components["schemas"]["OpusImportDefault"] | null;
         };
         CurrencyCode: string;
         DatUploadMetadata: {
@@ -5505,6 +5506,7 @@ export interface components {
         PreparationReadiness: {
             /** Format: int32 */
             discs: number;
+            incomplete_coverage?: boolean;
             needs_attention: boolean;
             /** Format: int32 */
             preparing: number;

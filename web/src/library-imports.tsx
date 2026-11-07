@@ -13,7 +13,7 @@ import {useDialogDismiss} from './dialog';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {loadDraft,saveDraft} from './intake-drafts';
 import {UploadMeter,bytes} from './work-progress';
-type PendingManifest={key:string;id?:string;packages:Package[];automatic:boolean;prepare:boolean;audio_preparation?:S['ImportAudioPreparation'];source:'browser'|'inbox'};
+type PendingManifest={key:string;id?:string;packages:Package[];automatic:boolean;prepare:boolean;audio_preparation?:S['ImportAudioPreparation'];reviewed_opus_import?:S['OpusImportDefault'];source:'browser'|'inbox'};
 type S=components['schemas'];type Session=S['IntakeSession'];type Member=S['IntakeMemberView'];type Plan=S['IngestPlanPackage'];type Package=S['IntakePackage'];type Item=S['PresentedItem'];
 export type Props={userId:string;collection:string;itemId:string;collections:S['PresentedCollection'][];onQuery:(v:{item?:string;collection?:string})=>void;onMetadata:(item:string,collection:string)=>void;onChanged:()=>void;onSessionExpired:()=>void};
 const transfers=new Map<string,{controller:AbortController;progress?:UploadProgress;error?:string;running:boolean}>();
@@ -155,21 +155,22 @@ function ImportedMembers({id,members,cursor,loading,busy,onMore,onChanged,onSess
 }
 
 export default function Imports({userId,collection,itemId,collections,onQuery,onMetadata,onChanged,onSessionExpired}:Props){
- const [session,setSession]=useState<Session>(),[admissionJob,setAdmissionJob]=useState<S['JobView']>(),[members,setMembers]=useState<Member[]>([]),[cursor,setCursor]=useState<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tick,setTick]=useState(0),[files,setFiles]=useState<File[]>([]),[packages,setPackages]=useState<Package[]>([]),[plans,setPlans]=useState<Plan[]>([]),[unassigned,setUnassigned]=useState<string[]>([]),[unassignedPage,setUnassignedPage]=useState(0),[automatic,setAutomatic]=useState(true),[audioChoice,setAudioChoice]=useState<ImportPreparationChoice>('default'),[opusDefault,setOpusDefault]=useState<S['OpusImportDefault']|null>(),[source,setSource]=useState<'browser'|'inbox'>('browser'),[inboxes,setInboxes]=useState<S['InboxSourceView'][]>([]),[label,setLabel]=useState(''),[selectedInbox,setSelectedInbox]=useState<string[]>([]),[reviewPage,setReviewPage]=useState(0),[pageCount,setPageCount]=useState(1),[hydrated,setHydrated]=useState(''),[pending,setPending]=useState<PendingManifest>(),[detail,setDetail]=useState(''),[destination,setDestination]=useState<Item|null>(null),[transfer,setTransfer]=useState<{running:boolean;progress?:UploadProgress;error?:string}>();
+ const [session,setSession]=useState<Session>(),[admissionJob,setAdmissionJob]=useState<S['JobView']>(),[members,setMembers]=useState<Member[]>([]),[cursor,setCursor]=useState<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tick,setTick]=useState(0),[files,setFiles]=useState<File[]>([]),[packages,setPackages]=useState<Package[]>([]),[plans,setPlans]=useState<Plan[]>([]),[unassigned,setUnassigned]=useState<string[]>([]),[unassignedPage,setUnassignedPage]=useState(0),[automatic,setAutomatic]=useState(true),[audioChoice,setAudioChoice]=useState<ImportPreparationChoice>('default'),[opusReview,setOpusReview]=useState<{collection:string;userId:string;plans:Plan[];settings:S['OpusImportDefault']}>(),[source,setSource]=useState<'browser'|'inbox'>('browser'),[inboxes,setInboxes]=useState<S['InboxSourceView'][]>([]),[label,setLabel]=useState(''),[selectedInbox,setSelectedInbox]=useState<string[]>([]),[reviewPage,setReviewPage]=useState(0),[pageCount,setPageCount]=useState(1),[hydrated,setHydrated]=useState(''),[pending,setPending]=useState<PendingManifest>(),[detail,setDetail]=useState(''),[destination,setDestination]=useState<Item|null>(null),[transfer,setTransfer]=useState<{running:boolean;progress?:UploadProgress;error?:string}>();
  const [loadingMembers,setLoadingMembers]=useState(false),[loadedPages,setLoadedPages]=useState(0);
  const reviewDialog=useDialogDismiss(()=>setDetail(''),!!detail);
  const musicCollection=plans.length>0?plans.every(plan=>plan.music_actions_available):collections.some(c=>c.id===collection&&c.binding.state==='assigned'&&c.binding.module==='org.junk.music');
  const scope=useRef(new AbortController());const draftKey=`collector:intake-draft:${userId}:${collection}`;
  const pendingKey=draftKey+':manifest';
+ const opusDefault=opusReview?.collection===collection&&opusReview.userId===userId&&opusReview.plans===plans?opusReview.settings:undefined;
  useEffect(()=>{
-  setOpusDefault(undefined);
-  if(!collection||!musicCollection)return;
+  setOpusReview(undefined);
+  if(!collection||!musicCollection||!plans.length)return;
   const controller=new AbortController();
   void api<S['CdLibrarySettings']>(`/collections/${collection}/cd-settings`,{signal:controller.signal}).then(settings=>{
-   if(!controller.signal.aborted)setOpusDefault(settings.opus_import??null);
+   if(!controller.signal.aborted)setOpusReview({collection,userId,plans,settings:settings.opus_import??{scope:'off',bitrate_kbps:128}});
   }).catch(e=>{if(!controller.signal.aborted)fail(e);});
   return()=>controller.abort();
- },[collection,musicCollection]);
+ },[collection,musicCollection,userId,plans]);
  const sourceBusy=busy||hydrated!==draftKey;
  const reviewLocked=sourceBusy||!!pending;
  function fail(e:unknown){if(isApiRequestError(e)&&e.code==='unauthenticated')onSessionExpired();else setError(requestErrorMessage(e));}
@@ -197,8 +198,8 @@ export default function Imports({userId,collection,itemId,collections,onQuery,on
  function groupTitle(key:string,title:string){setPackages(current=>current.map(p=>p.destination.destination==='album_group'&&p.destination.key===key?{...p,destination:{...p.destination,title:title.trim()?title:null}}:p));}
  const missingCopy=packages.some(p=>p.destination.destination!=='separate'&&!p.destination.copy_key.trim());
  async function start(){await mutate(async()=>{
-  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages,automatic,prepare:audioChoice==='flac'&&musicCollection,audio_preparation:musicCollection?importPreparation(audioChoice):undefined,source};await saveDraft(pendingKey,intent);setPending(intent);}
-  let saved:Session=intent.id?await api<Session>(`/intakes/${intent.id}`,{signal:scope.current.signal}):await api<Session>('/intakes',{method:'POST',signal:scope.current.signal,headers:{'Idempotency-Key':intent.key},body:JSON.stringify({collection_id:collection,automatic_metadata:intent.automatic,prepare_music:intent.prepare,audio_preparation:intent.audio_preparation,expected_packages:intent.packages.length,expected_files:intent.packages.reduce((n,p)=>n+p.package.files.length,0)})});
+  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages,automatic,prepare:audioChoice==='flac'&&musicCollection,audio_preparation:musicCollection?importPreparation(audioChoice):undefined,reviewed_opus_import:musicCollection&&audioChoice==='default'?opusDefault:undefined,source};await saveDraft(pendingKey,intent);setPending(intent);}
+  let saved:Session=intent.id?await api<Session>(`/intakes/${intent.id}`,{signal:scope.current.signal}):await api<Session>('/intakes',{method:'POST',signal:scope.current.signal,headers:{'Idempotency-Key':intent.key},body:JSON.stringify({collection_id:collection,automatic_metadata:intent.automatic,prepare_music:intent.prepare,audio_preparation:intent.audio_preparation,reviewed_opus_import:intent.reviewed_opus_import,expected_packages:intent.packages.length,expected_files:intent.packages.reduce((n,p)=>n+p.package.files.length,0)})});
   intent={...intent,id:saved.id};await saveDraft(pendingKey,intent);setPending(intent);onQuery({item:saved.id});setSession(saved);
   if(saved.state==='draft'){for(let i=saved.package_count;i<intent.packages.length;){let end=i;let count=0;let size=0;while(end<intent.packages.length&&end-i<64){const p=intent.packages[end];const length=JSON.stringify(p).length;if(end>i&&(count+p.package.files.length>10000||size+length>12*1024*1024))break;count+=p.package.files.length;size+=length;end++;}saved=await api<Session>(`/intakes/${saved.id}/members`,{method:'POST',signal:scope.current.signal,headers:{'Idempotency-Key':intent.key+':'+i},body:JSON.stringify({expected_revision:saved.revision,packages:intent.packages.slice(i,end)})});setSession(saved);i=end;}
    saved=await api<Session>(`/intakes/${saved.id}/start`,{method:'POST',signal:scope.current.signal,headers:{'Idempotency-Key':intent.key+':start'},body:JSON.stringify({expected_revision:saved.revision})});setSession(saved);

@@ -43,3 +43,26 @@ Strict workspace Clippy, formatting, architecture and link checks, OpenAPI
 and TypeScript contract checks, the web build and model checks passed.
 The workspace test run on `4410441` plus this delivery passed 637 tests with
 five existing ignores. It included the opt-in real FLAC checks.
+
+## Review follow-up
+
+A regression preserves a two-track CD without analysis and publishes just one
+128 kbps derivative. The cached filter keeps the album visible and reports
+incomplete coverage. After structural analysis, the cache reports both tracks.
+The album leaves the filter once the second track is prepared.
+
+Guided import retains the policy shown in its submitted plan when the saved
+default changes. Command replay returns the same import and preparation profile.
+The Chrome journey changes both the bitrate and scope after bulk import review
+and before submission. The digital import still produces the three reviewed
+96 kbps files.
+Opening another review in the same tab fetches the updated 192 kbps setting.
+
+The Opus and short smoke journeys passed against the rebuilt server after the
+same-tab fix. CD settings and digital purchases also passed during follow-up
+validation. Both new Rust regressions and the compact-list regression passed.
+The full Rust workspace passed 639 tests with five existing ignores, including
+real FLAC checks. Strict workspace Clippy, architecture and link checks,
+formatting, web build and model checks, API contracts, and tooling checks passed.
+The full Chrome integration journey passed on a standalone retry after a
+browser shutdown timeout and a separate checkout's fixture port conflict.

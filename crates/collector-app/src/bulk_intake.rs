@@ -89,6 +89,9 @@ pub struct CreateIntake {
     pub prepare_music: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_preparation: Option<ImportAudioPreparation>,
+    /// The collection default displayed in the submitted import review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_opus_import: Option<OpusImportDefault>,
 }
 fn automatic_metadata_default() -> bool {
     true
@@ -301,7 +304,14 @@ impl CollectionService {
                 return Err(Error::Invalid("Import preparation applies to music collections.".into()));
             }
             let opus_import = if music && !command.prepare_music && command.audio_preparation.is_none() {
-                Some(self.care.cd_settings(command.collection_id)?.opus_import)
+                let reviewed = match command.reviewed_opus_import {
+                    Some(reviewed) => reviewed,
+                    None => self.care.cd_settings(command.collection_id)?.opus_import,
+                };
+                reviewed.validate()?;
+                Some(reviewed)
+            } else if command.reviewed_opus_import.is_some() {
+                return Err(Error::Invalid("Choose one import preparation option for a music collection.".into()));
             } else {
                 None
             };

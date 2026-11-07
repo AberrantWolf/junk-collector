@@ -27,7 +27,8 @@ albums and preview a batch before starting it. If a disc has alternate
 captures, open the album and choose the original to use. You can review,
 cancel or retry preparation in the album or batch history. The list updates
 as imports and jobs change. While the server is rebuilding summaries, results
-filtered by readiness may be incomplete.
+filtered by readiness may be incomplete. An album with incomplete recorded
+track coverage stays in the filter, and its row counts only known tracks.
 
 ## Prepare Opus after import
 
@@ -35,8 +36,9 @@ In **Administration → Library settings**, select the music collection. Under
 **Opus on import**, choose a scope and bitrate and save the defaults. **CD and
 digital album imports** includes digital-only FLAC, MP3 and supported PCM WAV
 albums. Review **Audio preparation after import** before submitting an import
-to keep the collection default, select another preset, or skip preparation.
-Imports save the exact originals first and show the preparation outcome
+to keep the displayed collection default, select another preset, or skip
+preparation. The submitted review keeps its displayed default even if settings
+change before admission. Imports save the exact originals first and show the preparation outcome
 separately. A missing encoder, unsupported source or failed conversion can leave
 the originals saved and the preparation step needing attention.
 

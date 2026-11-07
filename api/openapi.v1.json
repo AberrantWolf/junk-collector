@@ -12115,6 +12115,17 @@
           },
           "prepare_music": {
             "type": "boolean"
+          },
+          "reviewed_opus_import": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpusImportDefault",
+                "description": "The collection default displayed in the submitted import review."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -20569,6 +20580,9 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "incomplete_coverage": {
+            "type": "boolean"
           },
           "needs_attention": {
             "type": "boolean"

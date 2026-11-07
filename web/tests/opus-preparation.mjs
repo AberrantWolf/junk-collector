@@ -19,6 +19,14 @@ async function request(page,route,body,method='POST'){
   return response.json();
  },{route,body,method});
 }
+async function setDefaultBitrate(page,collection,bitrate_kbps,scope='cd_and_digital'){
+ const path=`/collections/${collection}/cd-settings`;
+ const saved=await request(page,path);
+ await request(page,path,{
+  expected_revision:saved.revision,check_accuraterip_on_ingest:false,maximum_offset:saved.maximum_offset,
+  opus_import:{scope,bitrate_kbps},
+ },'PUT');
+}
 async function reviewImport(imports,files){
  await imports.getByLabel("Choose one package's files").setInputFiles(files);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
@@ -107,6 +115,7 @@ opus = "${wrapper}"
  const audio=['01.flac','02.mp3','03.wav'].map(file=>path.join(root,'crates/collector-store/tests/fixtures/digital-audio',file));
  const defaultChoice=await reviewImport(imports,audio);
  await expect(defaultChoice.locator('option[value=default]')).toContainText('Opus 96 kbps');
+ await setDefaultBitrate(page,collection,128,'cd');
  const digitalIntake=await startImport(intakePage,imports);
  await expect.poll(async()=>{
   const summary=await member(intakePage,digitalIntake);
@@ -118,11 +127,7 @@ opus = "${wrapper}"
  await expect(digitalRow).toContainText('3 tracks · 0 ready');
 
  // Change the default while the preserved digital import is still preparing.
- const saved=await request(intakePage,`/collections/${collection}/cd-settings`);
- await request(intakePage,`/collections/${collection}/cd-settings`,{
-  expected_revision:saved.revision,check_accuraterip_on_ingest:false,maximum_offset:saved.maximum_offset,
-  opus_import:{scope:'cd_and_digital',bitrate_kbps:192},
- },'PUT');
+ await setDefaultBitrate(intakePage,collection,192);
  await writeFile(gate,'ready');
  await expect.poll(async()=> outcome(intakePage,digitalIntake),{timeout:45000}).toBe('succeeded');
  const item=await request(intakePage,`/items/${digital}`);
@@ -139,7 +144,7 @@ opus = "${wrapper}"
  const cue=path.join(scratch,'Opus CD.cue'),bin=path.join(scratch,'disc.bin');
  await writeFile(cue,'FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');
  await writeFile(bin,Buffer.alloc(225*2352,1));
- await intakePage.goto(`${origin}/imports?collection=${collection}`);
+ await imports.getByRole('button',{name:'Back to imports',exact:true}).click();
  const override=await reviewImport(imports,[cue,bin]);
  await expect(override.locator('option[value=default]')).toContainText('Opus 192 kbps');
  await override.selectOption('none');

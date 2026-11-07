@@ -13835,7 +13835,7 @@ fn derivative_import_variant(
     collection: CollectionId,
     variant: u8,
 ) -> ImportView {
-    derivative_import_sectors(service, actor, collection, variant, 5)
+    derivative_import_sectors(service, actor, collection, variant, 5, true)
 }
 
 fn derivative_import_sectors(
@@ -13844,6 +13844,7 @@ fn derivative_import_sectors(
     collection: CollectionId,
     variant: u8,
     sectors: usize,
+    analyze: bool,
 ) -> ImportView {
     // Track 1 owns stored HTOA plus track 2's stored INDEX 00: 3 sectors.
     // Track 2 owns the final two sectors. No AccurateRip evidence is requested.
@@ -13906,15 +13907,17 @@ fn derivative_import_sectors(
             )
             .unwrap();
     }
-    service
-        .enqueue_import_analysis(
-            actor,
-            created.id,
-            ModuleId("org.junk.music".into()),
-            &command(),
-        )
-        .unwrap();
-    service.run_next_job("derivative-import-analysis").unwrap();
+    if analyze {
+        service
+            .enqueue_import_analysis(
+                actor,
+                created.id,
+                ModuleId("org.junk.music".into()),
+                &command(),
+            )
+            .unwrap();
+        service.run_next_job("derivative-import-analysis").unwrap();
+    }
     let analyzed = service.provisional_import(actor, created.id).unwrap();
     let reviewed = service
         .review_provisional_import(
@@ -14196,6 +14199,87 @@ fn derivative_jobs_converge_replay_keep_track_ownership_and_survive_item_edits_r
         ),
         Err(Error::IdempotencyConflict)
     ));
+}
+
+#[test]
+fn preparation_readiness_requires_recorded_coverage_for_a_partially_prepared_cd() {
+    let (_root, store, actor, service, collection) = setup();
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import_sectors(&service, &actor, collection.id, 0, 5, false);
+    let mut capture = store.capture(imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(album.id);
+    store.save_capture(capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let profile = ConversionProfile::Opus { bitrate_kbps: 128 };
+    let prepare = |position| {
+        let mut request = derivative_command(&imported, position);
+        request.profile = profile.clone();
+        let job = service
+            .prepare_music_derivative(&actor, imported.capture_id, request, &command())
+            .unwrap();
+        provider_drain(&service);
+        assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+        rebuild_library_summaries(&service);
+    };
+    let missing = || {
+        service
+            .preparation_care(
+                &actor,
+                collector_app::MetadataCareQuery {
+                    collection_id: Some(collection.id),
+                    search: String::new(),
+                    reason: None,
+                    needs_attention: true,
+                    cursor: None,
+                    limit: Some(1),
+                },
+                &profile,
+            )
+            .unwrap()
+            .items
+    };
+
+    prepare(1);
+    let partial = missing();
+    assert_eq!(partial[0].item.id, album.id);
+    let readiness = partial[0].readiness.as_ref().unwrap();
+    assert!(readiness.incomplete_coverage);
+    assert_eq!((readiness.tracks, readiness.ready), (1, 1));
+    let plan = service
+        .music_album_preparation_plan(&actor, album.id, &profile)
+        .unwrap();
+    assert_eq!(plan.total_tracks, 2);
+    assert_eq!(plan.discs[0].sources[0].eligible, 1);
+
+    let inspection = service
+        .enqueue_processing_operation(
+            &actor,
+            imported.capture_id,
+            StartProcessingCommand {
+                operation: OperationId::new(music::CD_STRUCTURE_OPERATION).unwrap(),
+                operation_version: 1,
+                representation_id: imported.representation_id,
+                snapshot_id: None,
+                selection: RawJson::from_value(
+                    serde_json::json!({"package_kind":"cue","anchor_file_index":0}),
+                ),
+            },
+            &command(),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert_eq!(
+        service.job(&actor, inspection).unwrap().state,
+        JobState::Completed
+    );
+    rebuild_library_summaries(&service);
+    let inspected = missing();
+    let readiness = inspected[0].readiness.as_ref().unwrap();
+    assert!(!readiness.incomplete_coverage);
+    assert_eq!((readiness.tracks, readiness.ready), (2, 1));
+    prepare(2);
+    assert!(missing().is_empty());
 }
 
 #[test]
@@ -18851,6 +18935,7 @@ fn grouped_disc_publication_case(
                 automatic_metadata: false,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -19079,6 +19164,7 @@ fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admiss
                 automatic_metadata: true,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -19232,6 +19318,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
                 automatic_metadata: false,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -19692,6 +19779,7 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
                 automatic_metadata: false,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -20130,6 +20218,7 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
                 automatic_metadata: false,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -20365,6 +20454,7 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
                 automatic_metadata: false,
                 prepare_music: false,
                 audio_preparation: None,
+                reviewed_opus_import: None,
             },
             &command(),
         )
@@ -23015,7 +23105,7 @@ fn processing_concurrency_local_benchmark() {
     let version = tool.version().to_string();
     let converter = collector_providers::ProcessAudioConverter::new(Some(tool), None).unwrap();
     let (_root, store, actor, service, collection) = setup();
-    let imported = derivative_import_sectors(&service, &actor, collection.id, 0, 13500);
+    let imported = derivative_import_sectors(&service, &actor, collection.id, 0, 13500, true);
     let service = Arc::new(service.with_audio_converter(Arc::new(converter)));
     let jobs: Vec<_> = [1, 2]
         .into_iter()
@@ -25028,6 +25118,83 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
     );
 }
 
+#[test]
+fn guided_import_freezes_the_reviewed_opus_default_after_settings_change() {
+    use collector_app::{OpusImportDefault, OpusImportScope, UpdateCdLibrarySettings};
+    let (_root, _store, actor, service, collection) = setup();
+    let update = |bitrate_kbps| {
+        let current = service.cd_library_settings(&actor, collection.id).unwrap();
+        service
+            .update_cd_library_settings(
+                &actor,
+                collection.id,
+                UpdateCdLibrarySettings {
+                    expected_revision: current.revision,
+                    check_accuraterip_on_ingest: false,
+                    maximum_offset: current.maximum_offset,
+                    opus_import: Some(OpusImportDefault {
+                        scope: OpusImportScope::CdAndDigital,
+                        bitrate_kbps,
+                    }),
+                },
+                &command(),
+            )
+            .unwrap();
+    };
+    update(96);
+    let bytes = include_bytes!("fixtures/digital-audio/01.flac");
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    purchase: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Reviewed album".into(),
+                    },
+                    anchor_file_index: None,
+                    files: vec![UploadFile {
+                        name: "01.flac".into(),
+                        bytes: ByteLength(bytes.len() as u64),
+                        sha256: None,
+                        visibility: None,
+                    }],
+                }],
+            },
+        )
+        .unwrap();
+    assert_eq!(plan.opus_import.unwrap().bitrate_kbps, 96);
+    update(192);
+    let input = StartIngestCommand {
+        purchase: None,
+        clean_reimport: None,
+        plan,
+        analysis: collector_app::IngestAnalysisPolicy::Automatic,
+        enrichment: IngestEnrichmentPolicy::None,
+        prepare_music: false,
+        audio_preparation: None,
+        destination: None,
+    };
+    let key = command();
+    let admitted = service.start_ingest(&actor, input.clone(), &key).unwrap();
+    let id = admitted.imports[0].import_id;
+    let profile = Some(ConversionProfile::Opus { bitrate_kbps: 96 });
+    assert_eq!(admitted.imports[0].preparation_profile, profile);
+    let replayed = service.start_ingest(&actor, input, &key).unwrap();
+    assert_eq!(replayed.imports[0].import_id, id);
+    assert_eq!(
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .summary
+            .preparation_profile,
+        profile
+    );
+}
+
 fn admit_digital_test_package(
     service: &CollectionService,
     actor: &Principal,
@@ -25898,7 +26065,8 @@ fn automatic_group_sources(
     let mut items = Vec::new();
     let mut media = Vec::new();
     for (index, sectors) in sectors.iter().enumerate() {
-        let imported = derivative_import_sectors(service, actor, collection, index as u8, *sectors);
+        let imported =
+            derivative_import_sectors(service, actor, collection, index as u8, *sectors, true);
         let mut inventory = item(collection);
         inventory.title = format!("Provisional folder {index}");
         inventory.wishlist = false;

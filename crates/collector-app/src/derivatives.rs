@@ -1267,20 +1267,34 @@ impl CollectionService {
         item: &collector_core::Item,
     ) -> Result<Vec<MusicTrackAvailability>> {
         self.music_track_rows(user_id, item, false)
+            .map(|(rows, _)| rows)
     }
+
     pub(super) fn music_track_availability_recorded(
         &self,
         user_id: collector_core::UserId,
         item: &collector_core::Item,
     ) -> Result<Vec<MusicTrackAvailability>> {
+        self.recorded_preparation_tracks(user_id, item)
+            .map(|(rows, _)| rows)
+    }
+
+    /// Return the recorded rows and whether any music source lacks full track
+    /// geometry. A retained recipe can describe its track even without a layout.
+    pub(super) fn recorded_preparation_tracks(
+        &self,
+        user_id: collector_core::UserId,
+        item: &collector_core::Item,
+    ) -> Result<(Vec<MusicTrackAvailability>, bool)> {
         self.music_track_rows(user_id, item, true)
     }
+
     fn music_track_rows(
         &self,
         user_id: collector_core::UserId,
         item: &collector_core::Item,
         recorded_only: bool,
-    ) -> Result<Vec<MusicTrackAvailability>> {
+    ) -> Result<(Vec<MusicTrackAvailability>, bool)> {
         let item_id = item.id;
         if item.deleted {
             return Err(Error::NotFound);
@@ -1312,6 +1326,7 @@ impl CollectionService {
         let unscoped_manual_titles = item.captures.len() == 1;
         let profiles = ConversionProfile::PRESETS;
         let mut rows = Vec::new();
+        let mut incomplete_coverage = false;
         for capture in item
             .captures
             .iter()
@@ -1390,9 +1405,14 @@ impl CollectionService {
                                 start,
                                 length,
                             });
+                        } else {
+                            incomplete_coverage = true;
                         }
                     }
                 }
+                // Check before falling back to recipe coordinates. Those
+                // describe published tracks without enumerating the source.
+                incomplete_coverage |= recorded_only && music_owner && tracks.is_empty();
                 let fingerprint = self
                     .processing
                     .recorded_source(item.collection_id, PackageScope::Representation(source.id))?;
@@ -1594,7 +1614,7 @@ impl CollectionService {
                 row.profile.as_ref().map_or(0, profile_order),
             )
         });
-        Ok(rows)
+        Ok((rows, incomplete_coverage))
     }
 
     pub(super) fn detect_music_selection(

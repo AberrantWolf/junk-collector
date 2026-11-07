@@ -151,7 +151,7 @@ impl CollectionService {
     pub(crate) fn library_namespace(&self) -> Result<String> {
         Ok(Digest::sha256(
             &serde_json::to_vec(&(
-                "library-row-v5",
+                "library-row-v6",
                 env!("CARGO_PKG_VERSION"),
                 self.modules.descriptors(),
                 self.encoder_availability(&ConversionProfile::Flac),
@@ -181,10 +181,10 @@ impl CollectionService {
                 return Err(Error::Conflict);
             }
             let effective = self.effective_metadata_for_language(&item, &build.language)?;
-            let tracks = if item.deleted {
-                Vec::new()
+            let (tracks, incomplete_coverage) = if item.deleted {
+                (Vec::new(), false)
             } else {
-                self.music_track_availability_recorded(build.actor.user_id, &item)?
+                self.recorded_preparation_tracks(build.actor.user_id, &item)?
             };
             let readiness = if role >= Role::Curator
                 && !item.deleted
@@ -195,7 +195,7 @@ impl CollectionService {
                     .map(|profile| {
                         let plan =
                             crate::album_preparation::album_plan_for_item(&item, &tracks, profile);
-                        PreparationReadiness::from(&plan)
+                        PreparationReadiness::from_plan(&plan, incomplete_coverage)
                     })
                     .collect()
             } else {
