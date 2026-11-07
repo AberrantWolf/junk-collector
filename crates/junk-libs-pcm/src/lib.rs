@@ -3,6 +3,7 @@
 pub mod fingerprint;
 pub mod flac;
 pub mod metadata;
+pub mod opus_input;
 use std::io::{self, Read, Seek, SeekFrom};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

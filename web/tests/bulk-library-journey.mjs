@@ -19,7 +19,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),folder);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  assert.equal(await imports.getByLabel('Automatic metadata and artwork').isChecked(),true);
- assert.equal(await imports.getByLabel('Prepare FLAC after import').isChecked(),false);
+ assert.equal(await imports.getByLabel('Audio preparation after import').inputValue(),'default');
  assert.equal(await imports.locator('.care-row').count(),2,'Nested tracks became separate or unassigned packages');
  await imports.getByText('1 unsupported or unassigned files will remain outside this import',{exact:true}).click();
  await imports.getByText(/Bulk library journey\/notes.txt/).waitFor();

@@ -303,16 +303,31 @@ impl AudioConversionPort for ProcessAudioConverter {
                 return Err(Error::JobCancelled);
             }
             let bytes = copy_result.map_err(conversion_io)?;
-            write_result.map_err(conversion_io)?;
             let diagnostics = diagnostics.map_err(conversion_io)?;
-            let status = status?;
-            if !status.success() {
+            // A tool refusal may close stdin while the PCM producer is writing.
+            // Keep a real source failure, but prefer the encoder's diagnostic
+            // over the resulting broken pipe or process-group cleanup status.
+            let write_result = match write_result {
+                Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => {
+                    return Err(conversion_io(error));
+                }
+                result => result,
+            };
+            if !status.as_ref().is_ok_and(ExitStatus::success) && !diagnostics.is_empty() {
                 return Err(Error::Unavailable(format!(
                     "{} conversion failed: {}",
                     recipe.encoder,
                     safe_diagnostic(&diagnostics)
                 )));
             }
+            let status = status?;
+            if !status.success() {
+                return Err(Error::Unavailable(format!(
+                    "{} conversion failed ({status})",
+                    recipe.encoder,
+                )));
+            }
+            write_result.map_err(conversion_io)?;
             scratch.flush().map_err(conversion_io)?;
 
             let (decoded_frames, lossless_pcm_equal, delay, padding) = match recipe.settings {

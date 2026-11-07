@@ -48,6 +48,8 @@ pub struct MusicAlbumPreparationPlan {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PrepareMusicAlbum {
+    #[serde(default, skip_serializing_if = "is_flac")]
+    pub profile: ConversionProfile,
     pub source_representation_ids: Vec<RepresentationId>,
 }
 
@@ -147,11 +149,15 @@ pub struct FrozenDerivativeBatchJob {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+pub(crate) fn is_flac(profile: &ConversionProfile) -> bool {
+    *profile == ConversionProfile::Flac
+}
+
 impl FrozenDerivativeBatchJob {
     pub fn validate(&self) -> Result<()> {
         self.collection_binding.validate()?;
+        self.profile.validate()?;
         if !matches!(&self.collection_binding,CollectionBinding::Assigned{module} if !module.0.is_empty())
-            || self.profile != ConversionProfile::Flac
             || self.members.is_empty()
             || self.members.len() > MAX_ALBUM_PREPARATION_MEMBERS
         {
@@ -225,11 +231,13 @@ impl CollectionService {
         &self,
         actor: &Principal,
         item_id: collector_core::ItemId,
+        profile: &ConversionProfile,
     ) -> Result<MusicAlbumPreparationPlan> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, crate::Action::Browse)?;
         let rows = self.music_track_availability_for_item(actor.user_id, &item)?;
-        Ok(album_plan_for_item(&item, &rows))
+        profile.validate()?;
+        Ok(album_plan_for_item(&item, &rows, profile))
     }
 
     pub fn prepare_music_album(
@@ -257,6 +265,7 @@ impl CollectionService {
                     actor.user_id,
                     &item,
                     &command.source_representation_ids,
+                    &command.profile,
                     id,
                 )?;
                 Self::enqueue_music_album_batch(effects, frozen, None)
@@ -270,6 +279,7 @@ impl CollectionService {
         user_id: collector_core::UserId,
         item: &collector_core::Item,
         selected_sources: &[RepresentationId],
+        profile: &ConversionProfile,
         batch_id: JobId,
     ) -> Result<FrozenDerivativeBatchJob> {
         let eligibility = self.content_write_eligibility_for_job(
@@ -283,7 +293,8 @@ impl CollectionService {
             ));
         }
         let rows = self.music_track_availability_for_item(user_id, item)?;
-        let plan = album_plan_for_item(item, &rows);
+        profile.validate()?;
+        let plan = album_plan_for_item(item, &rows, profile);
         let selected = selected_sources
             .iter()
             .copied()
@@ -309,8 +320,18 @@ impl CollectionService {
             return Err(Error::Invalid("select at least one captured disc".into()));
         }
         let selected_rows = rows.iter().filter(|row| {
-            row.primary_playback() && selected.contains(&row.source_representation_id)
+            preparation_row(row, profile) && selected.contains(&row.source_representation_id)
         });
+        if matches!(profile, ConversionProfile::Opus { .. })
+            && selected_rows.clone().any(|row| {
+                row.album_selection == collector_api_types::MusicAlbumSelection::NeedsReview
+            })
+        {
+            return Err(Error::Unavailable(
+                "Choose which alternate audio files belong to the album before preparing Opus."
+                    .into(),
+            ));
+        }
         if selected_rows.clone().count() > MAX_ALBUM_PREPARATION_MEMBERS {
             return Err(Error::Invalid(format!(
                 "Select at most {MAX_ALBUM_PREPARATION_MEMBERS} tracks per album batch."
@@ -333,7 +354,10 @@ impl CollectionService {
                 })
                 .collect::<Vec<_>>();
             let reason = if reasons.is_empty() {
-                "The selected sources have no eligible FLAC tracks.".into()
+                format!(
+                    "The selected sources have no eligible {} tracks.",
+                    profile.label()
+                )
             } else {
                 reasons.join("; ")
             };
@@ -349,7 +373,7 @@ impl CollectionService {
             .collect::<Vec<_>>();
         let mut members = Vec::new();
         for mut row in rows.into_iter().filter(|row| {
-            row.primary_playback() && selected.contains(&row.source_representation_id)
+            preparation_row(row, profile) && selected.contains(&row.source_representation_id)
         }) {
             // Another actor's Job is private. Admit our own request, converging on
             // the immutable output at publication without exposing their Job.
@@ -364,7 +388,7 @@ impl CollectionService {
                             .tracks
                             .first()
                             .is_some_and(|track| track.position == row.track_position)
-                        && profile_for_recipe(&job.input.recipe) == ConversionProfile::Flac
+                        && profile_for_recipe(&job.input.recipe) == *profile
                 })
             {
                 row.state = MusicTrackAvailabilityState::Unavailable {
@@ -402,7 +426,7 @@ impl CollectionService {
                                 && job.input.recipe.source_fingerprint.source
                                     == PackageScope::Representation(row.source_representation_id)
                                 && job.input.recipe.tracks.as_slice() == [track.clone()]
-                                && profile_for_recipe(&job.input.recipe) == ConversionProfile::Flac
+                                && profile_for_recipe(&job.input.recipe) == *profile
                         })
                         .ok_or_else(|| {
                             Error::Storage("preparing track has no active derivative Job".into())
@@ -420,7 +444,7 @@ impl CollectionService {
                         capture.collection_id,
                         row.source_representation_id,
                     )?;
-                    let version = match self.encoder_availability(&ConversionProfile::Flac) {
+                    let version = match self.encoder_availability(profile) {
                         EncoderAvailability::Available { version, .. } => version,
                         EncoderAvailability::Unavailable { reason } => {
                             members.push(FrozenPreparationMember::Ineligible {
@@ -441,7 +465,7 @@ impl CollectionService {
                             representation_id: row.source_representation_id,
                             selection,
                             track_position: row.track_position,
-                            profile: ConversionProfile::Flac,
+                            profile: profile.clone(),
                             encoder_version: version,
                         },
                     )?;
@@ -480,7 +504,7 @@ impl CollectionService {
             collection_id: item.collection_id,
             collection_binding: eligibility.binding,
             item_id: item.id,
-            profile: ConversionProfile::Flac,
+            profile: profile.clone(),
             members,
             created_at: self.authentication.now(),
         };
@@ -515,6 +539,7 @@ impl CollectionService {
         user_id: collector_core::UserId,
         item_id: collector_core::ItemId,
         import_id: collector_core::ImportId,
+        profile: &ConversionProfile,
     ) -> Result<JobId> {
         let item = self.reader.item(item_id)?;
         self.content_write_eligibility_for_job(user_id, Some(item.collection_id), Some(item.id))?;
@@ -535,8 +560,20 @@ impl CollectionService {
         {
             return Err(Error::Unavailable("Automatic preparation stopped because the Capture association changed. Open the associated album to prepare it explicitly.".into()));
         }
+        if matches!(profile, ConversionProfile::Opus { .. }) {
+            let sources = [import.view.representation_id];
+            let rows = self.music_track_availability_for_item(user_id, &item)?;
+            if !rows.iter().any(|row| {
+                row.source_representation_id == sources[0] && preparation_row(row, profile)
+            }) {
+                return Err(Error::Unavailable("The preserved import has no supported audio tracks for Opus. Review its analysis result and source format.".into()));
+            }
+            let frozen =
+                self.freeze_music_album_batch(user_id, &item, &sources, profile, batch_id)?;
+            return Self::enqueue_music_album_batch(self.jobs.as_ref(), frozen, Some(import_id));
+        }
         let rows = self.music_track_availability_for_item(user_id, &item)?;
-        let plan = album_plan_for_item(&item, &rows);
+        let plan = album_plan_for_item(&item, &rows, profile);
         if plan.discs.iter().any(|disc| disc.ambiguous) {
             return Err(Error::Unavailable(
                 "Album preparation needs a source choice because this import is associated with alternative disc sources. Use Prepare album to choose explicitly."
@@ -551,7 +588,7 @@ impl CollectionService {
             .map(|source| source.source_representation_id)
             .collect::<Vec<_>>();
         validate_album_sources(&sources)?;
-        let frozen = self.freeze_music_album_batch(user_id, &item, &sources, batch_id)?;
+        let frozen = self.freeze_music_album_batch(user_id, &item, &sources, profile, batch_id)?;
         Self::enqueue_music_album_batch(self.jobs.as_ref(), frozen, Some(import_id))
     }
 
@@ -587,7 +624,16 @@ impl CollectionService {
             .collect::<Vec<_>>();
         Ok((
             !pending,
-            (!failures.is_empty()).then(|| format!("Preparation has {} failed or cancelled outcomes. Open track preparation results for each cause.", failures.len())),
+            failures.first().map(|reason| {
+                if failures.len() == 1 {
+                    reason.clone()
+                } else {
+                    format!(
+                        "{reason} ({} other tracks need attention.)",
+                        failures.len() - 1
+                    )
+                }
+            }),
         ))
     }
 
@@ -913,11 +959,12 @@ fn validate_album_sources(sources: &[RepresentationId]) -> Result<()> {
     Ok(())
 }
 
-fn album_plan_for_item(
+pub(crate) fn album_plan_for_item(
     item: &collector_core::Item,
     rows: &[MusicTrackAvailability],
+    profile: &ConversionProfile,
 ) -> MusicAlbumPreparationPlan {
-    let mut plan = album_plan_from_rows(item.id, rows);
+    let mut plan = album_plan_from_rows(item.id, rows, profile);
     let mut carriers = std::collections::BTreeMap::new();
     for capture in &item.captures {
         if let Some(carrier) = capture.association.carrier_id {
@@ -961,15 +1008,25 @@ fn album_plan_for_item(
     plan
 }
 
+fn preparation_row(row: &MusicTrackAvailability, profile: &ConversionProfile) -> bool {
+    if *profile == ConversionProfile::Flac {
+        row.primary_playback()
+    } else {
+        row.profile.as_ref() == Some(profile)
+            && row.album_selection != collector_api_types::MusicAlbumSelection::Excluded
+    }
+}
+
 fn album_plan_from_rows(
     item_id: collector_core::ItemId,
     rows: &[MusicTrackAvailability],
+    profile: &ConversionProfile,
 ) -> MusicAlbumPreparationPlan {
     let mut grouped = std::collections::BTreeMap::<
         CaptureId,
         std::collections::BTreeMap<RepresentationId, Vec<&MusicTrackAvailability>>,
     >::new();
-    for row in rows.iter().filter(|row| row.primary_playback()) {
+    for row in rows.iter().filter(|row| preparation_row(row, profile)) {
         grouped
             .entry(row.capture_id)
             .or_default()
@@ -1028,7 +1085,7 @@ fn album_plan_from_rows(
     }
     if discs.is_empty() {
         blockers.push(
-            "No supported music-disc source is associated with this album. Preserve and analyze a complete supported package first."
+            "No supported audio source is associated with this album. Preserve and analyze a complete supported package first."
                 .into(),
         );
     }
@@ -1045,6 +1102,7 @@ fn album_plan_from_rows(
     if !can_submit && !discs.is_empty() {
         let reasons = rows
             .iter()
+            .filter(|row| preparation_row(row, profile))
             .filter_map(|row| match &row.state {
                 MusicTrackAvailabilityState::Unavailable { reason } if !row.can_prepare => {
                     Some(reason.clone())
@@ -1056,7 +1114,7 @@ fn album_plan_from_rows(
     }
     MusicAlbumPreparationPlan {
         item_id,
-        profile: ConversionProfile::Flac,
+        profile: profile.clone(),
         discs,
         total_tracks: total_tracks.try_into().unwrap_or(u16::MAX),
         blockers,
@@ -1089,44 +1147,6 @@ pub fn may_cancel_preparation_child(direct_request: bool, other_batch_requests: 
     !direct_request && !other_batch_requests
 }
 
-/// Compact rebuildable care coverage from current recorded layout evidence.
-/// This neither inspects media bytes nor asserts catalog verification.
-pub fn preparation_layout_projection(
-    observation: &collector_core::ProcessingObservation,
-    source: &collector_core::Representation,
-) -> collector_core::Result<Option<(String, u16)>> {
-    if observation.source_fingerprint.files.len() != source.files.len()
-        || observation
-            .source_fingerprint
-            .files
-            .iter()
-            .zip(&source.files)
-            .any(|(f, s)| f.sha256 != s.digest || f.bytes != s.bytes)
-    {
-        return Ok(None);
-    }
-    if let Some(audio) = collector_modules::games::recorded_disc_audio(
-        observation.operation.as_str(),
-        &observation.typed_result.payload,
-    )? {
-        return Ok(Some((source.id.to_string(), audio.tracks.len() as u16)));
-    }
-    if let Some(collector_modules::music::CdProcessingResult::Layout {
-        tracks, disc_ids, ..
-    }) = crate::metadata::recorded_music_layout(observation)?
-    {
-        let total = tracks
-            .iter()
-            .filter(|t| t.kind == collector_core::CdTrackKind::Audio)
-            .count() as u16;
-        return Ok(Some((
-            disc_ids.map_or_else(|| source.id.to_string(), |ids| ids.musicbrainz),
-            total,
-        )));
-    }
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1155,7 +1175,7 @@ mod tests {
             },
             can_prepare: true,
         };
-        let plan = album_plan_from_rows(item, &[row(first), row(second)]);
+        let plan = album_plan_from_rows(item, &[row(first), row(second)], &ConversionProfile::Flac);
         assert_eq!(plan.discs.len(), 1);
         assert!(plan.discs[0].ambiguous);
         assert_eq!(plan.discs[0].sources.len(), 2);
@@ -1189,7 +1209,7 @@ mod tests {
                 can_prepare: true,
             })
             .collect::<Vec<_>>();
-        let oversized = album_plan_from_rows(item, &oversized);
+        let oversized = album_plan_from_rows(item, &oversized, &ConversionProfile::Flac);
         assert_eq!(oversized.maximum_members, 256);
         assert!(
             oversized

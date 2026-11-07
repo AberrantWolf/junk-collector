@@ -7255,6 +7255,16 @@
             "schema": {
               "$ref": "#/components/schemas/ItemId"
             }
+          },
+          {
+            "name": "opus_bitrate_kbps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -7673,6 +7683,16 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "opus_bitrate_kbps",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -7681,13 +7701,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_PreparationCareEntry"
+                  "$ref": "#/components/schemas/PreparationCarePage"
                 }
               }
             }
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/library-care/music-preparation/revision": {
+      "get": {
+        "operationId": "preparation_revision",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }
@@ -10501,6 +10544,9 @@
             "format": "int32",
             "minimum": 0
           },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
           "selected": {
             "type": "integer",
             "format": "int32",
@@ -11159,6 +11205,9 @@
           "maximum_offset": {
             "type": "integer",
             "format": "int32"
+          },
+          "opus_import": {
+            "$ref": "#/components/schemas/OpusImportDefault"
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
@@ -12038,6 +12087,16 @@
           "expected_files"
         ],
         "properties": {
+          "audio_preparation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImportAudioPreparation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "automatic_metadata": {
             "type": "boolean"
           },
@@ -13439,6 +13498,58 @@
           "confirmed"
         ]
       },
+      "ImportAudioPreparation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "codec"
+            ],
+            "properties": {
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "codec"
+            ],
+            "properties": {
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "flac"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "bitrate_kbps",
+              "codec"
+            ],
+            "properties": {
+              "bitrate_kbps": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "codec": {
+                "type": "string",
+                "enum": [
+                  "opus"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "ImportCandidate": {
         "type": "object",
         "required": [
@@ -14065,6 +14176,16 @@
           "collection_id": {
             "$ref": "#/components/schemas/CollectionId"
           },
+          "opus_import": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpusImportDefault"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "packages": {
             "type": "array",
             "items": {
@@ -14281,6 +14402,16 @@
           },
           "phase": {
             "$ref": "#/components/schemas/ImportPhase"
+          },
+          "preparation_profile": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConversionProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "prepare_music": {
             "type": "boolean"
@@ -14556,6 +14687,16 @@
             "format": "int32",
             "minimum": 0
           },
+          "audio_preparation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImportAudioPreparation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "automatic_metadata": {
             "type": "boolean"
           },
@@ -14588,6 +14729,16 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "opus_import": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpusImportDefault"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "package_count": {
             "type": "integer",
@@ -15263,6 +15414,12 @@
           },
           "module": {
             "$ref": "#/components/schemas/ModuleId"
+          },
+          "preparation": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreparationReadiness"
+            }
           },
           "subtitle": {
             "type": "string"
@@ -18225,6 +18382,32 @@
           }
         ]
       },
+      "OpusImportDefault": {
+        "type": "object",
+        "required": [
+          "scope",
+          "bitrate_kbps"
+        ],
+        "properties": {
+          "bitrate_kbps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "scope": {
+            "$ref": "#/components/schemas/OpusImportScope"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpusImportScope": {
+        "type": "string",
+        "enum": [
+          "off",
+          "cd",
+          "cd_and_digital"
+        ]
+      },
       "Ownership": {
         "oneOf": [
           {
@@ -18543,6 +18726,9 @@
                   "type": "integer",
                   "format": "int32",
                   "minimum": 0
+                },
+                "profile": {
+                  "$ref": "#/components/schemas/ConversionProfile"
                 },
                 "selected": {
                   "type": "integer",
@@ -18886,6 +19072,16 @@
                 "phase": {
                   "$ref": "#/components/schemas/ImportPhase"
                 },
+                "preparation_profile": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ConversionProfile"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "prepare_music": {
                   "type": "boolean"
                 },
@@ -19021,6 +19217,16 @@
                   "format": "int32",
                   "minimum": 0
                 },
+                "audio_preparation": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ImportAudioPreparation"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "automatic_metadata": {
                   "type": "boolean"
                 },
@@ -19053,6 +19259,16 @@
                   "type": "integer",
                   "format": "int32",
                   "minimum": 0
+                },
+                "opus_import": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/OpusImportDefault"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "package_count": {
                   "type": "integer",
@@ -19423,38 +19639,6 @@
                 },
                 "revision": {
                   "$ref": "#/components/schemas/Revision"
-                }
-              }
-            }
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "Page_PreparationCareEntry": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "item",
-                "plan"
-              ],
-              "properties": {
-                "item": {
-                  "$ref": "#/components/schemas/PresentedItem"
-                },
-                "plan": {
-                  "$ref": "#/components/schemas/MusicAlbumPreparationPlan"
                 }
               }
             }
@@ -20322,14 +20506,87 @@
         "type": "object",
         "required": [
           "item",
-          "plan"
+          "revision"
         ],
         "properties": {
           "item": {
-            "$ref": "#/components/schemas/PresentedItem"
+            "$ref": "#/components/schemas/LibraryEntry"
           },
-          "plan": {
-            "$ref": "#/components/schemas/MusicAlbumPreparationPlan"
+          "readiness": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PreparationReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "PreparationCarePage": {
+        "type": "object",
+        "required": [
+          "items",
+          "catalog_revision",
+          "summary_state"
+        ],
+        "properties": {
+          "catalog_revision": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreparationCareEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary_state": {
+            "$ref": "#/components/schemas/LibrarySummaryState"
+          }
+        }
+      },
+      "PreparationReadiness": {
+        "type": "object",
+        "required": [
+          "discs",
+          "tracks",
+          "ready",
+          "preparing",
+          "needs_attention"
+        ],
+        "properties": {
+          "discs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "needs_attention": {
+            "type": "boolean"
+          },
+          "preparing": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -20339,6 +20596,9 @@
           "source_representation_ids"
         ],
         "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
           "source_representation_ids": {
             "type": "array",
             "items": {
@@ -21035,6 +21295,9 @@
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/BulkLibraryKind"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
           },
           "selection": {
             "$ref": "#/components/schemas/LibrarySelection"
@@ -22437,6 +22700,16 @@
           "analysis": {
             "$ref": "#/components/schemas/IngestAnalysisPolicy"
           },
+          "audio_preparation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImportAudioPreparation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clean_reimport": {
             "oneOf": [
               {
@@ -22714,6 +22987,16 @@
           "maximum_offset": {
             "type": "integer",
             "format": "int32"
+          },
+          "opus_import": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpusImportDefault"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false

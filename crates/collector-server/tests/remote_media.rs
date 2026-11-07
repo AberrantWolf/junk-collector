@@ -130,6 +130,7 @@ async fn isolated_media_enforces_grants_exact_bytes_and_socket_revocation() {
                 analysis: IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),

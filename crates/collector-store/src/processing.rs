@@ -806,7 +806,6 @@ fn project_processing(
     if let PackageScope::Representation(source) = record.observation.source_fingerprint.source {
         let item:Option<String>=tx.query_row("SELECT c.item_id FROM entity_owners o JOIN captures c ON c.id=o.root_id WHERE o.kind='representation' AND o.id=?",[source.to_string()],|r|r.get(0)).optional().map_err(storage)?.flatten();
         if let Some(item) = item {
-            library_care::project_preparation(tx, item.parse().map_err(storage)?)?;
             music_search::refresh(tx, item.parse().map_err(storage)?)?;
         }
     }

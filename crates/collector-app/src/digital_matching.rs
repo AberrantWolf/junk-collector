@@ -298,7 +298,10 @@ impl CollectionService {
                 let rows =
                     self.file_track_rows(item, capture, source, manifest.clone(), actor.user_id)?;
                 let mut files = Vec::new();
-                for row in rows {
+                for row in rows
+                    .into_iter()
+                    .filter(MusicTrackAvailability::primary_playback)
+                {
                     use collector_api_types::MusicAlbumSelection;
                     if row.album_selection == MusicAlbumSelection::NeedsReview {
                         return Err(Error::Unavailable("Choose which alternate audio files belong to the album before matching".into()));
@@ -433,7 +436,11 @@ impl CollectionService {
                 else {
                     continue;
                 };
-                for row in self.file_track_rows(item, capture, source, manifest, user)? {
+                for row in self
+                    .file_track_rows(item, capture, source, manifest, user)?
+                    .into_iter()
+                    .filter(MusicTrackAvailability::primary_playback)
+                {
                     match row.album_selection {
                         collector_api_types::MusicAlbumSelection::Excluded => {}
                         collector_api_types::MusicAlbumSelection::NeedsReview => {

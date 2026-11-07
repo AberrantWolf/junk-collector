@@ -130,6 +130,7 @@ npm --prefix web run test:models       # queue, async work context, evidence lab
 npm --prefix web run test:cd-library   # saved CD defaults and a real library AccurateRip batch
 npm --prefix web run test:full         # all named browser journeys, serially isolated
 node web/tests/run-suite.mjs browse fx04-review
+node web/tests/run-suite.mjs opus-preparation # real opusenc, or set COLLECTOR_OPUS
 node web/tests/browser-launch-check.mjs
 node web/tests/run-suite.mjs storage # isolated archive loss, visible 503, restart and retained authority
 npm --prefix web run test:scale        # optional 3,000-entry/import qualification

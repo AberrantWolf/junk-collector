@@ -22,6 +22,8 @@ pub enum LibrarySelection {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewBulkLibrary {
+    #[serde(default, skip_serializing_if = "crate::album_preparation::is_flac")]
+    pub profile: ConversionProfile,
     pub kind: BulkLibraryKind,
     pub selection: LibrarySelection,
     #[serde(default)]
@@ -50,6 +52,8 @@ pub enum BulkMemberState {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BulkLibrarySummary {
+    #[serde(default)]
+    pub profile: ConversionProfile,
     pub id: JobId,
     pub kind: BulkLibraryKind,
     pub state: BulkLibraryState,
@@ -161,6 +165,7 @@ impl CollectionService {
         self.execute_command(actor, context, "library.bulk.preview", &command, |effects| {
             let id = deterministic_job_id(actor.user_id, "library.bulk.preview", context.key());
             let mut items = Vec::new();
+            command.profile.validate()?;
             match &command.selection {
                 LibrarySelection::Explicit { items: ids } => {
                     if ids.is_empty() || ids.len() > 10_000 {return Err(Error::Invalid("Select 1–10,000 entries.".into()));}
@@ -177,16 +182,26 @@ impl CollectionService {
                     let exclusions=exclusions.iter().copied().collect::<BTreeSet<_>>();
                     let mut query=query.clone();query.limit=Some(200);
                     loop {
-                        let page=if command.kind==BulkLibraryKind::MusicPreparation {self.care.preparation_care_items(actor.user_id,&query)?}else{self.care.metadata_care_items(actor.user_id,&query)?};
-                        items.extend(page.items.into_iter().filter(|i|!exclusions.contains(&i.id)).map(|i|(i.id,i.revision)));
+                        let next = if command.kind == BulkLibraryKind::MusicPreparation {
+                            let page = self.preparation_care(actor, query.clone(), &command.profile)?;
+                            if query.needs_attention && page.summary_state != LibrarySummaryState::Ready {
+                                return Err(Error::Unavailable("Preparation summaries are still updating. Retry the preview once the results are current.".into()));
+                            }
+                            items.extend(page.items.into_iter().filter(|row| !exclusions.contains(&row.item.id)).map(|row| (row.item.id, row.revision)));
+                            page.next_cursor
+                        } else {
+                            let page = self.care.metadata_care_items(actor.user_id, &query)?;
+                            items.extend(page.items.into_iter().filter(|i| !exclusions.contains(&i.id)).map(|i| (i.id, i.revision)));
+                            page.next_cursor
+                        };
                         if items.len()>10_000 {return Err(Error::Invalid("This selection exceeds 10,000 entries. Narrow the collection or search and submit another batch.".into()));}
-                        let Some(cursor)=page.next_cursor else {break;};query.cursor=Some(cursor);
+                        let Some(cursor)=next else {break;};query.cursor=Some(cursor);
                     }
                 }
             }
             if items.is_empty(){return Err(Error::Invalid("No entries match this selection.".into()));}
             let now=self.authentication.now();
-            let mut summary=BulkLibrarySummary{id,kind:command.kind,state:BulkLibraryState::Preview,selected:items.len() as u32,tracks:0,already_ready:0,excluded:0,succeeded:0,failed:0,pending:0,source_bytes:ByteLength(0),can_start:false,can_cancel:false,can_retry:false,admission_error:None,created_at:now,updated_at:now};
+            let mut summary=BulkLibrarySummary{id,kind:command.kind,profile:command.profile.clone(),state:BulkLibraryState::Preview,selected:items.len() as u32,tracks:0,already_ready:0,excluded:0,succeeded:0,failed:0,pending:0,source_bytes:ByteLength(0),can_start:false,can_cancel:false,can_retry:false,admission_error:None,created_at:now,updated_at:now};
             let mut members=Vec::new();let mut manifest_bytes=0usize;
             for (position,(selected_id,selected_revision)) in items.into_iter().enumerate() {
                 let item=self.reader.item(selected_id)?;
@@ -224,7 +239,7 @@ impl CollectionService {
                 self.freeze_accuraterip_check(actor.user_id, item, child, None, true)?,
             )),
             BulkLibraryKind::MusicPreparation => {
-                let plan = self.music_album_preparation_plan(actor, item.id)?;
+                let plan = self.music_album_preparation_plan(actor, item.id, &command.profile)?;
                 let chosen = command.sources.get(&item.id);
                 let sources = plan
                     .discs
@@ -268,7 +283,13 @@ impl CollectionService {
                     ));
                 }
                 Ok(FrozenJobInput::DerivativeBatch(
-                    self.freeze_music_album_batch(actor.user_id, item, &sources, child)?,
+                    self.freeze_music_album_batch(
+                        actor.user_id,
+                        item,
+                        &sources,
+                        &command.profile,
+                        child,
+                    )?,
                 ))
             }
             BulkLibraryKind::Metadata => {

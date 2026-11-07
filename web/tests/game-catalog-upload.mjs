@@ -43,7 +43,7 @@ try{
   await page.goto(`${origin}/?collection=${collection.id}`);await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog',{name:'Add or import',exact:true});
   await editor.locator('summary').filter({hasText:'Choose individual files instead'}).click();
   await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'one.bin',mimeType:'application/octet-stream',buffer:one},{name:'two.bin',mimeType:'application/octet-stream',buffer:two}]);
-  await editor.getByRole('button',{name:'Preview import',exact:true}).click();await editor.getByText('1 dump packages found.',{exact:true}).waitFor();assert.equal(await editor.getByLabel('Prepare FLAC tracks after import').count(),0);
+  await editor.getByRole('button',{name:'Preview import',exact:true}).click();await editor.getByText('1 dump packages found.',{exact:true}).waitFor();assert.equal(await editor.getByLabel('Audio preparation after import').count(),0);
   await editor.getByRole('button',{name:'Save 1 package',exact:true}).click();
   await expect.poll(async()=>{const items=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return items.filter(i=>i.captures?.length).length;},{timeout:45000}).toBe(previous+1);
   await page.getByRole('button',{name:'Close curator',exact:true}).click();

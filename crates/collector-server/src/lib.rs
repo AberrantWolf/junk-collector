@@ -793,6 +793,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(find_digital_albums, digital_album_matches))
         .routes(routes!(metadata_care))
         .routes(routes!(preparation_care))
+        .routes(routes!(preparation_revision))
         .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
         .routes(routes!(intake_discovery_page))
         .routes(routes!(preview_bulk_library))
@@ -2905,15 +2906,22 @@ async fn prepare_music_track(
         .into_response())
 }
 
-#[utoipa::path(get, path = "/api/v1/items/{item}/music-preparation-plan", params(("item" = ItemId, Path)), responses((status = 200, body = MusicAlbumPreparationPlan), (status = 403), (status = 404)))]
+#[utoipa::path(get, path = "/api/v1/items/{item}/music-preparation-plan", params(("item" = ItemId, Path), ("opus_bitrate_kbps" = Option<u16>, Query)), responses((status = 200, body = MusicAlbumPreparationPlan), (status = 403), (status = 404)))]
 async fn music_album_preparation_plan(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(item): Path<ItemId>,
+    Query(profile): Query<PreparationProfileQuery>,
 ) -> ApiResult<Json<MusicAlbumPreparationPlan>> {
     let actor = principal(&state, &headers)?;
+    let profile = collector_core::ConversionProfile::from_opus_bitrate(profile.opus_bitrate_kbps)?;
     Ok(Json(
-        blocking(move || state.service.music_album_preparation_plan(&actor, item)).await?,
+        blocking(move || {
+            state
+                .service
+                .music_album_preparation_plan(&actor, item, &profile)
+        })
+        .await?,
     ))
 }
 
@@ -3368,17 +3376,54 @@ async fn discover_ingest(
     ))
 }
 
-#[utoipa::path(get,path="/api/v1/library-care/music-preparation",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("needs_attention"=Option<bool>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::PreparationCareEntry>),(status=403)))]
+#[derive(Deserialize)]
+struct PreparationProfileQuery {
+    opus_bitrate_kbps: Option<u16>,
+}
+
+#[derive(Deserialize)]
+struct PreparationCareQuery {
+    collection_id: Option<CollectionId>,
+    #[serde(default)]
+    search: String,
+    needs_attention: Option<bool>,
+    cursor: Option<String>,
+    limit: Option<u16>,
+    opus_bitrate_kbps: Option<u16>,
+}
+
+#[utoipa::path(get,path="/api/v1/library-care/music-preparation",params(("collection_id"=Option<CollectionId>,Query),("search"=Option<String>,Query),("needs_attention"=Option<bool>,Query),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query),("opus_bitrate_kbps"=Option<u16>,Query)),responses((status=200,body=collector_app::PreparationCarePage),(status=403),(status=409)))]
 async fn preparation_care(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<MetadataCareQuery>,
-) -> ApiResult<Json<Page<collector_app::PreparationCareEntry>>> {
+    Query(query): Query<PreparationCareQuery>,
+) -> ApiResult<Json<collector_app::PreparationCarePage>> {
     let actor = principal(&state, &headers)?;
+    let profile = collector_core::ConversionProfile::from_opus_bitrate(query.opus_bitrate_kbps)?;
+    let filter = MetadataCareQuery {
+        collection_id: query.collection_id,
+        search: query.search,
+        needs_attention: query.needs_attention.unwrap_or(true),
+        reason: None,
+        cursor: query.cursor,
+        limit: query.limit,
+    };
     Ok(Json(
-        blocking(move || state.service.preparation_care(&actor, query)).await?,
+        blocking(move || state.service.preparation_care(&actor, filter, &profile)).await?,
     ))
 }
+
+#[utoipa::path(get,path="/api/v1/library-care/music-preparation/revision",responses((status=200,body=String),(status=401)))]
+async fn preparation_revision(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Json<String>> {
+    principal(&state, &headers)?;
+    Ok(Json(
+        blocking(move || state.service.preparation_revision()).await?,
+    ))
+}
+
 #[utoipa::path(post,path="/api/v1/bulk-library/preview",params(("Idempotency-Key"=String,Header)),request_body=collector_app::PreviewBulkLibrary,responses((status=200,body=collector_app::BulkLibrarySummary),(status=403),(status=409)))]
 async fn preview_bulk_library(
     State(state): State<AppState>,

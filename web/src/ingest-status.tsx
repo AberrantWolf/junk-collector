@@ -1,3 +1,4 @@
+import {profileLabel} from './audio-profiles';
 import React from '@collector/runtime';
 import type {components} from './generated/api';
 import {presentationLabel} from './presentation-labels';
@@ -5,6 +6,7 @@ type Summary=components['schemas']['IngestSummary'];
 const states={running:'Active',queued:'Queued',waiting:'Waiting',cancelling:'Cancelling'};
 export default function IngestStatus({summary}:{summary:Summary}){
  return <div className="ingest-work" aria-label="Current ingest activity">
+  {summary.preparation_profile&&<small>Requested audio preparation · {profileLabel(summary.preparation_profile)}</small>}
   {summary.outcome!=='active'&&<small>{presentationLabel(summary.outcome)}</small>}
   {summary.work.map(work=><small key={`${work.kind}:${work.state}:${work.phase}:${work.shared}`}>
    <strong className={`ingest-work-${work.state}`}>{states[work.state]}</strong> · {presentationLabel(work.kind,'Processing')}

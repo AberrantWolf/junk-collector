@@ -1,3 +1,4 @@
+import {PreparationFormat,conversionProfile,preparationQuery,profileLabel,type PreparationPreset} from './audio-profiles';
 import AccurateRipCheck from './accuraterip-check';
 import PurchaseDetails from './purchase-details';
 import ActionMenu from './action-menu';
@@ -13,11 +14,9 @@ type Coverage=components['schemas']['MusicAlbumCoverage'];
 type DiscSource=components['schemas']['MusicDiscSourceCoverage'];
 type Review=components['schemas']['MetadataReviewView'];
 type Item=components['schemas']['PresentedItem'];
-type Props={item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void;onOpenHistory?:()=>void;onOpenFiles?:()=>void;onOpenMetadata?:()=>void;onAddToList?:(source?:string,track?:number)=>void;onOpenAnalysis?:(sourceId:string,operation:'structure'|'accuraterip'|'files')=>void};
+type Props={preparationPreset?:PreparationPreset;onPreparationPreset?:(preset:PreparationPreset)=>void;preparationSources?:string[];onPreparationSources?:(sources:string[])=>void;item:Item;canPrepare:boolean;onSessionExpired:()=>void;onPrepared?:(item:Item)=>void;onOpenHistory?:()=>void;onOpenFiles?:()=>void;onOpenMetadata?:()=>void;onAddToList?:(source?:string,track?:number)=>void;onOpenAnalysis?:(sourceId:string,operation:'structure'|'accuraterip'|'files')=>void};
 
-function profileLabel(profile:Availability['profile']):string{
- return !profile?'Original':profile.codec==='flac'?'FLAC':`Opus ${profile.bitrate_kbps} kbps`;
-}
+
 function stateLabel(row:Availability):string{
  if(row.state.status==='available')return `${(row.state.length/1048576).toFixed(1)} MiB`;
  return row.state.status==='preparing'?'Preparing…':row.state.reason;
@@ -61,7 +60,11 @@ function DiscCoverageSource({source,coverage,canAssign,busy,onAssign,onOpenMetad
  </div>;
 }
 
-export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessionExpired,onPrepared,onOpenHistory,onOpenFiles,onOpenMetadata,onOpenAnalysis,onAddToList}:Props){
+export default function MusicTracks({preparationPreset,onPreparationPreset,preparationSources,onPreparationSources,item,canPrepare:canPrepareRequested,onSessionExpired,onPrepared,onOpenHistory,onOpenFiles,onOpenMetadata,onOpenAnalysis,onAddToList}:Props){
+ const [localPreset,setLocalPreset]=useState<PreparationPreset>('flac');
+ const preset=preparationPreset??localPreset;
+ const profile=conversionProfile(preset);
+ const formatLabel=profileLabel(profile);
  const [rows,setRows]=useState<Availability[]>([]);
  const trackCache=useRef<{revision:string;rows:Availability[]}|undefined>(undefined);
  const canPrepare=canPrepareRequested&&(!item.digital_audio||rows.some(row=>!!row.profile));
@@ -77,7 +80,8 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
  const playback=useRef<AbortController|null>(null);
  const [busy,setBusy]=useState(false);
  const [pendingTracks,setPendingTracks]=useState<Set<string>>(new Set());
- const [plan,setPlan]=useState<AlbumPlan>();
+ const [loadedPlan,setPlan]=useState<AlbumPlan>();
+ const plan=profileLabel(loadedPlan?.profile)===formatLabel?loadedPlan:undefined;
  const [batches,setBatches]=useState<Batch[]>([]);
  const [discSources,setDiscSources]=useState<Record<string,string>>({});
  const [includedDiscs,setIncludedDiscs]=useState<Set<string>>(new Set());
@@ -137,11 +141,11 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
   async function load(){
    try{
     const [nextPlan,nextBatches]=await Promise.all([
-     api<AlbumPlan>(`/items/${item.id}/music-preparation-plan`,{signal:controller.signal,operation:'Load track preparation choices'}),
+     api<AlbumPlan>(`/items/${item.id}/music-preparation-plan${preset==='flac'?'':'?'+preparationQuery(preset)}`,{signal:controller.signal,operation:'Load track preparation choices'}),
      api<Batch[]>(`/items/${item.id}/music-preparation-batches`,{signal:controller.signal,operation:'Load track preparation results'}),
     ]);if(controller.signal.aborted)return;
     setPlan(nextPlan);setBatches(nextBatches);
-    setDiscSources(current=>{const next={...current};for(const disc of nextPlan.discs){const selected=disc.sources.find(source=>source.default_selected);if(selected&&!next[disc.capture_id])next[disc.capture_id]=selected.source_representation_id;}return next;});
+    setDiscSources(current=>{const next={...current};for(const disc of nextPlan.discs){const selected=disc.sources.find(source=>preparationSources?.includes(source.source_representation_id))??disc.sources.find(source=>source.default_selected);if(!disc.sources.some(source=>source.source_representation_id===next[disc.capture_id]))next[disc.capture_id]=selected?.source_representation_id||'';}return next;});
     const added=nextPlan.discs.filter(disc=>!initializedDiscs.current.has(disc.capture_id)).map(disc=>disc.capture_id);
     for(const id of added)initializedDiscs.current.add(id);
     if(added.length)setIncludedDiscs(current=>new Set([...current,...added]));
@@ -149,7 +153,7 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
    }catch(value){if(!controller.signal.aborted){report(value);if(!isApiRequestError(value)||(!['forbidden','unauthenticated'].includes(value.code)&&value.status!==404))timer=setTimeout(load,5000);}}
   }
   void load();return()=>{controller.abort();clearTimeout(timer);};
- },[canPrepare,item.id,item.revision,captureRevisions,refresh]);
+ },[canPrepare,item.id,item.revision,captureRevisions,refresh,preset]);
 
  async function prepare(row:Availability){
   const controller=requests.current;const key=`${trackKey(row)}/${profileLabel(row.profile)}`;setPendingTracks(current=>new Set(current).add(key));setError('');
@@ -163,11 +167,11 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
 
  async function prepareAlbum(){
   if(!plan||!selectedMissing||selectedActive)return;const sources=plan.discs.filter(disc=>includedDiscs.has(disc.capture_id)).map(disc=>discSources[disc.capture_id]).filter(Boolean);
-  const controller=requests.current;const key=`album:${JSON.stringify([...sources].sort())}`;
+  const controller=requests.current;const key=`album:${preset}:${JSON.stringify([...sources].sort())}`;
   setBusy(true);setError('');try{
-   const batch=await api<Batch>(`/items/${item.id}/music-preparation-batches`,{method:'POST',signal:controller.signal,headers:{'Idempotency-Key':commandKey(key)},body:JSON.stringify({source_representation_ids:sources})});
+   const batch=await api<Batch>(`/items/${item.id}/music-preparation-batches`,{method:'POST',signal:controller.signal,headers:{'Idempotency-Key':commandKey(key)},body:JSON.stringify({profile,source_representation_ids:sources})});
    if(controller.signal.aborted)return;commandKeys.current.delete(key);
-   setRows(current=>current.map(row=>row.profile?.codec==='flac'&&row.state.status!=='available'&&batch.members.some(member=>member.source_representation_id===row.source_representation_id&&member.track_position===row.track_position&&['queued','running'].includes(member.state))?{...row,can_prepare:false,state:{status:'preparing'}}:row));
+   setRows(current=>current.map(row=>profileLabel(row.profile)===formatLabel&&row.state.status!=='available'&&batch.members.some(member=>member.source_representation_id===row.source_representation_id&&member.track_position===row.track_position&&['queued','running'].includes(member.state))?{...row,can_prepare:false,state:{status:'preparing'}}:row));
    setBatches(current=>[batch,...current.filter(value=>value.batch_id!==batch.batch_id)]);setAvailabilityRefresh(value=>value+1);setRefresh(value=>value+1);
   }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
  }
@@ -223,6 +227,13 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
  const selectedMissing=selectedSources.reduce((count,source)=>count+source.eligible,0);
  const selectedActive=selectedSources.some(source=>source.preparing>0&&source.already_available+source.preparing===source.track_count||batches.some(batch=>batch.members.some(member=>member.source_representation_id===source.source_representation_id&&['queued','running'].includes(member.state))));
  const allReady=!!plan?.discs.length&&plan.discs.every(disc=>{const source=disc.sources.find(source=>source.source_representation_id===discSources[disc.capture_id]);return source&&source.track_count>0&&source.already_available===source.track_count;});
+ function preparationSourceLabel(id:string){
+  const capture=item.captures.find(c=>c.representations.some(r=>r.id===id));
+  const source=capture?.representations.find(r=>r.id===id);
+  const files=source?.files||[];
+  return files.length?`${files[0].name}${files.length>1?` and ${files.length-1} more`:''} · ${new Date(capture!.created_at).toLocaleString()}`:'Saved original';
+ }
+
  function queuedTrack(row:Availability){
   if(row.state.status!=='available')throw new Error('This track is not ready for playback. Prepare CD audio explicitly, or ask a curator to review its originals.');
   return {itemId:item.id,collectionId:item.collection_id,album:item.title,artist:item.subtitle||undefined,title:row.title,position:row.display_position??row.track_position,representationId:row.state.representation_id,fileIndex:row.state.file_index,mediaType:row.state.media_type,artwork:item.primary_artwork||undefined,original:!row.profile};
@@ -266,13 +277,14 @@ export default function MusicTracks({item,canPrepare:canPrepareRequested,onSessi
   {canPrepare&&<InfoHelp label="audio preparation">FLAC keeps the original audio quality. Opus creates smaller files. Encoder setup is in Administration → Audio encoders.</InfoHelp>}
   {canPrepare&&<p className="muted">Prepared tracks are saved automatically.</p>}
   {error&&<p role="alert" className="error">{error}</p>}
-  {canPrepare&&plan&&allReady&&<p className="notice" role="status">All album tracks are ready as FLAC. Download them below, or prepare another format where available.</p>}
-  {canPrepare&&plan&&!allReady&&<section className="album-preparation" aria-label="Prepare album"><div className="section-heading"><div><h4>Prepare album as FLAC</h4><p className="muted">Prepare FLAC files for the selected tracks.</p></div><span>{plan.total_tracks} tracks by default</span></div>
-   {orderedPlanDiscs.map((disc,index)=>{const matched=coverage?.sources.find(source=>source.capture_id===disc.capture_id&&source.source_representation_id===discSources[disc.capture_id]);return <fieldset key={disc.capture_id}><legend>{matched?.medium_position?`Album disc ${matched.medium_position}`:item.digital_audio?`Digital original ${index+1}`:`Original import ${index+1} · album disc not assigned`}</legend><label><input type="checkbox" checked={includedDiscs.has(disc.capture_id)} onChange={event=>setIncludedDiscs(current=>{const next=new Set(current);event.target.checked?next.add(disc.capture_id):next.delete(disc.capture_id);return next;})}/> {item.digital_audio?'Include this original':'Include this disc'}</label>{disc.sources.length===1?<p className="muted">{disc.sources[0].track_count} tracks · {disc.sources[0].already_available} ready · {disc.sources[0].preparing} preparing</p>:<>{disc.message&&<p className="notice">{disc.message}</p>}{disc.sources.map((source,sourceIndex)=><label key={source.source_representation_id}><input type="radio" name={`album-source-${disc.capture_id}`} checked={discSources[disc.capture_id]===source.source_representation_id} onChange={()=>setDiscSources(current=>({...current,[disc.capture_id]:source.source_representation_id}))}/> Source {sourceIndex+1}: {source.track_count} tracks · {source.already_available} ready</label>)}</>}</fieldset>;})}
+  {canPrepare&&<PreparationFormat value={preset} onChange={onPreparationPreset??setLocalPreset} disabled={busy}/>}
+  {canPrepare&&plan&&allReady&&<p className="notice" role="status">All album tracks are ready as {formatLabel}. Download them below, or prepare another format where available.</p>}
+  {canPrepare&&plan&&(!allReady||plan.discs.some(disc=>disc.ambiguous))&&<section className="album-preparation" aria-label="Prepare album"><div className="section-heading"><div><h4>Prepare album as {formatLabel}</h4><p className="muted">Prepare {formatLabel} files for the selected tracks.</p></div><span>{plan.total_tracks} tracks by default</span></div>
+   {orderedPlanDiscs.map((disc,index)=>{const matched=coverage?.sources.find(source=>source.capture_id===disc.capture_id&&source.source_representation_id===discSources[disc.capture_id]);return <fieldset key={disc.capture_id}><legend>{matched?.medium_position?`Album disc ${matched.medium_position}`:item.digital_audio?`Digital original ${index+1}`:`Original import ${index+1} · album disc not assigned`}</legend><label><input type="checkbox" checked={includedDiscs.has(disc.capture_id)} onChange={event=>setIncludedDiscs(current=>{const next=new Set(current);event.target.checked?next.add(disc.capture_id):next.delete(disc.capture_id);return next;})}/> {item.digital_audio?'Include this original':'Include this disc'}</label>{disc.sources.length===1?<p className="muted">{disc.sources[0].track_count} tracks · {disc.sources[0].already_available} ready · {disc.sources[0].preparing} preparing</p>:<>{disc.message&&<p className="notice">{disc.message}</p>}{disc.sources.map((source,sourceIndex)=><label key={source.source_representation_id}><input type="radio" name={`album-source-${disc.capture_id}`} checked={discSources[disc.capture_id]===source.source_representation_id} onChange={()=>{const next={...discSources,[disc.capture_id]:source.source_representation_id};setDiscSources(next);onPreparationSources?.(plan.discs.filter(d=>d.ambiguous).map(d=>next[d.capture_id]).filter(Boolean));}}/> Source {sourceIndex+1} · {preparationSourceLabel(source.source_representation_id)} · {source.track_count} tracks · {source.already_available} ready</label>)}</>}</fieldset>;})}
    {plan.blockers.map(message=><p className="notice" key={message}>{message}</p>)}
-   <button className="primary" disabled={busy||selectedActive||!selectedMissing||!plan.can_submit||![...includedDiscs].some(capture=>discSources[capture])||plan.discs.some(disc=>includedDiscs.has(disc.capture_id)&&!discSources[disc.capture_id])} onClick={()=>void prepareAlbum()}>{busy?'Submitting…':selectedActive?'Album preparation in progress…':!selectedMissing?'No missing tracks can be prepared':'Prepare missing FLAC tracks'}</button>
+   <button className="primary" disabled={busy||selectedActive||!selectedMissing||!plan.can_submit||![...includedDiscs].some(capture=>discSources[capture])||plan.discs.some(disc=>includedDiscs.has(disc.capture_id)&&!discSources[disc.capture_id])} onClick={()=>void prepareAlbum()}>{busy?'Submitting…':selectedActive?'Album preparation in progress…':!selectedMissing?'No missing tracks can be prepared':`Prepare missing ${formatLabel} tracks`}</button>
   </section>}
-  {canPrepare&&batches.length>0&&<section className="preparation-batches" aria-label="Album preparation progress"><h4>Preparation history</h4>{batches.length===50&&<p className="muted">Showing the 50 most recent batches. Older track jobs are in this entry’s Work &amp; history. {onOpenHistory&&<button onClick={onOpenHistory}>Open older preparation work</button>}</p>}{batches.map(batch=><article key={batch.batch_id}><div className="section-heading"><div><strong>Album FLAC preparation</strong><small>{new Date(batch.created_at).toLocaleString()}</small><details><summary>Technical details</summary>Batch ID: {batch.batch_id}</details></div><span>{batch.succeeded}/{batch.members.length} ready</span></div><p className="muted">{batch.queued} queued · {batch.running} running · {batch.failed} failed · {batch.cancelled} cancelled · {batch.ineligible} cannot prepare{batch.cancelled_by_user?' · batch cancelled':''}</p>{batch.admission_error&&<p className="error" role="alert">Could not start preparation: {batch.admission_error}</p>}<details><summary>Track outcomes</summary>{batch.members.map(member=><p className="batch-member" key={member.member_id}><strong>{member.track_position}. {member.title}</strong><span className={`identity ${member.state}`}>{presentationLabel(member.state)}</span>{member.error&&<small>{member.error}</small>}</p>)}</details><div className="profile-actions">{batch.can_cancel&&<button disabled={busy} onClick={()=>void batchAction(batch,'cancel')}>Cancel outstanding tracks</button>}{batch.can_retry&&<button disabled={busy} onClick={()=>void batchAction(batch,'retry')}>Retry unfinished tracks</button>}</div></article>)}</section>}
+  {canPrepare&&batches.length>0&&<section className="preparation-batches" aria-label="Album preparation progress"><h4>Preparation history</h4>{batches.length===50&&<p className="muted">Showing the 50 most recent batches. Older track jobs are in this entry’s Work &amp; history. {onOpenHistory&&<button onClick={onOpenHistory}>Open older preparation work</button>}</p>}{batches.map(batch=><article key={batch.batch_id}><div className="section-heading"><div><strong>Album {profileLabel(batch.profile)} preparation</strong><small>{new Date(batch.created_at).toLocaleString()}</small><details><summary>Technical details</summary>Batch ID: {batch.batch_id}</details></div><span>{batch.succeeded}/{batch.members.length} ready</span></div><p className="muted">{batch.queued} queued · {batch.running} running · {batch.failed} failed · {batch.cancelled} cancelled · {batch.ineligible} cannot prepare{batch.cancelled_by_user?' · batch cancelled':''}</p>{batch.admission_error&&<p className="error" role="alert">Could not start preparation: {batch.admission_error}</p>}<details><summary>Track outcomes</summary>{batch.members.map(member=><p className="batch-member" key={member.member_id}><strong>{member.track_position}. {member.title}</strong><span className={`identity ${member.state}`}>{presentationLabel(member.state)}</span>{member.error&&<small>{member.error}</small>}</p>)}</details><div className="profile-actions">{batch.can_cancel&&<button disabled={busy} onClick={()=>void batchAction(batch,'cancel')}>Cancel outstanding tracks</button>}{batch.can_retry&&<button disabled={busy} onClick={()=>void batchAction(batch,'retry')}>Retry unfinished tracks</button>}</div></article>)}</section>}
   {canPrepareRequested&&item.domain.module==='org.junk.music'&&onOpenAnalysis&&item.captures.flatMap(c=>c.representations).filter(r=>r.role==='preservation_master'&&r.files.some(f=>/\.(wav|flac|mp3)$/i.test(f.name))&&!r.files.some(f=>/\.(cue|toc)$/i.test(f.name))).map(r=><button key={`analyze-${r.id}`} onClick={()=>onOpenAnalysis(r.id,'files')}>Analyze retained digital audio · {r.files[0]?.name}</button>)}
   {canPrepareRequested&&item.digital_audio&&item.captures.map(capture=><PurchaseDetails key={`${item.id}/${capture.id}`} itemId={item.id} capture={capture} onChanged={()=>{setAvailabilityRefresh(v=>v+1);if(callbacks.current.onPrepared)void api<Item>(`/items/${item.id}`,{signal:requests.current.signal}).then(value=>callbacks.current.onPrepared?.(value)).catch(report);}}/>)}
   {rows.some(row=>row.album_selection==='needs_review')&&<p className="notice">Alternate encodings need a choice before playing the album. A curator can use Edit track details to include one encoding and exclude the others. Individual originals remain playable.</p>}{queueNotice&&<p role="status">{queueNotice}</p>}

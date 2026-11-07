@@ -80,9 +80,16 @@ pub(crate) fn install(connection: &Connection) -> Result<()> {
     }
     db.execute_batch("CREATE TABLE IF NOT EXISTS library_clock(token TEXT NOT NULL); INSERT INTO library_clock SELECT hex(randomblob(16)) WHERE NOT EXISTS(SELECT 1 FROM library_clock);
         CREATE TABLE IF NOT EXISTS private.library_clock(token TEXT NOT NULL); INSERT INTO private.library_clock SELECT hex(randomblob(16)) WHERE NOT EXISTS(SELECT 1 FROM private.library_clock);") .map_err(storage)?;
+    // Derivative Jobs are keyed by Capture and survive reassociation. Resolve
+    // the current owning Item when the library worker drains the invalidations.
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.library_dirty(item_id TEXT PRIMARY KEY);
-        CREATE TRIGGER IF NOT EXISTS private.library_job_admitted AFTER INSERT ON jobs WHEN NEW.kind='music_derivative' AND NEW.item_id IS NOT NULL BEGIN INSERT OR IGNORE INTO library_dirty VALUES(NEW.item_id); END;
-        CREATE TRIGGER IF NOT EXISTS private.library_job_state AFTER UPDATE OF state ON jobs WHEN NEW.kind='music_derivative' AND NEW.item_id IS NOT NULL AND NEW.state<>OLD.state BEGIN INSERT OR IGNORE INTO library_dirty VALUES(NEW.item_id); END;").map_err(storage)?;
+        CREATE TABLE IF NOT EXISTS private.library_dirty_captures(capture_id TEXT PRIMARY KEY);
+        CREATE TRIGGER IF NOT EXISTS private.library_derivative_admitted AFTER INSERT ON jobs WHEN NEW.kind='music_derivative' BEGIN
+            INSERT OR IGNORE INTO library_dirty_captures SELECT json_extract(NEW.request,'$.capture_id') WHERE json_extract(NEW.request,'$.capture_id') IS NOT NULL;
+        END;
+        CREATE TRIGGER IF NOT EXISTS private.library_derivative_state AFTER UPDATE OF state ON jobs WHEN NEW.kind='music_derivative' AND NEW.state<>OLD.state BEGIN
+            INSERT OR IGNORE INTO library_dirty_captures SELECT json_extract(NEW.request,'$.capture_id') WHERE json_extract(NEW.request,'$.capture_id') IS NOT NULL;
+        END;").map_err(storage)?;
     for (schema, tables) in [
         (
             "main",
@@ -93,7 +100,16 @@ pub(crate) fn install(connection: &Connection) -> Result<()> {
                 "metadata_language_display",
             ][..],
         ),
-        ("private", &["grants", "metadata_preferences", "users"][..]),
+        (
+            "private",
+            &[
+                "grants",
+                "metadata_preferences",
+                "users",
+                "library_dirty",
+                "library_dirty_captures",
+            ][..],
+        ),
     ] {
         for table in tables {
             for operation in ["INSERT", "UPDATE", "DELETE"] {
@@ -208,9 +224,11 @@ pub(crate) fn next_build(
     now: i64,
 ) -> Result<Option<LibraryEntryBuild>> {
     let tx = db.unchecked_transaction().map_err(storage)?;
-    tx.execute("UPDATE library_entry_versions SET token=hex(randomblob(16)) WHERE item_id IN (SELECT item_id FROM private.library_dirty)",[]).map_err(storage)?;
-    tx.execute("DELETE FROM private.library_dirty", [])
-        .map_err(storage)?;
+    tx.execute("UPDATE library_entry_versions SET token=hex(randomblob(16)) WHERE item_id IN (SELECT item_id FROM private.library_dirty UNION SELECT c.item_id FROM private.library_dirty_captures d JOIN captures c ON c.id=d.capture_id)",[]).map_err(storage)?;
+    tx.execute_batch(
+        "DELETE FROM private.library_dirty; DELETE FROM private.library_dirty_captures;",
+    )
+    .map_err(storage)?;
     tx.commit().map_err(storage)?;
     let sql = format!(
         "WITH demand AS ({DEMAND}) SELECT i.id,i.collection_id,d.role,d.language,d.user_id,v.token,u.administrator FROM items i JOIN library_entry_versions v ON v.item_id=i.id JOIN demand d ON d.collection_id=i.collection_id JOIN private.users u ON u.id=d.user_id LEFT JOIN library_entries c ON c.item_id=i.id AND c.namespace=?1 AND c.language=d.language AND c.role=d.role AND c.token=v.token LEFT JOIN library_entry_attempts a ON a.item_id=i.id AND a.namespace=?1 AND a.language=d.language AND a.role=d.role WHERE c.item_id IS NULL AND (i.deleted=0 OR d.role>=1) AND (a.token IS NULL OR a.token<>v.token OR a.retry_at<=?2) ORDER BY CASE WHEN a.token=v.token THEN a.retry_at ELSE 0 END,i.id,d.role,d.language LIMIT 1"
@@ -545,10 +563,8 @@ mod tests {
                     table_name,
                     column_name,
                 } if (table_name == "items" && column_name == "record")
-                    || matches!(
-                        table_name,
-                        "captures" | "processing_observations" | "conversion_recipes"
-                    ) =>
+                    || matches!(table_name, "processing_observations" | "conversion_recipes")
+                    || table_name == "captures" && !matches!(column_name, "id" | "item_id") =>
                 {
                     Authorization::Deny
                 }
@@ -559,6 +575,46 @@ mod tests {
         lock(&store.db)
             .unwrap()
             .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+    }
+
+    #[test]
+    fn preparation_list_uses_only_compact_rows_even_when_pending() {
+        use collector_app::{LibrarySummaryState as State, MetadataCareQuery};
+        let (_root, store, actor, service, saved) = fixture();
+        let profile = ConversionProfile::Opus { bitrate_kbps: 128 };
+        let mut query = MetadataCareQuery {
+            collection_id: Some(saved.collection_id),
+            search: "recorded".into(),
+            reason: None,
+            needs_attention: true,
+            cursor: None,
+            limit: Some(1),
+        };
+        deny_details(&store);
+        assert!(
+            service
+                .music_album_preparation_plan(&actor, saved.id, &profile)
+                .is_err()
+        );
+        let cold = service
+            .preparation_care(&actor, query.clone(), &profile)
+            .unwrap();
+        assert_eq!(cold.summary_state, State::Pending);
+        assert!(cold.items.is_empty());
+        allow_details(&store);
+        drain(&service);
+        deny_details(&store);
+        let warm = service
+            .preparation_care(&actor, query.clone(), &profile)
+            .unwrap();
+        assert_eq!(warm.summary_state, State::Ready);
+        assert_eq!(warm.items[0].item.id, saved.id);
+        assert!(warm.items[0].readiness.as_ref().unwrap().needs_attention);
+        assert_ne!(warm.catalog_revision, cold.catalog_revision);
+        query.search = "elsewhere".into();
+        let excluded = service.preparation_care(&actor, query, &profile).unwrap();
+        assert!(excluded.items.is_empty());
+        assert_eq!(excluded.summary_state, State::Ready);
     }
 
     #[test]

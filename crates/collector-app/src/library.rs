@@ -45,6 +45,8 @@ pub struct LibraryEntry {
     pub album_playback: Option<collector_api_types::AlbumPlaybackReadiness>,
     pub digital_audio: bool,
     pub accuraterip: Option<Vec<PresentedAudioCheck>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preparation: Vec<PreparationReadiness>,
 }
 
 /// Storage-selected identity and cache generation, never a full capture graph.
@@ -94,6 +96,7 @@ impl LibraryEntry {
             album_playback: None,
             digital_audio: false,
             accuraterip: None,
+            preparation: Vec::new(),
         }
     }
 }
@@ -139,6 +142,7 @@ impl From<PresentedItem> for LibraryEntry {
             album_playback: item.album_playback,
             digital_audio: item.digital_audio,
             accuraterip: item.accuraterip,
+            preparation: Vec::new(),
         }
     }
 }
@@ -147,7 +151,7 @@ impl CollectionService {
     pub(crate) fn library_namespace(&self) -> Result<String> {
         Ok(Digest::sha256(
             &serde_json::to_vec(&(
-                "library-row-v4",
+                "library-row-v5",
                 env!("CARGO_PKG_VERSION"),
                 self.modules.descriptors(),
                 self.encoder_availability(&ConversionProfile::Flac),
@@ -180,9 +184,26 @@ impl CollectionService {
             let tracks = if item.deleted {
                 Vec::new()
             } else {
-                self.recorded_music_track_availability(&build.actor, item.id)?
+                self.music_track_availability_recorded(build.actor.user_id, &item)?
             };
-            let entry = LibraryEntry::from(self.presented(item, role, &build.actor, effective)?);
+            let readiness = if role >= Role::Curator
+                && !item.deleted
+                && self.modules.supports_listening(&item.domain.module)
+            {
+                ConversionProfile::PRESETS
+                    .iter()
+                    .map(|profile| {
+                        let plan =
+                            crate::album_preparation::album_plan_for_item(&item, &tracks, profile);
+                        PreparationReadiness::from(&plan)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let mut entry =
+                LibraryEntry::from(self.presented(item, role, &build.actor, effective)?);
+            entry.preparation = readiness;
             self.care.cache_library_tracks(
                 &namespace,
                 &build.language,

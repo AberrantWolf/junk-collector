@@ -1096,7 +1096,7 @@ try{
  await guided.getByText('Package details and import options',{exact:true}).click();
  await guided.getByText('destination: new collection entry',{exact:false}).waitFor();
  assert.equal(await guided.getByLabel('Find metadata and artwork automatically').isChecked(),true);
- if(hasFlac){assert.equal(await guided.getByLabel('Prepare FLAC tracks after import').isDisabled(),false);await guided.getByLabel('Prepare FLAC tracks after import').check();}
+ if(hasFlac){assert.equal(await guided.getByLabel('Audio preparation after import').locator('option[value=flac]').isDisabled(),false);await guided.getByLabel('Audio preparation after import').selectOption('flac');}
  let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
  await guided.getByRole('button',{name:'Save 1 package',exact:true}).click();
@@ -1117,15 +1117,22 @@ try{
  for(let attempt=0;attempt<100&&!metadataRequests.some(value=>value.startsWith('/ws/2/discid/'));attempt++)await new Promise(resolve=>setTimeout(resolve,100));
  assert.ok(metadataRequests.some(value=>value.startsWith('/ws/2/discid/')),`automatic guided lookup did not use a disc ID: ${metadataRequests.join(', ')}`);
  assert.equal(metadataRequests.some(value=>value.includes('Guided%20smoke%20master')||value.includes('guided-original')),false,'automatic lookup used a package name');
- const guidedItem=await page.evaluate(async()=>{const work=await(await fetch('/api/v1/work?search=Guided%20smoke%20master&limit=10')).json();const id=work.items.find(value=>value.name==='Guided smoke master')?.item_id;if(!id)throw new Error('guided import has no item');return (await(await fetch(`/api/v1/items/${id}`)).json());});
- // Await the actual metadata value before reloading the collection list.
- let enrichedItem;
- for(let attempt=0;attempt<150;attempt++){
-  enrichedItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),guidedItem.id);
-  if(enrichedItem.title==='Provider pressing')break;
-  await page.waitForTimeout(200);
- }
- assert.equal(enrichedItem.title,'Provider pressing','automatic metadata did not settle before reload');
+ const guidedId=await page.evaluate(async()=>{
+  const response=await fetch('/api/v1/work?search=Guided%20smoke%20master&limit=10');
+  if(!response.ok)throw new Error(await response.text());
+  const work=await response.json();
+  const id=work.items.find(value=>value.name==='Guided smoke master')?.item_id;
+  if(!id)throw new Error('guided import has no item');
+  return id;
+ });
+ // Wait through typed catalog contention while publication holds the writer.
+ await expect.poll(()=>page.evaluate(async id=>{
+  const response=await fetch(`/api/v1/items/${id}`);
+  const body=await response.json();
+  if(response.status===503&&body.error?.code==='catalog_busy')return null;
+  if(!response.ok)throw new Error(JSON.stringify(body));
+  return body.title;
+ },guidedId),{timeout:45000}).toBe('Provider pressing');
  const discLookupCount=metadataRequests.filter(value=>value.startsWith('/ws/2/discid/')).length;
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
  await page.reload();

@@ -962,11 +962,45 @@ pub struct StoredFile {
     pub bytes: ByteLength,
     pub digest: Digest,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "codec", rename_all = "snake_case")]
 pub enum ConversionProfile {
+    #[default]
     Flac,
-    Opus { bitrate_kbps: u16 },
+    Opus {
+        bitrate_kbps: u16,
+    },
+}
+impl ConversionProfile {
+    pub const PRESETS: [Self; 4] = [
+        Self::Flac,
+        Self::Opus { bitrate_kbps: 96 },
+        Self::Opus { bitrate_kbps: 128 },
+        Self::Opus { bitrate_kbps: 192 },
+    ];
+
+    pub fn validate(&self) -> Result<()> {
+        if Self::PRESETS.contains(self) {
+            Ok(())
+        } else {
+            Err(Error::Invalid(
+                "Unsupported audio preparation profile".into(),
+            ))
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::Flac => "FLAC".into(),
+            Self::Opus { bitrate_kbps } => format!("Opus {bitrate_kbps} kbps"),
+        }
+    }
+
+    pub fn from_opus_bitrate(bitrate: Option<u16>) -> Result<Self> {
+        let profile = bitrate.map_or(Self::Flac, |bitrate_kbps| Self::Opus { bitrate_kbps });
+        profile.validate()?;
+        Ok(profile)
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Asset {

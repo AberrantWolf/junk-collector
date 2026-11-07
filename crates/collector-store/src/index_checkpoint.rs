@@ -19,7 +19,6 @@ pub(crate) const TABLES: &[&str] = &[
     "music_search",
     "metadata_authorities",
     "metadata_health",
-    "preparation_readiness",
     "album_group_members",
     "metadata_language_display",
     "metadata_candidates",

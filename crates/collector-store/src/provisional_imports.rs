@@ -444,7 +444,7 @@ impl Store {
             )
             .map_err(storage)?;
             tx.execute(
-                "UPDATE private.guided_ingest_intents SET cd_check_settings=?,bulk_context=? WHERE import_id=?",
+                "UPDATE private.guided_ingest_intents SET cd_check_settings=?,bulk_context=?,opus_bitrate_kbps=? WHERE import_id=?",
                 params![
                     intent.cd_check_settings.as_ref().map(serde_json::to_string).transpose().map_err(storage)?,
                     intent
@@ -453,6 +453,7 @@ impl Store {
                         .map(serde_json::to_string)
                         .transpose()
                         .map_err(storage)?,
+                    intent.opus_bitrate_kbps,
                     intent.import_id.to_string()
                 ],
             )
@@ -791,9 +792,9 @@ impl ProvisionalImportPort for Store {
     fn guided_ingest_intent(&self, id: ImportId) -> Result<Option<GuidedIngestIntent>> {
         lock(&self.db)?
             .query_row(
-                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase,cd_check_settings,cd_check_error FROM private.guided_ingest_intents WHERE import_id=?",
+                "SELECT user_id,plan_token,target_item_id,default_title,enrichment,enrichment_error,created_at,updated_at,settled,cancelled,prepare_music,preparation_batch_id,preparation_error,anchor_file_index,created_item,analysis,clean_reimport,bulk_context,purchase,cd_check_settings,cd_check_error,opus_bitrate_kbps FROM private.guided_ingest_intents WHERE import_id=?",
                 [id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?,row.get::<_, Option<String>>(19)?,row.get::<_, Option<String>>(20)?)),
+                |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?,row.get::<_, String>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, i64>(6)?,row.get::<_, i64>(7)?,row.get::<_, bool>(8)?,row.get::<_, bool>(9)?,row.get::<_, bool>(10)?,row.get::<_, Option<String>>(11)?,row.get::<_, Option<String>>(12)?,row.get::<_, Option<i64>>(13)?,row.get::<_, bool>(14)?,row.get::<_, String>(15)?,row.get::<_, Option<String>>(16)?,row.get::<_, Option<String>>(17)?,row.get::<_, Option<String>>(18)?,row.get::<_, Option<String>>(19)?,row.get::<_, Option<String>>(20)?,row.get::<_, Option<u16>>(21)?)),
             )
             .optional()
             .map_err(storage)?
@@ -818,6 +819,7 @@ impl ProvisionalImportPort for Store {
                     enrichment: parse_enrichment(&row.4)?,
                     enrichment_error: row.5,
                     prepare_music: row.10,
+                    opus_bitrate_kbps: row.21,
                     preparation_batch_id: row.11.map(|value| value.parse().map_err(storage)).transpose()?,
                     preparation_error: row.12,
                     settled: row.8,

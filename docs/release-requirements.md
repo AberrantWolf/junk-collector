@@ -191,7 +191,7 @@ native pin/merge and actual-host/release qualification remain in [the queue](rem
 
 ## Playback and offline use
 
-Expose media through authorized capability readers, not paths. Integer sample positions, seeking, queues and DSP belong below UI layers. Server-side playback derivative generation/storage is optional and initially explicit, not an automatic consequence of import. FLAC is the default format when a derivative is requested; offer configurable Opus offline profiles; record source/conversion settings and validate lossless output against source PCM. Originals remain intact.
+Expose media through authorized capability readers, not paths. Integer sample positions, seeking, queues and DSP belong below UI layers. Server-side playback derivatives are optional. Users can prepare audio explicitly or opt in to Opus preparation on music import. FLAC remains the default for explicit preparation. Preserve originals, record source and conversion settings, and validate lossless output against source PCM.
 
 Cache by server and immutable representation/profile identity. Downloads resume, include thumbnails/metadata/evidence summaries, support pinned albums, budgets and eviction. Favorites and playback activity synchronize after reconnection; collection edits require connectivity. Revocation prevents future access but cannot recall disconnected copies. There is no offline DRM requirement.
 

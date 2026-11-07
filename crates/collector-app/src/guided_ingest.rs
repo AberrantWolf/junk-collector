@@ -411,6 +411,11 @@ impl CollectionService {
             collection_id: command.collection_id,
             token,
             packages,
+            opus_import: if eligibility.owner.0 == "org.junk.music" {
+                Some(self.care.cd_settings(command.collection_id)?.opus_import)
+            } else {
+                None
+            },
         })
     }
 
@@ -459,8 +464,20 @@ impl CollectionService {
                 "an existing destination accepts one package at a time".into(),
             ));
         }
+        let explicit_profile = command
+            .audio_preparation
+            .map(ImportAudioPreparation::profile)
+            .transpose()?
+            .flatten();
+        if command.prepare_music && command.audio_preparation.is_some() {
+            return Err(Error::Invalid(
+                "Choose one import preparation option.".into(),
+            ));
+        }
         if command.analysis == IngestAnalysisPolicy::PreserveOnly
-            && (command.enrichment != IngestEnrichmentPolicy::None || command.prepare_music)
+            && (command.enrichment != IngestEnrichmentPolicy::None
+                || command.prepare_music
+                || explicit_profile.is_some())
         {
             return Err(Error::Invalid(
                 "preservation without analysis cannot request enrichment or music preparation"
@@ -505,7 +522,7 @@ impl CollectionService {
             {
                 return Err(Error::Conflict);
             }
-            if command.prepare_music
+            if (command.prepare_music || explicit_profile == Some(ConversionProfile::Flac))
                 && let Some(package) = replanned
                     .packages
                     .iter()
@@ -555,7 +572,32 @@ impl CollectionService {
         }
         let mut records = Vec::new();
         let mut intents = Vec::new();
+        let default_opus = if eligibility.owner.0 == "org.junk.music"
+            && command.clean_reimport.is_none()
+            && command.analysis != IngestAnalysisPolicy::PreserveOnly
+            && !command.prepare_music
+            && command.audio_preparation.is_none()
+        {
+            self.care
+                .cd_settings(command.plan.collection_id)?
+                .opus_import
+        } else {
+            OpusImportDefault::default()
+        };
         for package in &command.plan.packages {
+            let profile = if command.prepare_music {
+                Some(ConversionProfile::Flac)
+            } else {
+                command
+                    .audio_preparation
+                    .unwrap_or_else(|| default_opus.for_package(package))
+                    .profile()?
+            };
+            if profile.is_some() && eligibility.owner.0 != "org.junk.music" {
+                return Err(Error::Invalid(
+                    "Import preparation applies to music collections.".into(),
+                ));
+            }
             let key = format!("{}:{}", key, package.position);
             let import_id = ImportId(super::deterministic_inventory_uuid(
                 user,
@@ -683,7 +725,11 @@ impl CollectionService {
                 analysis: command.analysis,
                 enrichment: command.enrichment,
                 enrichment_error: None,
-                prepare_music: command.prepare_music,
+                prepare_music: profile.is_some(),
+                opus_bitrate_kbps: match profile {
+                    Some(ConversionProfile::Opus { bitrate_kbps }) => Some(bitrate_kbps),
+                    _ => None,
+                },
                 preparation_batch_id: None,
                 preparation_error: None,
                 settled: false,
@@ -1328,6 +1374,7 @@ impl CollectionService {
                                 intent.user_id,
                                 intent.target_item_id,
                                 intent.import_id,
+                                &ConversionProfile::from_opus_bitrate(intent.opus_bitrate_kbps)?,
                             ) {
                                 Ok(batch) => intent.preparation_batch_id = Some(batch),
                                 Err(error) => {
@@ -1604,6 +1651,10 @@ impl CollectionService {
             outcome,
             enrichment: intent.enrichment,
             prepare_music: intent.prepare_music,
+            preparation_profile: intent
+                .prepare_music
+                .then(|| ConversionProfile::from_opus_bitrate(intent.opus_bitrate_kbps))
+                .transpose()?,
             updated_at: view.updated_at,
             permissions: IngestPermissions {
                 can_clean_inbox: can_write

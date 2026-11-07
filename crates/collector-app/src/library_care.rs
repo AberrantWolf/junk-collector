@@ -95,8 +95,14 @@ pub trait LibraryCarePort: Send + Sync {
         after: Option<ItemId>,
         limit: u16,
     ) -> Result<Page<Item>>;
-    fn preparation_care_items(&self, user: UserId, query: &MetadataCareQuery)
-    -> Result<Page<Item>>;
+    fn preparation_care_rows(
+        &self,
+        user: UserId,
+        query: &MetadataCareQuery,
+        profile: &ConversionProfile,
+        namespace: &str,
+        language: &str,
+    ) -> Result<PreparationCarePage>;
     fn metadata_preferences(&self, user: UserId) -> Result<MetadataPreferences>;
     fn save_metadata_preferences(
         &self,
@@ -191,32 +197,82 @@ impl CollectionService {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PreparationReadiness {
+    pub discs: u16,
+    pub tracks: u32,
+    pub ready: u32,
+    pub preparing: u32,
+    pub needs_attention: bool,
+}
+
+impl From<&MusicAlbumPreparationPlan> for PreparationReadiness {
+    fn from(plan: &MusicAlbumPreparationPlan) -> Self {
+        let mut summary = Self {
+            discs: plan.discs.len().try_into().unwrap_or(u16::MAX),
+            tracks: 0,
+            ready: 0,
+            preparing: 0,
+            needs_attention: plan.discs.is_empty(),
+        };
+        for disc in &plan.discs {
+            // Alternatives represent the same disc. Prefer a complete source,
+            // then the most ready source, without adding duplicate track counts.
+            if let Some(source) = disc.sources.iter().max_by_key(|source| {
+                (
+                    source.track_count == source.already_available,
+                    source.already_available,
+                    source.preparing,
+                    source.track_count,
+                )
+            }) {
+                summary.tracks += u32::from(source.track_count);
+                summary.ready += u32::from(source.already_available);
+                summary.preparing += u32::from(source.preparing);
+                summary.needs_attention |= source.track_count != source.already_available;
+            }
+        }
+        summary
+    }
+}
+
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PreparationCareEntry {
-    pub item: PresentedItem,
-    pub plan: MusicAlbumPreparationPlan,
+    pub item: LibraryEntry,
+    pub revision: Revision,
+    pub readiness: Option<PreparationReadiness>,
 }
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct PreparationCarePage {
+    pub items: Vec<PreparationCareEntry>,
+    pub next_cursor: Option<String>,
+    pub catalog_revision: String,
+    pub summary_state: LibrarySummaryState,
+}
+
 impl CollectionService {
+    pub fn preparation_revision(&self) -> Result<String> {
+        self.care.library_revision()
+    }
+
     pub fn preparation_care(
         &self,
         actor: &Principal,
         query: MetadataCareQuery,
-    ) -> Result<Page<PreparationCareEntry>> {
+        profile: &ConversionProfile,
+    ) -> Result<PreparationCarePage> {
         if let Some(collection) = query.collection_id {
             self.authorize(actor, collection, Action::Curate)?;
         }
-        let page = self.care.preparation_care_items(actor.user_id, &query)?;
-        let mut items = Vec::new();
-        for item in page.items {
-            items.push(PreparationCareEntry {
-                plan: self.music_album_preparation_plan(actor, item.id)?,
-                item: self.item_presented(actor, item.id)?,
-            });
-        }
-        Ok(Page {
-            items,
-            next_cursor: page.next_cursor,
-        })
+        profile.validate()?;
+        self.care.preparation_care_rows(
+            actor.user_id,
+            &query,
+            profile,
+            &self.library_namespace()?,
+            &self.metadata_language(actor.user_id)?,
+        )
     }
 }
 

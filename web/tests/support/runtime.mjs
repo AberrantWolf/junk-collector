@@ -1,5 +1,6 @@
 import {spawn as nodeSpawn,spawnSync} from 'node:child_process';
 import path from 'node:path';
+import {createServer} from 'node:net';
 export {spawnSync};
 export const root=path.resolve(import.meta.dirname,'../../..');
 export const serverBinary=process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server');
@@ -28,6 +29,13 @@ export async function cleanup(){
  const results=await Promise.allSettled([...cleanups].map(callback=>callback()).concat([...children].map(child=>stopProcess(child))));
  const failed=results.find(result=>result.status==='rejected');
  if(failed)throw failed.reason;
+}
+export async function fixturePort(){
+ const listener=createServer();
+ await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);});
+ const value=listener.address().port;
+ await new Promise(resolve=>listener.close(resolve));
+ return value;
 }
 export async function waitForServer(url,child,{timeout=20000,logs=()=>''}={}){
  const until=Date.now()+timeout;

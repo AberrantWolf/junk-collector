@@ -1,7 +1,7 @@
 import {stopProcess} from './support/runtime.mjs';
 // Actual browser setup, purchased-file intake and listening against an isolated server.
 import {chromium,expect,chooseFolder} from './support/browser.mjs';
-import {spawn,spawnSync} from './support/runtime.mjs';
+import {spawn,spawnSync,waitForServer,fixturePort} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,copyFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -14,19 +14,20 @@ const config=path.join(scratch,'collector.toml');
 const flac=process.env.COLLECTOR_FLAC||spawnSync('which',['flac'],{encoding:'utf8'}).stdout.trim();
 assert.equal(spawnSync(flac,['--version']).status,0,'WAV acceptance requires COLLECTOR_FLAC or a real flac executable');
 const password=randomBytes(24).toString('hex');
-const origin='https://localhost:19863';
+const publicPort=await fixturePort(),privatePort=await fixturePort(),lanPort=await fixturePort();
+const origin=`https://localhost:${lanPort}`;
 const fixture=path.join(scratch,'Digital purchase');await mkdir(fixture);
 for(const file of ['01.flac','02.mp3'])await copyFile(path.join(root,'crates/collector-store/tests/fixtures/digital-audio',file),path.join(fixture,file));
 await writeFile(path.join(fixture,'receipt.txt'),'PRIVATE ORDER REFERENCE 482');
 await writeFile(path.join(fixture,'booklet.txt'),'Shared booklet');
 await writeFile(path.join(fixture,'cover.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19861"\nprivate_bind = "127.0.0.1:19862"\nlan_bind = "127.0.0.1:19863"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n[encoders]\nflac = "${flac}"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${publicPort}"\nprivate_bind = "127.0.0.1:${privatePort}"\nlan_bind = "127.0.0.1:${lanPort}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n[encoders]\nflac = "${flac}"\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page;
 try{
- for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19861/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
+ await waitForServer(`http://127.0.0.1:${publicPort}/healthz`,server,{logs:()=>logs});
  // Trust only this disposable fixture's SPKI, including its service-worker fetch.
  const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});
@@ -163,7 +164,7 @@ try{
  await imports.getByLabel("Choose one package's files").setInputFiles(wavFile);
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  await imports.getByLabel('Store',{exact:true}).fill('WAV store');
- await imports.getByLabel('Prepare FLAC after import',{exact:true}).check();
+ await imports.getByLabel('Audio preparation after import',{exact:true}).selectOption('flac');
  await expect(imports.getByLabel('Physical copy label')).toHaveCount(0);
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
  await page.waitForURL(url=>url.searchParams.has('item'));
@@ -190,7 +191,7 @@ try{
   const bytes=await response.arrayBuffer();return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
  },{item:wavItem,source:wavSource.id});
  assert.equal(originalDigest,createHash('sha256').update(suffixedWav).digest('hex'));
- const wavRows=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-tracks`)).json()),wavItem);
+ const wavRows=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/music-tracks`)).json()).filter(row=>row.profile?.codec==='flac'),wavItem);
  assert.equal(wavRows.length,1);assert.equal(wavRows[0].audio_format.sample_rate,96000);
  assert.equal(wavRows[0].audio_format.bits_per_sample,24);assert.equal(wavRows[0].audio_format.channels,1);
  await page.goto(`${origin}/?collection=${collection}&item=${wavItem}`);
@@ -205,7 +206,7 @@ try{
  await page.setViewportSize({width:1440,height:1000});
  await page.goto(`${origin}/imports?collection=${collection}`);
  await imports.getByLabel("Choose one package's files").setInputFiles(wavFile);
- await imports.getByLabel('Prepare FLAC after import',{exact:true}).uncheck();
+ await imports.getByLabel('Audio preparation after import',{exact:true}).selectOption('none');
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
  await page.waitForURL(url=>url.searchParams.has('item'));
  const laterIntake=new URL(page.url()).searchParams.get('item');
@@ -233,7 +234,7 @@ try{
  const taggedFile=path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03-tagged.wav');
  await page.goto(`${origin}/imports?collection=${collection}`);
  await imports.getByLabel("Choose one package's files").setInputFiles(taggedFile);
- await imports.getByLabel('Prepare FLAC after import',{exact:true}).check();
+ await imports.getByLabel('Audio preparation after import',{exact:true}).selectOption('flac');
  await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
  const taggedIntake=new URL(page.url()).searchParams.get('item');
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,taggedIntake),{timeout:60000}).toBe('completed');
@@ -412,4 +413,4 @@ try{
  await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
  await page.getByRole('region',{name:'Album tracks'}).getByText('1. FLAC original',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery, paged bulk album metadata and failure recovery, striped rows, loading states and mobile layout. Artifacts: ${scratch}`);
-}catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{await browser?.close();await stopProcess(server);}
+}catch(error){console.error(error);console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{try{await browser?.close();}finally{await stopProcess(server);}}

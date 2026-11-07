@@ -1,16 +1,18 @@
 //! Mechanisms for private library maintenance state and indexed queries.
 use super::*;
 use collector_app::{
-    LibraryCarePort, MetadataCareQuery, MetadataPreferences, UpdateMetadataPreferences,
+    LibraryCarePort, LibraryEntry, MetadataCareQuery, MetadataPreferences,
+    UpdateMetadataPreferences,
 };
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
     crate::digital_pipeline::install(db)?;
+    // The old FLAC-only projection is replaced by the generation-fenced library cache.
+    db.execute_batch("DROP TABLE IF EXISTS preparation_readiness")
+        .map_err(storage)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,missing_name INTEGER NOT NULL,missing_artwork INTEGER NOT NULL,album_ambiguity INTEGER NOT NULL,incomplete_provider_information INTEGER NOT NULL,no_match INTEGER NOT NULL,manual_conflict INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS album_group_members(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,album_id TEXT NOT NULL,PRIMARY KEY(item_id,album_id));
     CREATE INDEX IF NOT EXISTS album_group_matches ON album_group_members(collection_id,album_id,item_id);
-    CREATE TABLE IF NOT EXISTS preparation_readiness(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,total_tracks INTEGER NOT NULL,ready_tracks INTEGER NOT NULL,source_count INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
-    CREATE INDEX IF NOT EXISTS preparation_readiness_attention ON preparation_readiness(needs_attention,collection_id,item_id);
     CREATE TABLE IF NOT EXISTS metadata_language_display(item_id TEXT NOT NULL,language TEXT NOT NULL,title TEXT NOT NULL,subtitle TEXT NOT NULL,title_key TEXT NOT NULL,PRIMARY KEY(item_id,language));
     CREATE INDEX IF NOT EXISTS metadata_language_order ON metadata_language_display(language,title_key,item_id);
     CREATE INDEX IF NOT EXISTS metadata_health_attention ON metadata_health(needs_attention,collection_id,title_key,item_id);
@@ -500,25 +502,33 @@ impl LibraryCarePort for Store {
         };
         Ok(Page { items, next_cursor })
     }
-    fn preparation_care_items(
+    fn preparation_care_rows(
         &self,
         user: UserId,
         query: &MetadataCareQuery,
-    ) -> Result<Page<Item>> {
+        profile: &ConversionProfile,
+        namespace: &str,
+        language: &str,
+    ) -> Result<collector_app::PreparationCarePage> {
         let page_limit = query.limit.unwrap_or(50);
         if !(1..=200).contains(&page_limit) || query.search.len() > 256 {
             return Err(Error::Invalid(
                 "Use a 1–200 entry page and a search of at most 256 characters.".into(),
             ));
         }
-        let language = self
-            .metadata_preferences(user)?
-            .language
-            .as_str()
+        let display_language = language
             .split('-')
             .next()
             .unwrap_or("en")
             .to_ascii_lowercase();
+        let profile_index = ConversionProfile::PRESETS
+            .iter()
+            .position(|p| p == profile)
+            .ok_or_else(|| Error::Invalid("Unsupported audio preparation profile".into()))?;
+        let path = format!("$.preparation[{profile_index}]");
+        let db = self.db.read_lock()?;
+        let snapshot = db.unchecked_transaction().map_err(storage)?;
+        let revision = crate::library::revision(&snapshot)?;
         let scope = Digest::sha256(
             &serde_json::to_vec(&(
                 user,
@@ -526,7 +536,9 @@ impl LibraryCarePort for Store {
                 &query.search,
                 query.needs_attention,
                 "preparation",
-                &language,
+                language,
+                profile,
+                &revision,
             ))
             .map_err(storage)?,
         )
@@ -538,49 +550,81 @@ impl LibraryCarePort for Store {
             let (saved, title, id): (String, String, String) =
                 serde_json::from_slice(&hex::decode(raw).map_err(storage)?).map_err(storage)?;
             if saved != scope {
-                return Err(Error::Invalid(
-                    "This cursor belongs to different preparation results.".into(),
-                ));
+                return Err(Error::Conflict);
             }
             Some((title, id))
         } else {
             None
         };
-        let db = lock(&self.db)?;
-        let mut stmt=db.prepare("SELECT i.record,COALESCE(d.title_key,b.title_key) FROM preparation_readiness r JOIN items i ON i.id=r.item_id JOIN browse_items b ON b.id=i.id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 WHERE i.deleted=0 AND (?2 IS NULL OR i.collection_id=?2) AND (?3=0 OR r.needs_attention=1) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,b.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,b.title_key),i.id LIMIT ?8").map_err(storage)?;
-        let rows = stmt
-            .query_map(
-                params![
-                    user.to_string(),
-                    query.collection_id.map(|v| v.to_string()),
-                    query.needs_attention,
-                    query.search,
-                    cursor.is_some(),
-                    cursor.as_ref().map(|v| v.0.as_str()).unwrap_or(""),
-                    cursor.as_ref().map(|v| v.1.as_str()).unwrap_or(""),
-                    u32::from(page_limit) + 1,
-                    language
-                ],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-            )
-            .map_err(storage)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(storage)?;
-        let more = rows.len() > usize::from(page_limit);
+
+        let from = "FROM items i
+            JOIN browse_items b ON b.id=i.id
+            JOIN library_entry_basics basic ON basic.item_id=i.id
+            JOIN library_entry_versions v ON v.item_id=i.id
+            LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=:display
+            JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=:user AND g.role>=1
+            JOIN private.users u ON u.id=g.user_id AND u.enabled=1
+            LEFT JOIN private.library_dirty dirty ON dirty.item_id=i.id
+            LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=:namespace AND c.language=:language AND c.role=g.role AND dirty.item_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
+            LEFT JOIN library_entry_attempts a ON a.item_id=i.id AND a.token=v.token AND a.namespace=:namespace AND a.language=:language AND a.role=g.role AND dirty.item_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
+            WHERE i.deleted=0 AND basic.listening=1 AND (:collection IS NULL OR i.collection_id=:collection)
+            AND (:search='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(:search))>0)";
+        let collection = query.collection_id.map(|id| id.to_string());
+        let user = user.to_string();
+        let common = rusqlite::named_params! {":display":display_language,":user":user,":namespace":namespace,":language":language,":collection":collection,":search":query.search};
+        let state: i64 = snapshot.query_row(&format!("SELECT COALESCE(MAX(CASE WHEN c.item_id IS NOT NULL THEN 0 WHEN a.item_id IS NULL THEN 2 ELSE 1 END),0) {from}"), common, |row| row.get(0)).map_err(storage)?;
+        let mut stmt = snapshot.prepare(&format!("SELECT COALESCE(json_remove(c.record,'$.preparation'),json_set(basic.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),
+            COALESCE(d.title_key,b.title_key), i.revision, json_extract(c.record,:profile), a.item_id IS NOT NULL
+            {from} AND (:attention=0 OR json_extract(c.record,:profile||'.needs_attention')=1)
+            AND (:after=0 OR (COALESCE(d.title_key,b.title_key),i.id)>(:title,:id))
+            ORDER BY COALESCE(d.title_key,b.title_key),i.id LIMIT :limit")).map_err(storage)?;
+        let mut parameters = common.to_vec();
+        let after = cursor.is_some();
+        let title = cursor.as_ref().map(|v| v.0.as_str()).unwrap_or("");
+        let id = cursor.as_ref().map(|v| v.1.as_str()).unwrap_or("");
+        let limit = u32::from(page_limit) + 1;
+        parameters.extend(rusqlite::named_params! {":profile":path,":attention":query.needs_attention,":after":after,":title":title,":id":id,":limit":limit});
+        let mut rows = stmt.query(parameters.as_slice()).map_err(storage)?;
         let mut items = Vec::new();
         let mut last = None;
-        for (raw, title) in rows.into_iter().take(usize::from(page_limit)) {
-            let item: Item = serde_json::from_str(&raw).map_err(storage)?;
-            last = Some((scope.clone(), title, item.id.to_string()));
-            items.push(item);
+        while let Some(row) = rows.next().map_err(storage)? {
+            if items.len() == usize::from(page_limit) {
+                return Ok(collector_app::PreparationCarePage {
+                    items,
+                    next_cursor: last
+                        .map(|v| serde_json::to_vec(&v).map(hex::encode).map_err(storage))
+                        .transpose()?,
+                    catalog_revision: revision,
+                    summary_state: preparation_summary_state(state),
+                });
+            }
+            let mut item: LibraryEntry =
+                serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?)
+                    .map_err(storage)?;
+            if item.summary_state == collector_app::LibrarySummaryState::Pending
+                && row.get::<_, bool>(4).map_err(storage)?
+            {
+                item.summary_state = collector_app::LibrarySummaryState::Retrying;
+            }
+            last = Some((&scope, row.get::<_, String>(1).map_err(storage)?, item.id));
+            items.push(collector_app::PreparationCareEntry {
+                item,
+                revision: Revision(row.get(2).map_err(storage)?),
+                readiness: row
+                    .get::<_, Option<String>>(3)
+                    .map_err(storage)?
+                    .map(|raw| serde_json::from_str(&raw).map_err(storage))
+                    .transpose()?,
+            });
         }
-        let next_cursor = if more {
-            last.map(|v| serde_json::to_vec(&v).map(hex::encode).map_err(storage))
-                .transpose()?
-        } else {
-            None
-        };
-        Ok(Page { items, next_cursor })
+        Ok(collector_app::PreparationCarePage {
+            items,
+            next_cursor: None,
+            catalog_revision: revision,
+            summary_state: preparation_summary_state(state),
+        })
     }
     fn metadata_preferences(&self, user: UserId) -> Result<MetadataPreferences> {
         let db = lock(&self.db)?;
@@ -788,125 +832,6 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
     Ok(())
 }
 
-/// Rebuildable summary from immutable observations and recipes, without opening media.
-pub(crate) fn project_preparation(db: &Connection, item_id: ItemId) -> Result<()> {
-    let raw: Option<String> = db
-        .query_row(
-            "SELECT record FROM items WHERE id=?",
-            [item_id.to_string()],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(storage)?;
-    let Some(raw) = raw else {
-        return Ok(());
-    };
-    let item: Item = serde_json::from_str(&raw).map_err(storage)?;
-    if !matches!(
-        item.domain.module.0.as_str(),
-        "org.junk.music" | "org.junk.games"
-    ) || item.deleted
-    {
-        db.execute(
-            "DELETE FROM preparation_readiness WHERE item_id=?",
-            [item_id.to_string()],
-        )
-        .map_err(storage)?;
-        return Ok(());
-    }
-    let mut stmt = db
-        .prepare("SELECT record FROM captures WHERE item_id=? ORDER BY id")
-        .map_err(storage)?;
-    let captures = stmt
-        .query_map([item_id.to_string()], |r| r.get::<_, String>(0))
-        .map_err(storage)?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(storage)?;
-    drop(stmt);
-    let mut discs = std::collections::BTreeMap::<String, (u32, u32)>::new();
-    let mut sources = 0u32;
-    for raw in captures {
-        let capture: Capture = serde_json::from_str(&raw).map_err(storage)?;
-        if item.lifecycle.historical_captures.contains(&capture.id) {
-            continue;
-        }
-        for source in capture
-            .representations
-            .iter()
-            .filter(|r| r.role == RepresentationRole::PreservationMaster)
-        {
-            sources += 1;
-            let mut stmt=db.prepare("SELECT record FROM processing_observations WHERE source_scope='representation' AND source_id=? AND operation IN ('org.junk.music.cd-structure','org.junk.music.import-analysis','org.junk.games.cd-audio','org.junk.games.identify','org.junk.games.import-analysis') ORDER BY created_at DESC,id DESC").map_err(storage)?;
-            let mut rows = stmt.query([source.id.to_string()]).map_err(storage)?;
-            let mut layout = None;
-            while let Some(row) = rows.next().map_err(storage)? {
-                let record: collector_app::PortableProcessingRecord =
-                    serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?)
-                        .map_err(storage)?;
-                let fingerprint = &record.observation.source_fingerprint;
-                if fingerprint.files.len() != source.files.len()
-                    || fingerprint
-                        .files
-                        .iter()
-                        .zip(&source.files)
-                        .any(|(f, s)| f.sha256 != s.digest || f.bytes != s.bytes)
-                {
-                    continue;
-                }
-                if let Some((key, total)) =
-                    collector_app::preparation_layout_projection(&record.observation, source)?
-                {
-                    layout = Some((key, total, fingerprint.clone()));
-                    break;
-                }
-            }
-            drop(rows);
-            drop(stmt);
-            let Some((key, total, fingerprint)) = layout else {
-                continue;
-            };
-            let mut ready = std::collections::BTreeSet::new();
-            for representation in capture.representations.iter().filter(|r| {
-                r.source == Some(source.id) && r.profile == Some(ConversionProfile::Flac)
-            }) {
-                let recipe: Option<String> = db
-                    .query_row(
-                        "SELECT record FROM conversion_recipes WHERE id=?",
-                        [representation.id.to_string()],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(storage)?;
-                if let Some(raw) = recipe {
-                    let recipe: collector_core::ConversionRecipe =
-                        serde_json::from_str(&raw).map_err(storage)?;
-                    if recipe.source_fingerprint == fingerprint {
-                        for track in recipe.tracks {
-                            ready.insert(track.position);
-                        }
-                    }
-                }
-            }
-            let counts = discs.entry(key).or_default();
-            counts.0 = counts.0.max(u32::from(total));
-            counts.1 = counts.1.max(ready.len() as u32);
-        }
-    }
-    let (total, ready) = discs
-        .values()
-        .fold((0u32, 0u32), |(t, r), (dt, dr)| (t + dt, r + dr));
-    if item.domain.module.0 == "org.junk.games" && total == 0 {
-        db.execute(
-            "DELETE FROM preparation_readiness WHERE item_id=?",
-            [item_id.to_string()],
-        )
-        .map_err(storage)?;
-        return Ok(());
-    }
-    db.execute("INSERT INTO preparation_readiness VALUES(?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,total_tracks=excluded.total_tracks,ready_tracks=excluded.ready_tracks,source_count=excluded.source_count,needs_attention=excluded.needs_attention",params![item_id.to_string(),item.collection_id.to_string(),total,ready,sources,total==0||ready<total]).map_err(storage)?;
-    Ok(())
-}
-
 pub(crate) fn install_read_clock(db: &Connection) -> Result<()> {
     db.execute_batch("CREATE INDEX IF NOT EXISTS snapshot_response_lookup ON snapshots(collection_id,json_extract(record,'$.digest.hex'),json_extract(record,'$.acquisition_key'),id);").map_err(storage)?;
     for (schema, tables) in [
@@ -937,4 +862,13 @@ pub(crate) fn install_read_clock(db: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn preparation_summary_state(state: i64) -> collector_app::LibrarySummaryState {
+    use collector_app::LibrarySummaryState::*;
+    match state {
+        0 => Ready,
+        1 => Retrying,
+        _ => Pending,
+    }
 }

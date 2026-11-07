@@ -70,6 +70,10 @@ pub struct IntakeSession {
     pub needs_attention: u32,
     pub automatic_metadata: bool,
     pub prepare_music: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_preparation: Option<ImportAudioPreparation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus_import: Option<OpusImportDefault>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -83,6 +87,8 @@ pub struct CreateIntake {
     pub automatic_metadata: bool,
     #[serde(default)]
     pub prepare_music: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_preparation: Option<ImportAudioPreparation>,
 }
 fn automatic_metadata_default() -> bool {
     true
@@ -286,6 +292,19 @@ impl CollectionService {
                 return Err(Error::Invalid("Plan 1–10,000 packages and at most 100,000 files per intake. Split larger selections into separate intakes.".into()));
             }
             let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+            if command.prepare_music && command.audio_preparation.is_some() {
+                return Err(Error::Invalid("Choose one import preparation option.".into()));
+            }
+            let profile = command.audio_preparation.map(ImportAudioPreparation::profile).transpose()?.flatten();
+            let music = eligibility.owner.0 == "org.junk.music";
+            if !music && (command.prepare_music || profile.is_some()) {
+                return Err(Error::Invalid("Import preparation applies to music collections.".into()));
+            }
+            let opus_import = if music && !command.prepare_music && command.audio_preparation.is_none() {
+                Some(self.care.cd_settings(command.collection_id)?.opus_import)
+            } else {
+                None
+            };
             let now = self.authentication.now();
             effects.create_intake(PrivateIntake {
                 user_id: actor.user_id,
@@ -305,6 +324,8 @@ impl CollectionService {
                     needs_attention: 0,
                     automatic_metadata: command.automatic_metadata,
                     prepare_music: command.prepare_music,
+                    audio_preparation: command.audio_preparation,
+                    opus_import,
                     created_at: now,
                     updated_at: now,
                 },
@@ -566,6 +587,7 @@ impl CollectionService {
                         collection_id: intake.session.collection_id,
                         token: member.plan_token,
                         packages: vec![package],
+                        opus_import: None,
                     },
                     analysis: IngestAnalysisPolicy::Automatic,
                     enrichment: if intake.session.automatic_metadata {
@@ -575,6 +597,19 @@ impl CollectionService {
                     },
                     prepare_music: intake.session.prepare_music
                         && member.plan.preparation_available,
+                    audio_preparation: if intake.session.prepare_music
+                        && member.plan.preparation_available
+                    {
+                        None
+                    } else {
+                        Some(intake.session.audio_preparation.unwrap_or_else(|| {
+                            intake
+                                .session
+                                .opus_import
+                                .unwrap_or_default()
+                                .for_package(&member.plan)
+                        }))
+                    },
                     destination,
                 };
                 let (mut child_records, mut child_intents) = match self.build_guided_import_records(

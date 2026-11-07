@@ -1,4 +1,7 @@
-use std::io::{Read, Seek, Write};
+use std::{
+    io::{Read, Seek, Write},
+    sync::Arc,
+};
 
 use collector_core::{
     ByteLength, ConversionProfile, ConversionRecipe, ConversionSettings, ConversionTrack, Digest,
@@ -840,22 +843,18 @@ impl CollectionService {
             claim: None,
         };
         let mut disc_audio = None;
-        let wav = self.wav_conversion_track(
+        let wav = self.file_conversion_track(
             capture.collection_id,
             command.representation_id,
             &command.selection,
+            &command.profile,
             command.track_position,
         )?;
         let tracks = if let Some(track) = &wav {
-            if command.profile != ConversionProfile::Flac {
-                return Err(Error::Invalid(
-                    "WAV originals support lossless FLAC preparation".into(),
-                ));
-            }
             vec![collector_modules::disc_audio::ConversionPcmTrack {
                 position: track.position,
                 start_frame: 0,
-                frame_count: track.audio.decoded_frames.ok_or(Error::Conflict)?,
+                frame_count: file_conversion_frames(&track.audio, &command.profile)?,
                 leading_hidden_frames: 0,
             }]
         } else if command.selection.package_kind
@@ -888,7 +887,9 @@ impl CollectionService {
             command.profile.clone(),
             command.encoder_version.clone(),
         )?;
-        if let Some(track) = &wav {
+        if let Some(track) = &wav
+            && command.profile == ConversionProfile::Flac
+        {
             recipe = wav_recipe_format(recipe, &track.audio)?;
         }
         // Identity excludes requester/key, so separate requests converge at publication.
@@ -906,7 +907,16 @@ impl CollectionService {
             collection_id: capture.collection_id,
             collection_binding: binding,
             selection: collector_modules::music::AudioPackageSelection {
-                package_kind: command.selection.package_kind,
+                package_kind: if wav.is_some() {
+                    match command.profile {
+                        ConversionProfile::Flac => collector_modules::music::AudioPackageKind::Wav,
+                        ConversionProfile::Opus { .. } => {
+                            collector_modules::music::AudioPackageKind::FileAudio
+                        }
+                    }
+                } else {
+                    command.selection.package_kind
+                },
                 anchor_file_index: wav
                     .as_ref()
                     .map_or(command.selection.anchor_file_index, |t| t.file_index),
@@ -1300,12 +1310,7 @@ impl CollectionService {
         };
         let assignments = self.music_disc_assignments(item)?;
         let unscoped_manual_titles = item.captures.len() == 1;
-        let profiles = [
-            ConversionProfile::Flac,
-            ConversionProfile::Opus { bitrate_kbps: 96 },
-            ConversionProfile::Opus { bitrate_kbps: 128 },
-            ConversionProfile::Opus { bitrate_kbps: 192 },
-        ];
+        let profiles = ConversionProfile::PRESETS;
         let mut rows = Vec::new();
         for capture in item
             .captures
@@ -1388,6 +1393,9 @@ impl CollectionService {
                         }
                     }
                 }
+                let fingerprint = self
+                    .processing
+                    .recorded_source(item.collection_id, PackageScope::Representation(source.id))?;
                 let mut retained = Vec::new();
                 for representation in capture.representations.iter().filter(|representation| {
                     representation.source == Some(source.id) && representation.profile.is_some()
@@ -1398,6 +1406,9 @@ impl CollectionService {
                         Err(Error::NotFound) => continue,
                         Err(error) => return Err(error),
                     };
+                    if recipe.source_fingerprint != fingerprint {
+                        continue;
+                    }
                     if recipe.tracks.len() == 1
                         && !tracks
                             .iter()
@@ -1492,8 +1503,7 @@ impl CollectionService {
                                 digest: file.digest.clone(),
                             }
                         } else if active.iter().any(|job| {
-                            job.input.recipe.source_fingerprint.source
-                                == PackageScope::Representation(source.id)
+                            job.input.recipe.source_fingerprint == fingerprint
                                 && job.input.recipe.tracks.as_slice() == [track.clone()]
                                 && profile_for_recipe(&job.input.recipe) == profile
                         }) {
@@ -1607,7 +1617,7 @@ impl CollectionService {
         }
         if self.recorded_file_tracks(collection_id, source)?.is_some() {
             return Ok(collector_modules::music::AudioPackageSelection {
-                package_kind: collector_modules::music::AudioPackageKind::Wav,
+                package_kind: collector_modules::music::AudioPackageKind::FileAudio,
                 anchor_file_index: 0,
             });
         }
@@ -1735,13 +1745,15 @@ impl CollectionService {
                 return Err(Error::Conflict);
             }
         }
-        let wav = self.wav_conversion_track(
+        let profile = profile_for_recipe(&frozen.recipe);
+        let wav = self.file_conversion_track(
             frozen.collection_id,
             match frozen.recipe.source_fingerprint.source {
                 PackageScope::Representation(id) => id,
                 _ => return Err(Error::Conflict),
             },
             &frozen.selection,
+            &profile,
             frozen.recipe.tracks[0].position,
         )?;
         if wav
@@ -1754,25 +1766,54 @@ impl CollectionService {
             if let Some(track) = &wav {
                 use collector_modules::ModuleHost;
                 let file = host.package_file(host.access, track.file_id)?;
-                let reader = junk_libs_pcm::WavReader::open(file, &mut || {
-                    checkpoint().map_err(std::io::Error::other)
-                })
-                .map_err(|e| Error::Invalid(e.to_string()))?;
-                use junk_libs_pcm::IntegerPcmReader;
-                let actual = reader.format();
-                if actual.sample_rate != track.audio.sample_rate
-                    || actual.channels != track.audio.channels
-                    || Some(u32::from(actual.bits)) != track.audio.bits_per_sample
-                    || Some(reader.total_frames()) != track.audio.decoded_frames
-                {
-                    return Err(Error::Conflict);
-                }
+                let reader: Box<dyn junk_libs_pcm::IntegerPcmReader> =
+                    if matches!(profile, ConversionProfile::Opus { .. }) {
+                        let member = inventory
+                            .files
+                            .get(track.file_index)
+                            .ok_or(Error::Conflict)?;
+                        let hint = junk_libs_audio::MediaHint::new(
+                            Some(member.bytes.0),
+                            Some(&track.audio.codec),
+                            None,
+                        );
+                        let file = crate::ProcessingReader {
+                            reader: file,
+                            cancellation: Arc::new(crate::ProcessingCancellation::new(
+                                self.jobs.clone(),
+                                claim.id,
+                                claim.claim_token.clone(),
+                            )),
+                        };
+                        Box::new(
+                            junk_libs_pcm::opus_input::OpusFileInput::open(
+                                junk_libs_audio::ByteSource::new(file, hint),
+                                &track.audio,
+                            )
+                            .map_err(|error| Error::Invalid(error.to_string()))?,
+                        )
+                    } else {
+                        let reader = junk_libs_pcm::WavReader::open(file, &mut || {
+                            checkpoint().map_err(std::io::Error::other)
+                        })
+                        .map_err(|e| Error::Invalid(e.to_string()))?;
+                        use junk_libs_pcm::IntegerPcmReader;
+                        let actual = reader.format();
+                        if actual.sample_rate != track.audio.sample_rate
+                            || actual.channels != track.audio.channels
+                            || Some(u32::from(actual.bits)) != track.audio.bits_per_sample
+                            || Some(reader.total_frames()) != track.audio.decoded_frames
+                        {
+                            return Err(Error::Conflict);
+                        }
+                        Box::new(reader)
+                    };
                 (
-                    Box::new(reader),
+                    reader,
                     vec![collector_modules::disc_audio::ConversionPcmTrack {
                         position: track.position,
                         start_frame: 0,
-                        frame_count: track.audio.decoded_frames.ok_or(Error::Conflict)?,
+                        frame_count: file_conversion_frames(&track.audio, &profile)?,
                         leading_hidden_frames: 0,
                     }],
                 )
@@ -1798,7 +1839,9 @@ impl CollectionService {
             },
             frozen.recipe.encoder_version.clone(),
         )?;
-        if let Some(track) = &wav {
+        if let Some(track) = &wav
+            && profile == ConversionProfile::Flac
+        {
             expected = wav_recipe_format(expected, &track.audio)?;
         }
         if expected.digest != frozen.recipe.digest {
@@ -2074,14 +2117,19 @@ fn wav_recipe_format(
     recipe.seal()
 }
 impl CollectionService {
-    fn wav_conversion_track(
+    fn file_conversion_track(
         &self,
         collection: CollectionId,
         source: RepresentationId,
         selection: &collector_modules::music::AudioPackageSelection,
+        profile: &ConversionProfile,
         position: u16,
     ) -> Result<Option<collector_modules::music::files::FileTrack>> {
-        if selection.package_kind != collector_modules::music::AudioPackageKind::Wav {
+        use collector_modules::music::AudioPackageKind;
+        if !matches!(
+            selection.package_kind,
+            AudioPackageKind::Wav | AudioPackageKind::FileAudio
+        ) {
             return Ok(None);
         }
         let manifest = self
@@ -2092,11 +2140,31 @@ impl CollectionService {
             .into_iter()
             .find(|t| t.position == position)
             .ok_or(Error::Conflict)?;
-        if track.audio.codec != "wav" {
+        if *profile == ConversionProfile::Flac && track.audio.codec != "wav" {
             return Err(Error::Invalid(
                 "Only WAV originals need FLAC preparation".into(),
             ));
         }
         Ok(Some(track))
+    }
+}
+
+pub(crate) fn file_conversion_frames(
+    audio: &junk_libs_audio::FileAudioInfo,
+    profile: &ConversionProfile,
+) -> Result<u64> {
+    let frames = audio.decoded_frames.ok_or(Error::Conflict)?;
+    match profile {
+        ConversionProfile::Flac => Ok(frames),
+        ConversionProfile::Opus { .. } => {
+            junk_libs_pcm::opus_input::frames_at_input_rate(frames, audio.sample_rate).ok_or_else(
+                || {
+                    Error::Unavailable(
+                "The original's sample rate or duration is unsupported for Opus preparation."
+                    .into(),
+            )
+                },
+            )
+        }
     }
 }

@@ -2260,6 +2260,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library-care/music-preparation/revision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["preparation_revision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/summary": {
         parameters: {
             query?: never;
@@ -3123,6 +3139,7 @@ export interface components {
             kind: components["schemas"]["BulkLibraryKind"];
             /** Format: int32 */
             pending: number;
+            profile?: components["schemas"]["ConversionProfile"];
             /** Format: int32 */
             selected: number;
             source_bytes: components["schemas"]["ByteLength"];
@@ -3278,6 +3295,7 @@ export interface components {
             check_accuraterip_on_ingest: boolean;
             /** Format: int32 */
             maximum_offset: number;
+            opus_import?: components["schemas"]["OpusImportDefault"];
             revision: components["schemas"]["Revision"];
         };
         ChangePassword: {
@@ -3490,6 +3508,7 @@ export interface components {
             name: string;
         };
         CreateIntake: {
+            audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
             automatic_metadata?: boolean;
             collection_id: components["schemas"]["CollectionId"];
             /** Format: int32 */
@@ -3841,6 +3860,18 @@ export interface components {
         };
         /** @enum {string} */
         IdentityState: "unidentified" | "tentative" | "selected" | "confirmed";
+        ImportAudioPreparation: {
+            /** @enum {string} */
+            codec: "none";
+        } | {
+            /** @enum {string} */
+            codec: "flac";
+        } | {
+            /** Format: int32 */
+            bitrate_kbps: number;
+            /** @enum {string} */
+            codec: "opus";
+        };
         ImportCandidate: {
             key: string;
             label: string;
@@ -3983,6 +4014,7 @@ export interface components {
         };
         IngestPlan: {
             collection_id: components["schemas"]["CollectionId"];
+            opus_import?: components["schemas"]["OpusImportDefault"] | null;
             packages: components["schemas"]["IngestPlanPackage"][];
             token: string;
         };
@@ -4030,6 +4062,7 @@ export interface components {
             package_name: string;
             permissions: components["schemas"]["IngestPermissions"];
             phase: components["schemas"]["ImportPhase"];
+            preparation_profile?: components["schemas"]["ConversionProfile"] | null;
             prepare_music: boolean;
             target_item_id?: components["schemas"]["ItemId"] | null;
             total_bytes: components["schemas"]["ByteLength"];
@@ -4095,6 +4128,7 @@ export interface components {
         IntakeSession: {
             /** Format: int32 */
             admitted: number;
+            audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
             automatic_metadata: boolean;
             collection_id: components["schemas"]["CollectionId"];
             /** Format: date-time */
@@ -4108,6 +4142,7 @@ export interface components {
             id: components["schemas"]["JobId"];
             /** Format: int32 */
             needs_attention: number;
+            opus_import?: components["schemas"]["OpusImportDefault"] | null;
             /** Format: int32 */
             package_count: number;
             prepare_music: boolean;
@@ -4273,6 +4308,7 @@ export interface components {
             metadata_provisional?: boolean;
             metadata_tentative: boolean;
             module: components["schemas"]["ModuleId"];
+            preparation?: components["schemas"]["PreparationReadiness"][];
             subtitle: string;
             summary_state: components["schemas"]["LibrarySummaryState"];
             title: string;
@@ -4983,6 +5019,13 @@ export interface components {
             /** @enum {string} */
             support: "externally_unqualified";
         };
+        OpusImportDefault: {
+            /** Format: int32 */
+            bitrate_kbps: number;
+            scope: components["schemas"]["OpusImportScope"];
+        };
+        /** @enum {string} */
+        OpusImportScope: "off" | "cd" | "cd_and_digital";
         Ownership: {
             /** @enum {string} */
             state: "owned";
@@ -5057,6 +5100,7 @@ export interface components {
                 kind: components["schemas"]["BulkLibraryKind"];
                 /** Format: int32 */
                 pending: number;
+                profile?: components["schemas"]["ConversionProfile"];
                 /** Format: int32 */
                 selected: number;
                 source_bytes: components["schemas"]["ByteLength"];
@@ -5134,6 +5178,7 @@ export interface components {
                 package_name: string;
                 permissions: components["schemas"]["IngestPermissions"];
                 phase: components["schemas"]["ImportPhase"];
+                preparation_profile?: components["schemas"]["ConversionProfile"] | null;
                 prepare_music: boolean;
                 target_item_id?: components["schemas"]["ItemId"] | null;
                 total_bytes: components["schemas"]["ByteLength"];
@@ -5159,6 +5204,7 @@ export interface components {
             items: {
                 /** Format: int32 */
                 admitted: number;
+                audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
                 automatic_metadata: boolean;
                 collection_id: components["schemas"]["CollectionId"];
                 /** Format: date-time */
@@ -5172,6 +5218,7 @@ export interface components {
                 id: components["schemas"]["JobId"];
                 /** Format: int32 */
                 needs_attention: number;
+                opus_import?: components["schemas"]["OpusImportDefault"] | null;
                 /** Format: int32 */
                 package_count: number;
                 prepare_music: boolean;
@@ -5257,13 +5304,6 @@ export interface components {
                 id: components["schemas"]["PasskeyId"];
                 label: string;
                 revision: components["schemas"]["Revision"];
-            }[];
-            next_cursor?: string | null;
-        };
-        Page_PreparationCareEntry: {
-            items: {
-                item: components["schemas"]["PresentedItem"];
-                plan: components["schemas"]["MusicAlbumPreparationPlan"];
             }[];
             next_cursor?: string | null;
         };
@@ -5452,10 +5492,29 @@ export interface components {
         /** @enum {string} */
         Possession: "present" | "lent" | "elsewhere" | "unknown";
         PreparationCareEntry: {
-            item: components["schemas"]["PresentedItem"];
-            plan: components["schemas"]["MusicAlbumPreparationPlan"];
+            item: components["schemas"]["LibraryEntry"];
+            readiness?: components["schemas"]["PreparationReadiness"] | null;
+            revision: components["schemas"]["Revision"];
+        };
+        PreparationCarePage: {
+            catalog_revision: string;
+            items: components["schemas"]["PreparationCareEntry"][];
+            next_cursor?: string | null;
+            summary_state: components["schemas"]["LibrarySummaryState"];
+        };
+        PreparationReadiness: {
+            /** Format: int32 */
+            discs: number;
+            needs_attention: boolean;
+            /** Format: int32 */
+            preparing: number;
+            /** Format: int32 */
+            ready: number;
+            /** Format: int32 */
+            tracks: number;
         };
         PrepareMusicAlbum: {
+            profile?: components["schemas"]["ConversionProfile"];
             source_representation_ids: components["schemas"]["RepresentationId"][];
         };
         PrepareMusicTrack: {
@@ -5612,6 +5671,7 @@ export interface components {
         };
         PreviewBulkLibrary: {
             kind: components["schemas"]["BulkLibraryKind"];
+            profile?: components["schemas"]["ConversionProfile"];
             selection: components["schemas"]["LibrarySelection"];
             sources?: {
                 [key: string]: components["schemas"]["RepresentationId"][];
@@ -5942,6 +6002,7 @@ export interface components {
         };
         StartIngestCommand: {
             analysis?: components["schemas"]["IngestAnalysisPolicy"];
+            audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
             clean_reimport?: components["schemas"]["CleanReimportOptions"] | null;
             destination?: components["schemas"]["IngestDestination"] | null;
             enrichment: components["schemas"]["IngestEnrichmentPolicy"];
@@ -6010,6 +6071,7 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
             /** Format: int32 */
             maximum_offset: number;
+            opus_import?: components["schemas"]["OpusImportDefault"] | null;
         };
         UpdateCollectionList: {
             change: components["schemas"]["CollectionListChange"];
@@ -12548,7 +12610,9 @@ export interface operations {
     };
     music_album_preparation_plan: {
         parameters: {
-            query?: never;
+            query?: {
+                opus_bitrate_kbps?: number;
+            };
             header?: never;
             path: {
                 item: components["schemas"]["ItemId"];
@@ -12823,6 +12887,7 @@ export interface operations {
                 needs_attention?: boolean;
                 cursor?: string;
                 limit?: number;
+                opus_bitrate_kbps?: number;
             };
             header?: never;
             path?: never;
@@ -12836,11 +12901,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_PreparationCareEntry"];
+                    "application/json": components["schemas"]["PreparationCarePage"];
                 };
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preparation_revision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

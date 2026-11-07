@@ -163,7 +163,7 @@ the extra inbox-to-private-staging-to-archive copy.
 | Option | Effect |
 |---|---|
 | `[encoders].flac` | Path or executable name for `flac`. Enables validated lossless track preparation. |
-| `[encoders].opus` | Path or executable name for `opusenc`. Enables explicit 96, 128, and 192 kbps track preparation. |
+| `[encoders].opus` | Path or executable name for `opusenc`. Enables 96, 128 and 192 kbps VBR track, album, batch and optional import preparation. See [audio preparation](audio-preparation.md). |
 
 Both are optional and are probed at startup and by `doctor`. Use absolute executable paths when running as a service, whose `PATH` may differ from your shell. Unavailable tools do not prevent preservation or original-file downloads.
 

@@ -647,6 +647,8 @@ pub struct IngestPlan {
     pub collection_id: CollectionId,
     pub token: String,
     pub packages: Vec<IngestPlanPackage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus_import: Option<OpusImportDefault>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -662,6 +664,8 @@ pub struct StartIngestCommand {
     pub enrichment: IngestEnrichmentPolicy,
     #[serde(default)]
     pub prepare_music: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_preparation: Option<ImportAudioPreparation>,
     #[serde(default)]
     pub destination: Option<IngestDestination>,
 }
@@ -715,6 +719,8 @@ pub struct GuidedIngestIntent {
     pub enrichment: IngestEnrichmentPolicy,
     pub enrichment_error: Option<String>,
     pub prepare_music: bool,
+    #[serde(default)]
+    pub opus_bitrate_kbps: Option<u16>,
     pub preparation_batch_id: Option<JobId>,
     pub preparation_error: Option<String>,
     pub settled: bool,
@@ -823,6 +829,7 @@ pub struct IngestSummary {
     pub outcome: IngestStepState,
     pub enrichment: IngestEnrichmentPolicy,
     pub prepare_music: bool,
+    pub preparation_profile: Option<ConversionProfile>,
     pub updated_at: DateTime<Utc>,
     pub permissions: IngestPermissions,
 }

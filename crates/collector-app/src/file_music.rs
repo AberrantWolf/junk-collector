@@ -147,7 +147,7 @@ impl CollectionService {
         for representation in capture
             .representations
             .iter()
-            .filter(|r| r.source == Some(source.id) && r.profile == Some(ConversionProfile::Flac))
+            .filter(|r| r.source == Some(source.id) && r.profile.is_some())
         {
             match self.processing.recipe(RecipeId(representation.id.0)) {
                 Ok(recipe) if recipe.source_fingerprint == fingerprint => {
@@ -208,9 +208,10 @@ impl CollectionService {
                 start: PcmFrame(0),
                 length: PcmFrame(audio.decoded_frames.ok_or(Error::Conflict)?),
             };
-            let published = retained
-                .iter()
-                .find(|(_, recipe)| recipe.tracks.as_slice() == [coordinate.clone()]);
+            let published = retained.iter().find(|(_, recipe)| {
+                crate::derivatives::profile_for_recipe(recipe) == ConversionProfile::Flac
+                    && recipe.tracks.as_slice() == [coordinate.clone()]
+            });
             let state = if wav {
                 if let Some((representation, _)) = published {
                     let output = representation.files.first().ok_or(Error::Conflict)?;
@@ -290,6 +291,69 @@ impl CollectionService {
                 can_prepare,
                 state,
             });
+
+            let original = rows.last().ok_or(Error::Conflict)?.clone();
+            for profile in ConversionProfile::PRESETS.into_iter().skip(1) {
+                let geometry = crate::derivatives::file_conversion_frames(audio, &profile);
+                let mut row = original.clone();
+                row.profile = Some(profile.clone());
+                row.audio_format = Some(collector_api_types::MusicAudioFormat {
+                    codec: "opus".into(),
+                    sample_rate: 48000,
+                    channels: 2,
+                    bits_per_sample: None,
+                    delay_frames: None,
+                    padding_frames: None,
+                });
+                row.can_prepare = false;
+                row.state = match geometry {
+                    Ok(frames) => {
+                        row.frame_count = PcmFrame(frames);
+                        let track = ConversionTrack {
+                            length: row.frame_count,
+                            ..coordinate.clone()
+                        };
+                        if let Some((representation, _)) = retained.iter().find(|(_, recipe)| {
+                            crate::derivatives::profile_for_recipe(recipe) == profile
+                                && recipe.tracks.as_slice() == [track.clone()]
+                        }) {
+                            let output = representation.files.first().ok_or(Error::Conflict)?;
+                            let inventory = self.processing.package_inventory(
+                                item.collection_id,
+                                PackageScope::Representation(representation.id),
+                            )?;
+                            MusicTrackAvailabilityState::Available {
+                                representation_id: representation.id,
+                                file_id: inventory.files.first().ok_or(Error::Conflict)?.id,
+                                file_index: 0,
+                                length: output.bytes,
+                                media_type: "audio/ogg; codecs=opus".into(),
+                                digest: output.digest.clone(),
+                            }
+                        } else if active.iter().any(|job| {
+                            job.input.recipe.source_fingerprint == fingerprint
+                                && job.input.recipe.tracks.as_slice() == [track.clone()]
+                                && crate::derivatives::profile_for_recipe(&job.input.recipe)
+                                    == profile
+                        }) {
+                            MusicTrackAvailabilityState::Preparing
+                        } else {
+                            let reason = match self.encoder_availability(&profile) {
+                                EncoderAvailability::Unavailable { reason } => reason,
+                                EncoderAvailability::Available { .. } => {
+                                    row.can_prepare = can_write;
+                                    "This track has not been prepared at this Opus bitrate.".into()
+                                }
+                            };
+                            MusicTrackAvailabilityState::Unavailable { reason }
+                        }
+                    }
+                    Err(error) => MusicTrackAvailabilityState::Unavailable {
+                        reason: error.to_string(),
+                    },
+                };
+                rows.push(row);
+            }
         }
         Ok(rows)
     }

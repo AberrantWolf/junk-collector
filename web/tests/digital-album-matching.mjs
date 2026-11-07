@@ -163,9 +163,15 @@ try{
  assert.equal(adopted.authority.artwork_choice,null,'provider artwork must remain automatic');
  assert.equal(adopted.review_reasons.includes('missing_artwork'),false);
  const coverResponse=await page.request.get(`${origin}/api/v1/collections/${collection}/assets/${adopted.display.artwork}/thumbnail`);assert.equal(coverResponse.status(),200);
- const resolutions=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}/metadata/resolutions`)).json(),item);
- const adoptionResolution=resolutions.find(value=>value.job.id===adoptionJob);
- assert.equal(adoptionResolution.result.outcome,'candidates');assert.equal(adoptionResolution.result.artwork_error,null);
+ // The artwork publication can be visible before the durable outcome commits.
+ await expect.poll(()=>page.evaluate(async ({item,job})=>{
+  const response=await fetch(`/api/v1/items/${item}/metadata/resolutions`);
+  const body=await response.json();
+  if(response.status===503&&body.error?.code==='catalog_busy')return null;
+  if(!response.ok)throw new Error(JSON.stringify(body));
+  const result=body.find(value=>value.job.id===job)?.result;
+  return result?[result.outcome,result.artwork_error]:null;
+ },{item,job:adoptionJob}),{timeout:15000}).toEqual(['candidates',null]);
  await expect(matching).toContainText('Find matching albums again',{timeout:15000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  // Source-only edits preserve selected release, track mappings and automatic artwork.
  const sourceEditor=page.getByRole('region',{name:'Digital source',exact:true});

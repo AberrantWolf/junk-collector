@@ -82,6 +82,7 @@ impl Store {
             revision: Revision(current.revision.0.checked_add(1).ok_or(Error::Conflict)?),
             check_accuraterip_on_ingest: command.check_accuraterip_on_ingest,
             maximum_offset: command.maximum_offset,
+            opus_import: command.opus_import.unwrap_or(current.opus_import),
         };
         result.validate()?;
         tx.execute("INSERT INTO private.settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![format!("cd_settings:{collection}"),serde_json::to_string(&result).map_err(storage)?]).map_err(storage)?;

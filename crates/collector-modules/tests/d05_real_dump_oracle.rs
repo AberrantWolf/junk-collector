@@ -131,7 +131,7 @@ fn owned_cd_dump_matches_declared_layout_and_accuraterip_oracles() {
             Box<dyn junk_libs_disc::CdPcmReader>,
             _,
         ) = match package.kind {
-            AudioPackageKind::Wav | AudioPackageKind::CueAudio => {
+            AudioPackageKind::Wav | AudioPackageKind::FileAudio | AudioPackageKind::CueAudio => {
                 panic!("Playback geometry is outside the whole-disc oracle")
             }
             AudioPackageKind::Cue => {

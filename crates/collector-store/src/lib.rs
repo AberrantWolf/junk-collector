@@ -62,7 +62,7 @@ use std::{
 };
 pub use storage_guard::{ArchiveMount, validate_remote_archive_target};
 
-pub(crate) const PRIVATE_SCHEMA: u32 = 22;
+pub(crate) const PRIVATE_SCHEMA: u32 = 23;
 
 pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
     Error::Storage(e.to_string())
@@ -856,7 +856,7 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
-            "DELETE FROM library_entry_attempts; DELETE FROM library_entry_basics; DELETE FROM library_entries; DELETE FROM library_entry_versions; DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM preparation_readiness; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM music_search; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
+            "DELETE FROM library_entry_attempts; DELETE FROM library_entry_basics; DELETE FROM library_entries; DELETE FROM library_entry_versions; DELETE FROM collection_lists; DELETE FROM metadata_language_display; DELETE FROM metadata_health; DELETE FROM album_group_members; DELETE FROM metadata_authorities; DELETE FROM metadata_candidates; DELETE FROM browse_items; DELETE FROM music_search; DELETE FROM collections; DELETE FROM items; DELETE FROM search; DELETE FROM evidence; DELETE FROM assets; DELETE FROM works; DELETE FROM editions; DELETE FROM captures; DELETE FROM components; DELETE FROM legacy_payload_locators;",
         )
         .map_err(storage)?;
         for (collection, path) in collections {
@@ -948,7 +948,6 @@ impl Store {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(storage)?;
         for id in ids {
-            library_care::project_preparation(&tx, id.parse().map_err(storage)?)?;
             music_search::refresh(&tx, id.parse().map_err(storage)?)?;
         }
         self.record_command(&tx, &())?;
@@ -2817,6 +2816,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         ("cd_check_settings", "TEXT"),
         ("cd_check_error", "TEXT"),
         ("prepare_music", "INTEGER NOT NULL DEFAULT 0"),
+        ("opus_bitrate_kbps", "INTEGER"),
         ("preparation_batch_id", "TEXT"),
         ("preparation_error", "TEXT"),
         ("anchor_file_index", "INTEGER"),
@@ -4338,7 +4338,6 @@ fn project_capture(tx: &Connection, capture: &Capture) -> Result<()> {
         music_search::refresh(tx, previous)?;
     }
     if let Some(item) = capture.association.item_id {
-        library_care::project_preparation(tx, item)?;
         music_search::refresh(tx, item)?;
     }
     Ok(())

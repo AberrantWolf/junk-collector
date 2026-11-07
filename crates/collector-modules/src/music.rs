@@ -99,6 +99,7 @@ pub struct MusicDiscAssignment {
 #[serde(rename_all = "snake_case")]
 pub enum AudioPackageKind {
     Wav,
+    FileAudio,
     CueAudio,
     Cue,
     Redumper,
@@ -1521,9 +1522,11 @@ fn analyze_selection(
     selection: &AudioPackageSelection,
 ) -> ModuleResult<CdProcessingResult> {
     match selection.package_kind {
-        AudioPackageKind::Wav => Err(ModuleError::UnavailableCapability(
-            "Digital WAV originals do not have CD verification coordinates".into(),
-        )),
+        AudioPackageKind::Wav | AudioPackageKind::FileAudio => {
+            Err(ModuleError::UnavailableCapability(
+                "Digital file originals do not have CD verification coordinates".into(),
+            ))
+        }
         AudioPackageKind::CueAudio => Err(ModuleError::UnavailableCapability(
             "Playback-only game CD audio does not support whole-disc verification".into(),
         )),
@@ -1577,9 +1580,9 @@ fn open_pcm_selection(
 ) -> ModuleResult<(PackagePcmReader, Vec<DiscPcmTrack>, CdProcessingResult)> {
     let layout = analyze_selection(host, access, inventory, selection)?;
     let (reader, tracks) = match selection.package_kind {
-        AudioPackageKind::Wav => {
+        AudioPackageKind::Wav | AudioPackageKind::FileAudio => {
             return Err(ModuleError::UnavailableCapability(
-                "Digital WAV originals do not have CD verification coordinates".into(),
+                "Digital file originals do not have CD verification coordinates".into(),
             ));
         }
         AudioPackageKind::CueAudio => {
@@ -1615,8 +1618,8 @@ pub fn open_conversion_pcm_selection(
 ) -> ModuleResult<ConversionPcmSource> {
     let inventory = host.package_inventory(access)?;
     match selection.package_kind {
-        AudioPackageKind::Wav => Err(ModuleError::Invalid(
-            "WAV conversion needs a recorded file track".into(),
+        AudioPackageKind::Wav | AudioPackageKind::FileAudio => Err(ModuleError::Invalid(
+            "Digital audio conversion needs a recorded file track".into(),
         )),
         AudioPackageKind::CueAudio => crate::disc_audio::open_conversion(
             host,
@@ -2039,6 +2042,7 @@ impl CollectionModule for Music {
                     AudioPackageKind::Cue | AudioPackageKind::CueAudio => "BIN/CUE",
                     AudioPackageKind::Redumper => "Redumper TOC",
                     AudioPackageKind::Wav => "WAV original",
+                    AudioPackageKind::FileAudio => "Digital audio original",
                 }
                 .into(),
                 selected: anchor_file_index

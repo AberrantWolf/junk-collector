@@ -1562,6 +1562,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: saved.id,
                     expected_revision: saved.revision,
@@ -4386,6 +4387,7 @@ fn start_cleanup_fixture_import(
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -7256,6 +7258,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &CommandContext::new("guided-redumper-anchor").unwrap(),
@@ -7318,6 +7321,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -7401,6 +7405,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -7418,6 +7423,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &key,
@@ -7433,6 +7439,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &key,
@@ -7448,6 +7455,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &key,
@@ -7700,6 +7708,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -7807,6 +7816,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: existing.id,
                     expected_revision: Revision(0)
@@ -7823,6 +7833,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
         analysis: collector_app::IngestAnalysisPolicy::Automatic,
         enrichment: IngestEnrichmentPolicy::None,
         prepare_music: false,
+        audio_preparation: None,
         destination,
     };
     let acceptance_key = command();
@@ -7932,6 +7943,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
         enrichment: IngestEnrichmentPolicy::None,
         prepare_music: false,
+        audio_preparation: None,
         destination: Some(collector_app::IngestDestination {
             item_id: existing.id,
             expected_revision: existing.revision,
@@ -7998,6 +8010,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8085,6 +8098,7 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: target.id,
                     expected_revision: target.revision,
@@ -8270,6 +8284,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8381,6 +8396,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8409,6 +8425,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: true,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8522,6 +8539,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
             &actor,
             target,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![capture.representations[0].id],
             },
             &command(),
@@ -8581,6 +8599,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8724,6 +8743,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -8962,6 +8982,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -9029,6 +9050,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -9115,6 +9137,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -14202,7 +14225,7 @@ fn album_admission_uses_recorded_identity_but_workers_reject_changed_payloads() 
     // Browsing/admission describe the recorded package; they do not attest to
     // current payload integrity. Background validation must still fail closed.
     let plan = service
-        .music_album_preparation_plan(&actor, saved.id)
+        .music_album_preparation_plan(&actor, saved.id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert_eq!(plan.total_tracks, 2);
     let batch = service
@@ -14210,6 +14233,7 @@ fn album_admission_uses_recorded_identity_but_workers_reject_changed_payloads() 
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![imported.representation_id],
             },
             &command(),
@@ -14244,12 +14268,13 @@ fn album_batches_fan_out_durably_overlap_without_duplicate_tracks_and_retry_part
     let encoder = Arc::new(DerivativeFixtureEncoder::new());
     let service = service.with_audio_converter(encoder.clone());
     let plan = service
-        .music_album_preparation_plan(&actor, saved.id)
+        .music_album_preparation_plan(&actor, saved.id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert_eq!(plan.discs.len(), 1);
     assert_eq!(plan.total_tracks, 2);
     assert!(plan.discs[0].sources[0].default_selected);
     let request = PrepareMusicAlbum {
+        profile: collector_core::ConversionProfile::Flac,
         source_representation_ids: vec![imported.representation_id],
     };
     let first = service
@@ -14347,6 +14372,7 @@ fn album_cancellation_respects_later_direct_requests_and_last_shared_request() {
     Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let request = PrepareMusicAlbum {
+        profile: collector_core::ConversionProfile::Flac,
         source_representation_ids: vec![imported.representation_id],
     };
     let first = service
@@ -14404,6 +14430,7 @@ fn album_cancellation_respects_later_direct_requests_and_last_shared_request() {
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![imported.representation_id],
             },
             &command(),
@@ -14433,6 +14460,7 @@ fn album_requests_from_another_curator_keep_job_details_private_and_respect_role
     Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let request = PrepareMusicAlbum {
+        profile: collector_core::ConversionProfile::Flac,
         source_representation_ids: vec![imported.representation_id],
     };
     let owner_batch = service
@@ -14535,6 +14563,7 @@ fn album_failed_admission_is_visible_retryable_and_cancel_fences_late_children()
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![imported.representation_id],
             },
             &command(),
@@ -14593,7 +14622,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
         Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
     }
     let unavailable = service
-        .music_album_preparation_plan(&actor, saved.id)
+        .music_album_preparation_plan(&actor, saved.id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert_eq!(unavailable.discs.len(), 2);
     assert!(!unavailable.can_submit);
@@ -14609,6 +14638,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![first.representation_id, second.representation_id],
             },
             &command(),
@@ -14619,7 +14649,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
     let encoder = Arc::new(DerivativeFixtureEncoder::new());
     let service = service.with_audio_converter(encoder);
     let plan = service
-        .music_album_preparation_plan(&actor, saved.id)
+        .music_album_preparation_plan(&actor, saved.id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert_eq!(plan.discs.len(), 2);
     let first_disc = plan
@@ -14642,6 +14672,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![first.representation_id, second.representation_id],
             },
             &command(),
@@ -14662,6 +14693,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![first.representation_id, first.representation_id],
             },
             &command(),
@@ -14722,7 +14754,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
         Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
     }
     let plan = service
-        .music_album_preparation_plan(&actor, saved.id)
+        .music_album_preparation_plan(&actor, saved.id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert_eq!(plan.discs.len(), 1);
     assert!(plan.discs[0].ambiguous);
@@ -14737,6 +14769,7 @@ fn album_plan_keeps_discs_separate_requires_ambiguous_source_choice_and_reports_
             &actor,
             saved.id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![first.representation_id, second.representation_id],
             },
             &command()
@@ -16384,6 +16417,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -16887,6 +16921,7 @@ fn fx05_original(
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: original.id,
                     expected_revision: original.revision,
@@ -16952,6 +16987,7 @@ fn clean_reimport_reuses_validated_originals_preserves_authority_and_survives_re
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
         enrichment: IngestEnrichmentPolicy::None,
         prepare_music: false,
+        audio_preparation: None,
         destination: Some(collector_app::IngestDestination {
             item_id: original.id,
             expected_revision: original.revision,
@@ -17069,6 +17105,7 @@ fn clean_reimport_failed_replacement_keeps_original_and_explicit_reset_is_portab
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: original.id,
                     expected_revision: original.revision,
@@ -17148,6 +17185,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: original.id,
                     expected_revision: original.revision,
@@ -17219,6 +17257,7 @@ fn clean_reimport_fences_old_jobs_but_keeps_direct_scan_owners_and_later_manual_
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: Some(collector_app::IngestDestination {
                     item_id: original.id,
                     expected_revision: original.revision,
@@ -17301,6 +17340,7 @@ fn fx05_retained_command(
         analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
         enrichment: IngestEnrichmentPolicy::None,
         prepare_music: false,
+        audio_preparation: None,
     }
 }
 
@@ -18810,6 +18850,7 @@ fn grouped_disc_publication_case(
                 expected_files: 2,
                 automatic_metadata: false,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -19037,6 +19078,7 @@ fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admiss
                 expected_files: 2,
                 automatic_metadata: true,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -19120,6 +19162,8 @@ fn saved_intakes_page_by_creation_time_with_a_stable_tie_breaker() {
                     needs_attention: 0,
                     automatic_metadata: true,
                     prepare_music: false,
+                    audio_preparation: None,
+                    opus_import: None,
                     created_at: created_at.parse().unwrap(),
                     updated_at: "2026-11-07T00:00:30Z".parse().unwrap(),
                 },
@@ -19187,6 +19231,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
                 expected_files: 70,
                 automatic_metadata: false,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -19372,9 +19417,14 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
         cursor: None,
         limit: Some(1),
     };
+    while service.rebuild_next_library_entry().unwrap() {}
     assert_eq!(
         service
-            .preparation_care(&actor, query.clone())
+            .preparation_care(
+                &actor,
+                query.clone(),
+                &collector_core::ConversionProfile::Flac
+            )
             .unwrap()
             .items
             .len(),
@@ -19382,6 +19432,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
     );
     let receipt = command();
     let input = PreviewBulkLibrary {
+        profile: collector_core::ConversionProfile::Flac,
         kind: BulkLibraryKind::MusicPreparation,
         selection: LibrarySelection::AllMatching {
             query,
@@ -19462,6 +19513,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
         "Successful albums were not encoded again."
     );
     store.reindex().unwrap();
+    while service.rebuild_next_library_entry().unwrap() {}
     assert!(
         service
             .preparation_care(
@@ -19473,7 +19525,8 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
                     needs_attention: true,
                     cursor: None,
                     limit: None
-                }
+                },
+                &collector_core::ConversionProfile::Flac,
             )
             .unwrap()
             .items
@@ -19505,6 +19558,7 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![inventory.id],
@@ -19534,6 +19588,7 @@ fn bulk_preparation_parent_claim_cancellation_revoked_access_and_changed_invento
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![inventory.id],
@@ -19636,6 +19691,7 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
                 expected_files: 2,
                 automatic_metadata: false,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -20073,6 +20129,7 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
                 expected_files: count as u32,
                 automatic_metadata: false,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -20229,6 +20286,7 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::Metadata,
                 selection: LibrarySelection::AllMatching {
                     query,
@@ -20306,6 +20364,7 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
                 expected_files: 2,
                 automatic_metadata: false,
                 prepare_music: false,
+                audio_preparation: None,
             },
             &command(),
         )
@@ -20416,6 +20475,7 @@ fn bulk_parent_cancellation_preserves_later_direct_and_other_batch_requests() {
     store.save_capture(capture, revision).unwrap();
     let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
     let request = PreviewBulkLibrary {
+        profile: collector_core::ConversionProfile::Flac,
         kind: BulkLibraryKind::MusicPreparation,
         selection: LibrarySelection::Explicit {
             items: vec![saved.id],
@@ -20523,6 +20583,7 @@ fn bulk_failed_parent_admission_is_actionable_and_retries_without_losing_members
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::MusicPreparation,
                 selection: LibrarySelection::Explicit {
                     items: vec![saved.id],
@@ -23259,6 +23320,7 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -24662,6 +24724,7 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
         analysis: collector_app::IngestAnalysisPolicy::Automatic,
         enrichment: IngestEnrichmentPolicy::Automatic,
         prepare_music: false,
+        audio_preparation: None,
         destination: None,
     };
     let accepted = service
@@ -24688,7 +24751,10 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
     assert_eq!(capture.representations.len(), 1);
     let rows = service
         .recorded_music_track_availability(&actor, item)
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.primary_playback())
+        .collect::<Vec<_>>();
     assert_eq!(rows.len(), 2, "{detail:?}");
     assert!(rows.iter().all(|r| r.profile.is_none() && !r.can_prepare));
     assert_eq!(rows[0].sample_rate(), 96_000);
@@ -24926,7 +24992,9 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
         service
             .recorded_music_track_availability(&actor, item)
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row.primary_playback())
+            .count(),
         2
     );
     assert_eq!(
@@ -25017,6 +25085,7 @@ fn admit_digital_test_package_with_visibility(
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::Automatic,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -25056,7 +25125,7 @@ fn alternate_encodings_require_explicit_album_selection_without_retargeting_trac
     let rows = service
         .recorded_music_track_availability(&actor, item)
         .unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.iter().filter(|row| row.primary_playback()).count(), 2);
     assert!(
         rows.iter()
             .all(|row| row.album_selection == collector_app::MusicAlbumSelection::NeedsReview)
@@ -25102,7 +25171,9 @@ fn alternate_encodings_require_explicit_album_selection_without_retargeting_trac
         service
             .recorded_music_track_availability(&actor, item)
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row.primary_playback())
+            .count(),
         2
     );
     store.reindex().unwrap();
@@ -25203,7 +25274,9 @@ fn embedded_purchase_cover_is_an_asset_without_blocking_on_unsupported_companion
         service
             .recorded_music_track_availability(&actor, item)
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row.primary_playback())
+            .count(),
         1
     );
     assert_eq!(
@@ -25231,7 +25304,9 @@ fn private_purchase_audio_does_not_publish_its_embedded_tags_or_artwork() {
         service
             .recorded_music_track_availability(&actor, item)
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|row| row.primary_playback())
+            .count(),
         1
     );
     let viewer = Principal {
@@ -25416,6 +25491,7 @@ fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -25529,6 +25605,7 @@ fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
             &actor,
             id,
             PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![source],
             },
             &command(),
@@ -27770,6 +27847,7 @@ fn cd_check_defaults_and_workers_are_scoped_revisioned_and_persisted() {
     let defaults = service.cd_library_settings(&actor, collection.id).unwrap();
     assert!(defaults.check_accuraterip_on_ingest);
     let update = UpdateCdLibrarySettings {
+        opus_import: None,
         expected_revision: defaults.revision,
         check_accuraterip_on_ingest: false,
         maximum_offset: 0,
@@ -27940,6 +28018,7 @@ fn accurate_rip_member_pages_skip_exclusions_before_pagination() {
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::AccurateRip,
                 selection: LibrarySelection::Explicit {
                     items: vec![saved.id],
@@ -28089,6 +28168,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
             &actor,
             collection.id,
             UpdateCdLibrarySettings {
+                opus_import: None,
                 expected_revision: Revision(0),
                 check_accuraterip_on_ingest: true,
                 maximum_offset: 0,
@@ -28144,6 +28224,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -28156,6 +28237,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
             &actor,
             collection.id,
             UpdateCdLibrarySettings {
+                opus_import: None,
                 expected_revision: Revision(1),
                 check_accuraterip_on_ingest: false,
                 maximum_offset: 1,
@@ -28230,6 +28312,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::AccurateRip,
                 selection: LibrarySelection::Explicit { items: vec![item] },
                 sources: Default::default(),
@@ -28292,6 +28375,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
         .preview_bulk_library(
             &actor,
             PreviewBulkLibrary {
+                profile: collector_core::ConversionProfile::Flac,
                 kind: BulkLibraryKind::AccurateRip,
                 selection: LibrarySelection::AllMatching {
                     query: collector_app::MetadataCareQuery {
@@ -28333,6 +28417,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
             &actor,
             collection.id,
             UpdateCdLibrarySettings {
+                opus_import: None,
                 expected_revision: Revision(2),
                 check_accuraterip_on_ingest: false,
                 maximum_offset: 0,
@@ -28444,6 +28529,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
                 analysis: collector_app::IngestAnalysisPolicy::PreserveOnly,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: false,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -28541,6 +28627,7 @@ fn disable_automatic_cd_checks(
             actor,
             collection,
             collector_app::UpdateCdLibrarySettings {
+                opus_import: None,
                 expected_revision: settings.revision,
                 check_accuraterip_on_ingest: false,
                 maximum_offset: settings.maximum_offset,
@@ -29464,7 +29551,10 @@ fn digital_matching_full_workflow(wav: bool, manual: bool, scenario: DigitalDisc
     );
     let rows = service
         .recorded_music_track_availability(&actor, item)
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.primary_playback())
+        .collect::<Vec<_>>();
     assert_eq!(
         rows.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
         ["Matched first", "Matched second"]
@@ -29660,7 +29750,11 @@ fn digital_matching_full_workflow(wav: bool, manual: bool, scenario: DigitalDisc
     assert_eq!(
         service
             .recorded_music_track_availability(&actor, item)
-            .unwrap()[1]
+            .unwrap()
+            .iter()
+            .filter(|row| row.primary_playback())
+            .nth(1)
+            .unwrap()
             .title,
         "Matched second"
     );
@@ -29866,14 +29960,15 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
     ));
     assert!(
         rows.iter()
-            .filter(|r| !matches!(r.track_position, 2 | 3))
+            .filter(|r| r.primary_playback() && !matches!(r.track_position, 2 | 3))
             .all(|r| r.profile.is_none() && !r.can_prepare)
     );
     let plan = service
-        .music_album_preparation_plan(&actor, item_id)
+        .music_album_preparation_plan(&actor, item_id, &collector_core::ConversionProfile::Flac)
         .unwrap();
     assert!(plan.can_submit, "{plan:?}");
     let request = collector_app::PrepareMusicAlbum {
+        profile: collector_core::ConversionProfile::Flac,
         source_representation_ids: vec![source],
     };
     let key = command();
@@ -29967,6 +30062,7 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
         .unwrap();
     assert!(
         rows.iter()
+            .filter(|row| row.primary_playback())
             .all(|r| matches!(r.state, MusicTrackAvailabilityState::Available { .. }))
     );
     assert_eq!(
@@ -29992,7 +30088,10 @@ fn wav_preservation_without_encoder_and_private_audio_do_not_advertise_playback_
     let source = store.item(item).unwrap().captures[0].representations[0].id;
     let rows = service
         .recorded_music_track_availability(&actor, item)
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.primary_playback())
+        .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert!(!rows[0].can_prepare);
     assert!(matches!(
@@ -30026,6 +30125,7 @@ fn wav_preservation_without_encoder_and_private_audio_do_not_advertise_playback_
                 &viewer,
                 item,
                 collector_app::PrepareMusicAlbum {
+                    profile: collector_core::ConversionProfile::Flac,
                     source_representation_ids: vec![source]
                 },
                 &command()
@@ -30191,6 +30291,7 @@ fn wav_completion_tagged_original_artwork_native_flac_and_portable_export() {
             &actor,
             id,
             collector_app::PrepareMusicAlbum {
+                profile: collector_core::ConversionProfile::Flac,
                 source_representation_ids: vec![source],
             },
             &command(),
@@ -30388,7 +30489,10 @@ fn wav_completion_retained_analysis_enriches_in_place_and_keeps_manual_authority
     );
     let rows = service
         .recorded_music_track_availability(&actor, id)
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.primary_playback())
+        .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].title, "WAV title");
     let artwork = service.item_presented(&actor, id).unwrap().primary_artwork;
@@ -30565,6 +30669,7 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
                 analysis: collector_app::IngestAnalysisPolicy::Automatic,
                 enrichment: IngestEnrichmentPolicy::None,
                 prepare_music: prepare,
+                audio_preparation: None,
                 destination: None,
             },
             &command(),
@@ -30719,7 +30824,10 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
     );
     let rows = service
         .recorded_music_track_availability(&actor, item_id)
-        .unwrap();
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.primary_playback())
+        .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     // Availability describes the playable prepared FLAC. The exact WAV master
     // is checked separately through its preserved file record and download.

@@ -13,6 +13,21 @@ The existing metadata authority saves the chosen fields together per album,
 reports failures per album and supports retrying the remaining selection. See
 [validation](validation/github-imports-2026-11-07.md).
 
+## Opus album preparation and live readiness — 2026-11-07
+
+Prepare audio supports FLAC and the three existing Opus VBR presets for albums
+and durable batches. The readiness filter uses the exact selected preset. The
+list reads compact generation-fenced summaries with collection access, search
+and readiness applied before pagination. The open list refreshes as source
+records, derivative jobs and published outputs change.
+
+Music collections can default to Opus on CD imports or on CD and digital album
+imports. Import review shows the default and allows an override. The durable
+workflow freezes the choice, preserves originals and reports preparation
+through settlement. Digital preparation uses shared decoding for analyzed FLAC,
+MP3 and supported PCM WAV sources. See [user workflow](audio-preparation.md) and
+[isolated browser and storage validation](validation/opus-preparation-2026-11-07.md).
+
 ## Beta.21 published and installed on Fi — 2026-11-04
 
 Signed source `280b04f` is published as beta.21 and installed on Fi. Full exact-source

@@ -1821,6 +1821,7 @@ source = "git+https://github.com/AberrantWolf/junk-libs?rev=280ddc7132eed4196672
 dependencies = [
  "claxon",
  "junk-libs-disc 0.1.0 (git+https://github.com/AberrantWolf/junk-libs?rev=280ddc7132eed41966720cdc93d608ecf54c2e94)",
+ "rubato",
  "serde",
  "symphonia",
  "symphonia-bundle-mp3 0.5.5 (git+https://github.com/AberrantWolf/junk-libs?rev=280ddc7132eed41966720cdc93d608ecf54c2e94)",
@@ -2682,6 +2683,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "realfft"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f821338fddb99d089116342c46e9f1fbf3828dba077674613e734e01d6ea8677"
+dependencies = [
+ "rustfft",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2783,6 +2793,18 @@ checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rubato"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5258099699851cfd0082aeb645feb9c084d9a5e1f1b8d5372086b989fc5e56a1"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
 ]
 
 [[package]]
