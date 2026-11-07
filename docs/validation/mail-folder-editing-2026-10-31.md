@@ -93,3 +93,11 @@ The listener matrix covers both discovery routes. The Python fixtures also cover
 escaped, duplicate, nonselectable and malformed replies. The short Chrome smoke
 passed, and the picker fit the 390px viewport. Discovery against a live Proton
 account and release deployment remain outside this source validation.
+
+### Hosted fixture status reporting — 2026-11-07
+
+The [hosted browser journey](https://github.com/AberrantWolf/junk-collector/actions/runs/42366266515)
+reached the saved-folder checks, then failed when its periodic reporter and a
+manual status refresh shared the same temporary file. The fixture now serializes
+status writes and drains them before teardown. The stale-to-fresh transition
+deliberately overlaps two reports and still checks the real browser status.
