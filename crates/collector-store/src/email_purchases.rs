@@ -131,6 +131,14 @@ impl PurchaseInboxPort for Store {
         Ok(PurchaseInbox { items, next_cursor })
     }
     fn commit_mail_batch(&self, c: &MailConnection, batch: MailBatch) -> Result<()> {
+        // Recovery can change a review generation. Serialize it with review
+        // publication, which holds the writer after checking that generation.
+        let _writer = batch
+            .details
+            .iter()
+            .any(|d| d.amazon_order_card)
+            .then(|| lock(&self.writer))
+            .transpose()?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -159,13 +167,30 @@ impl PurchaseInboxPort for Store {
             let id = purchase.source_keys[0].clone();
             let s=PurchaseSuggestion{id:id.clone(),connection_id:c.profile.id.clone(),owner:c.profile.owner,collection_id:c.collection_id,purchase,reason:"Review the original email, then confirm the item, edition, platform, order reference and status. Email sender names alone do not verify a purchase.".into(),dismissed:false,revision:Revision(0),source:detail.map(|d| d.source.clone()),issue:detail.and_then(|d| d.issue),matches:vec![],accepted_item:None};
             let inserted = tx.execute("INSERT OR IGNORE INTO private.purchase_suggestions(id,owner,collection_id,record) VALUES(?,?,?,?)",params![id,c.profile.owner.to_string(),c.collection_id.to_string(),serde_json::to_string(&s).map_err(storage)?]).map_err(storage)?;
-            if inserted == 0 && detail.is_some() {
+            if inserted == 0
+                && let Some(detail) = detail
+            {
                 let mut existing = suggestion(&tx, &id)?;
-                // Source coordinates are current private diagnostics, not an immutable
-                // claim or a replacement for the original reviewed receipt content.
-                if existing.owner == s.owner
-                    && existing.collection_id == s.collection_id
-                    && serde_json::to_value(&existing.purchase).map_err(storage)?
+                if existing.owner != s.owner || existing.collection_id != s.collection_id {
+                    continue;
+                }
+                let recovered = if detail.amazon_order_card
+                    && detail.issue.is_none()
+                    && existing.accepted_item.is_none()
+                {
+                    collector_app::recover_amazon_purchase_fields(
+                        &mut existing.purchase,
+                        &s.purchase,
+                    )
+                } else {
+                    None
+                };
+                if recovered == Some(true) {
+                    existing.revision =
+                        Revision(existing.revision.0.checked_add(1).ok_or(Error::Conflict)?);
+                }
+                if recovered.is_some()
+                    || serde_json::to_value(&existing.purchase).map_err(storage)?
                         == serde_json::to_value(&s.purchase).map_err(storage)?
                 {
                     existing.source = s.source;

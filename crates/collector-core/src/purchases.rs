@@ -7,6 +7,7 @@ pub enum PurchaseStatus {
     Ordered,
     Purchased,
     Shipped,
+    OutForDelivery,
     Delivered,
     Cancelled,
     Refunded,

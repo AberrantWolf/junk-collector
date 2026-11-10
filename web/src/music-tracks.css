@@ -75,3 +75,13 @@
 .playback-source{display:block;font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin:4px 0}
 .album-track-toolbar{flex-wrap:wrap}
 .music-track>div.track-title>.track-play{flex:none;min-height:32px;border:1px solid var(--line);color:var(--ink);background:var(--paper);padding:3px 7px;font-size:11px}
+
+.playback-format{display:flex;align-items:end;flex-wrap:wrap;gap:.5rem .75rem}
+.playback-format label{margin:0}
+.playback-format input[type=number]{width:6rem}
+.playback-format .muted{flex-basis:100%;margin:.25rem 0}
+.dock-options{display:grid;justify-items:end;gap:.5rem}
+.dock-format{justify-content:end;font-size:.78rem}
+.dock-format label{font-size:inherit}
+.dock-format button,.dock-format input,.dock-format select{padding:.3rem .45rem;font-size:inherit}
+@media(max-width:700px){.dock-options{grid-column:2;grid-row:1}.dock-format{display:none}}

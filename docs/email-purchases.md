@@ -112,16 +112,35 @@ owner-private locators retain folder/UID/UIDVALIDITY, Message-ID, subject and th
 email date so an original can be found; they stay outside the portable archive and
 are never exposed to other users. No full header block is retained. Locator text
 can itself contain private sender-supplied details; inspect it only in the private
-review UI. Matching rescans refresh coordinates without rewriting receipt facts. No external HTML
-resource is fetched. Other email clients can still modify mailbox flags; Bridge
-sync itself is separate from the extractor's read-only command set.
+review UI. Matching rescans refresh coordinates and can fill missing fields on
+unaccepted Amazon suggestions. No external HTML resource is fetched. Other email
+clients can still modify mailbox flags. Bridge sync itself is separate from the
+extractor's read-only command set.
 
 Supported parsers: Amazon Japan, Joshin, Square Enix e-STORE, Nintendo eShop and
 Steam, with labelled Japanese/English product/order fields; Steam also supports
-receipt item cells and store app links. MIME transfer encodings and declared
-Japanese character sets are decoded locally. Japanese folder names are encoded
-as IMAP modified UTF-7, including literal ampersands. Amazon quoted-subject title fallback
-is tentative and may be truncated. Status comes from the subject to avoid
+receipt item cells and store app links.
+
+Amazon Japan's English **Ordered**, **Shipped**, **Out for delivery** and
+**Delivered** HTML notices have a separate layout check. A labelled order number
+and marked Amazon Japan product links in the same message body identify the order
+and its listed items. Full link text or the linked product image's alternate text
+supplies the title, including when the visible text is shortened. The parser reads
+those links as text and ignores recommendation links. It marks these items as
+physical purchases and leaves platform and edition for review. The subject prefix
+identifies the phase even when the progress bar shows several phases or the
+subject uses a separator other than a colon. Labelled Japanese receipts keep
+their original parser. Equivalent HTML alternatives count once. Different
+products with the same title remain separate suggestions. If one item's title
+cannot be recovered, its suggestion keeps the order number and phase for manual
+review alongside the successfully parsed items. To update an accepted order, link
+the new notice to the existing entry and choose the matching order in **Order
+action**. Dismiss suggestions for purchases outside your collection.
+
+MIME transfer encodings and declared Japanese character sets are decoded locally.
+Japanese folder names are encoded as IMAP modified UTF-7, including literal
+ampersands. The legacy Amazon quoted-subject title fallback is tentative and may
+be truncated. Status comes from the subject to avoid
 cancellation/refund help text in receipt footers. Unknown layouts/oversize receipts
 become an unparsed review entry rather than an owned game. Limits are 2 MiB/mail,
 100 MIME parts, 20 product names/mail and 100 suggestions/batch. Malformed dates,
@@ -134,8 +153,24 @@ cursor and return typed authentication/certificate/folder/transport/adapter erro
 No failed batch advances its cursor. Templates without a receipt-like subject or
 recognised sender can be missed. Gift, wallet, subscription, quantity and item-level
 partial-refund semantics need manual review; no claim of universal template support
-is made. Tests use synthetic receipts; actual personal receipt calibration remains
-part of local setup, without uploading messages to chat.
+is made. Automated tests use synthetic receipts.
+
+On 2026-11-09, four local exports from one physical purchase produced the same
+full title and order reference across all four phases. The Purchase inbox
+browser test also scans a synthetic delivery notice through the IMAP adapter,
+checks the mobile review form and accepts the purchase with its delivery status.
+Initial local validation passed 26 offline mail tests, 640 Rust workspace tests with
+five existing ignores, strict Clippy, contract and web checks, and all 31
+browser journeys. The Opus journey passed on retry with the existing local
+encoder supplied through `COLLECTOR_OPUS`.
+
+The 2026-11-09 review follow-up exercises subject variants through the IMAP
+header filter and verifies in-place field recovery through the Purchase inbox.
+Storage regression coverage checks stale review rejection, replay, conflicting
+order numbers, retained dismissals and accepted purchase history after reindex.
+The follow-up passed 30 offline mail tests, 641 Rust workspace tests with five
+existing ignores, strict Clippy, contract and web checks, and all 31 browser
+journeys.
 
 ## Proton Bridge deployment
 
@@ -205,7 +240,11 @@ separate. For an initial complete history pass, finish Bridge sync, then use
 retains suggestions and enabled/paused state, and fences prior work. A paused scan
 stays paused until explicitly enabled. It also provides a retry after parser repair.
 Older unparsed suggestions remain available for review/dismissal when a later parse
-produces a new suggestion; rescanning never silently accepts a receipt.
+produces a new suggestion. When a recognized Amazon order card matches an
+existing unaccepted suggestion, the rescan fills a missing order number, format
+or phase in place. Dismissed suggestions stay dismissed. Refresh an open inbox
+after recovery to load the new review revision. Accepted receipts and their
+purchase history retain the reviewed facts.
 
 **Restore suggestion** returns a dismissed receipt to Needs review. **Reopen purchase
 review** previews the affected accepted purchase and requires **Confirm reopen
@@ -221,4 +260,4 @@ but leaves either the accepted purchase or its committed reopened state intact.
 Receipt review attaches older source keys to an existing matching order without
 replacing newer status/date/details or duplicate intent. Newer receipts can update
 that order normally. Orders with different retailer/reference still conflict.
-Source review data stays immutable; corrections live in the accepted purchase row.
+Corrections made during review live in the accepted purchase row.

@@ -10,9 +10,11 @@ pub use digital_matching::*;
 pub use digital_pipeline::DigitalMatchingProgress;
 mod file_music;
 mod music_export;
+mod music_stream;
 pub use file_music::{
     UpdateDigitalPurchase, file_music_search_projection, import_preservation_format,
 };
+pub use music_stream::*;
 mod documents;
 pub use documents::*;
 mod backup_reminder;

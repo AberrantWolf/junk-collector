@@ -1,3 +1,24 @@
+## Live playback format preference — source delivery, 2026-11-10
+
+FLAC or custom-bitrate Opus can be selected from the web player or Account
+settings. Normal authenticated audio resolves a source-bound track to saved
+FLAC, its original (including supported raw CD layouts), or a retained Opus
+fallback. Live conversion is independent of background worker limits. Separate
+media transports retain saved playback. See
+[delivery and validation](validation/live-playback-format-2026-11-10.md).
+
+## Amazon Japan order and delivery notices — source delivery, 2026-11-09
+
+Purchase inbox reads the full item title and order reference from the observed
+English Amazon Japan HTML layout and distinguishes Ordered, Shipped, Out for
+delivery and Delivered. The layout requires a labelled order reference and
+marked product links. The review follow-up handles subject separator variants,
+legacy labelled receipts, equivalent HTML alternatives and separate product rows
+with identical titles. Items with unresolved titles remain visible alongside
+parsed items. Rescans fill missing fields on the same unaccepted suggestion
+without undoing dismissals or changing accepted history. See
+[parser coverage and validation](email-purchases.md#import-and-parser-coverage).
+
 ## Beta.23 published and installed on Fi — 2026-11-07
 
 Signed source `ed65d66` is published as beta.23 and installed on Fi. This release

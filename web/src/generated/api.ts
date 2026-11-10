@@ -1860,6 +1860,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/music-stream/{source}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["music_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/music-tracks": {
         parameters: {
             query?: never;
@@ -4498,7 +4514,7 @@ export interface components {
             uid_validity: number;
         };
         /** @enum {string} */
-        MailParseIssue: "malformed_date" | "unsupported_content" | "too_large" | "too_many_parts" | "unrecognized_layout";
+        MailParseIssue: "malformed_date" | "unsupported_content" | "too_large" | "too_many_parts" | "unrecognized_layout" | "incomplete_item_title";
         MailProfile: {
             configuration_revision?: components["schemas"]["Revision"];
             folders?: string[];
@@ -4980,6 +4996,8 @@ export interface components {
             audio_format?: components["schemas"]["MusicAudioFormat"] | null;
             /** @description Current actor, module, source and encoder permit explicit preparation. */
             can_prepare: boolean;
+            /** @description An authorized original can supply PCM for live conversion. */
+            can_stream_original?: boolean;
             capture_id: components["schemas"]["CaptureId"];
             /** Format: int32 */
             disc_position?: number | null;
@@ -5798,7 +5816,7 @@ export interface components {
             title: string;
         };
         /** @enum {string} */
-        PurchaseStatus: "preordered" | "ordered" | "purchased" | "shipped" | "delivered" | "cancelled" | "refunded" | "unknown";
+        PurchaseStatus: "preordered" | "ordered" | "purchased" | "shipped" | "out_for_delivery" | "delivered" | "cancelled" | "refunded" | "unknown";
         PurchaseSuggestion: {
             accepted_item?: components["schemas"]["ItemId"] | null;
             collection_id: components["schemas"]["CollectionId"];
@@ -11719,6 +11737,89 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    music_stream: {
+        parameters: {
+            query: {
+                format: "flac" | "opus";
+                /** @description Required for Opus. Target variable bitrate in kbps, 6–256. */
+                bitrate?: number;
+                /** @description Track number when playing a source-bound track. */
+                track?: number;
+                /** @description File index when playing a directly queued original file. */
+                file?: number;
+                /** @description Start position in milliseconds for a live stream. */
+                start_ms?: number;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+                source: components["schemas"]["RepresentationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/flac": unknown;
+                    "audio/ogg": unknown;
+                };
+            };
+            /** @description Partial Content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

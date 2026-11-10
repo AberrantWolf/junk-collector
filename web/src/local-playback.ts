@@ -116,3 +116,5 @@ export async function playbackUrl(path:string,signal:AbortSignal,refresh=false){
 export function remotePlaybackExpired(path:string){const grant=remoteGrants.get(path);return !!grant&&Date.parse(grant.expires_at)<=Date.now();}
 
 export function remotePlaybackActive(path:string){return !!remoteBase&&!route&&remoteGrants.has(path);}
+
+export function normalPlaybackAvailable(){return descriptor?.remote_media_allowed===true;}

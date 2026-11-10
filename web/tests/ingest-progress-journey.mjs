@@ -97,6 +97,7 @@ export async function ingestProgressJourney(page,{scratch,holdProvider,collectio
   await page.screenshot({path:path.join(scratch,'ingest-activity-mobile.png'),fullPage:true});
  }finally{release();await page.setViewportSize({width:1440,height:1000});}
  const intake=new URL(page.url()).searchParams.get('item');
+ console.log('Provider released; waiting for the 31 imports to settle.');
  // Both release variants acquire artwork through the single paced provider
  // slot. This checks settlement of 31 packages, without imposing a two-minute
  // throughput requirement on the one-worker configuration.

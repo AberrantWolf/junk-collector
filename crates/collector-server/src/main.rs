@@ -208,6 +208,8 @@ struct EncoderConfig {
     flac: Option<PathBuf>,
     /// Optional path or executable name for opusenc.
     opus: Option<PathBuf>,
+    /// FFmpeg executable for live playback. Defaults to ffmpeg on PATH.
+    ffmpeg: Option<PathBuf>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -1198,6 +1200,11 @@ async fn main() -> Result<()> {
                 }
                 None => None,
             };
+            state.live_audio_ffmpeg = config
+                .encoders
+                .ffmpeg
+                .clone()
+                .unwrap_or_else(|| "ffmpeg".into());
             state.remote_media_allowed = config.remote_media_allowed;
             state.remote_media = config.remote_media.clone().map(Arc::new);
             let _media_authority = match &config.remote_media {

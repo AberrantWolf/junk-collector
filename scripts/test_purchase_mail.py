@@ -5,7 +5,10 @@ import json
 import re
 from pathlib import Path
 import unittest
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
+from urllib.parse import urlencode
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('mail',Path(__file__).resolve().parents[1]/'crates/collector-providers/src/mail/connector.py')
@@ -13,7 +16,125 @@ mail=importlib.util.module_from_spec(spec);spec.loader.exec_module(mail)
 def receipt(sender,subject,body,html=False,mid='receipt-1',charset='utf-8'):
     m=EmailMessage();m['From']=sender;m['Subject']=subject;m['Message-ID']=f'<{mid}@fixture.invalid>';m['Date']='Fri, 30 Oct 2026 10:00:00 +0900'
     m.set_content(body,subtype='html' if html else 'plain',charset=charset);return m.as_bytes()
+
+
+AMAZON_REFERENCE = '123-1234567-1234567'
+AMAZON_TITLE = 'USB Network Switch Adapter & Cable'
+
+
+def amazon_link(kind, content, asin='B000000001', marker='fed_asin_title'):
+    query = urlencode({'ref_': f'pe_1_2_{kind}_{marker}', 'U': f'https://www.amazon.co.jp/dp/{asin}'})
+    return f'<a href="https://www.amazon.co.jp/gp/r.html?{query.replace("&", "&amp;")}">{content}</a>'
+
+
+def amazon_receipt(phase, body=None):
+    if body is None:
+        body = f'<div><span>Order # </span><span>&#8235;{AMAZON_REFERENCE}&#8236;</span></div>'
+        body += amazon_link('i', '<img alt="USB Network Switch Adapter &amp; Cable">')
+        if phase != 'Delivered':
+            body += amazon_link('t', 'USB Network <span>Switch</span>...')
+        body += amazon_link('i', '<img alt="Unrelated accessory">', 'B000000002', 'recommendation')
+        body += '<footer>See refund and cancellation help. Delivered</footer>'
+    return receipt('shipment-tracking@amazon.co.jp', f'{phase}: "USB Network Switch..."',
+                   body, html=True, mid=phase.lower().replace(' ', '-'))
+
+
 class Receipts(unittest.TestCase):
+    def test_amazon_order_card_lifecycle(self):
+        sources = set()
+        for phase in ('Ordered', 'Shipped', 'Out for delivery', 'Delivered'):
+            with self.subTest(phase=phase):
+                result = mail.extract(amazon_receipt(phase), 'p')
+                self.assertEqual(len(result), 1)
+                purchase = result[0]
+                self.assertNotIn('_issue', purchase)
+                self.assertEqual(purchase['status'], phase.lower().replace(' ', '_'))
+                self.assertEqual(purchase['title'], AMAZON_TITLE)
+                self.assertEqual(purchase['order_reference'], AMAZON_REFERENCE)
+                self.assertEqual(purchase['format'], 'physical')
+                self.assertEqual((purchase['platform'], purchase['edition']), ('', ''))
+                sources.add(purchase['id'])
+        self.assertEqual(len(sources), 4)
+
+    def test_amazon_order_card_requires_one_reference_and_marked_product_links(self):
+        order = f'<p>Order # {AMAZON_REFERENCE}</p>'
+        product = amazon_link('t', 'First item')
+        another = amazon_link('t', 'Second item', 'B000000002')
+        raw = amazon_receipt('Shipped', order + product + another)
+        self.assertEqual([p['title'] for p in mail.extract(raw, 'p')], ['First item', 'Second item'])
+        for body in (
+            product,
+            order + product + '<p>Order # 456-1234567-1234567</p>',
+            order + product.replace('www.amazon.co.jp', 'amazon.co.jp.example.invalid', 1),
+            order + product.replace('%2Fdp%2F', '%2Fhelp%2F'),
+            order + '<script>' + product + '</script>',
+        ):
+            with self.subTest(body=body):
+                result = mail.extract(amazon_receipt('Delivered', body), 'p')
+                self.assertEqual([p.get('_issue') for p in result], ['unrecognized_layout'])
+
+    def test_amazon_marked_links_do_not_disable_legacy_japanese_receipts(self):
+        body = f'<p>注文番号: {AMAZON_REFERENCE}</p><p>商品名: Fixture Game</p>'
+        body += amazon_link('t', 'Fixture Game')
+        raw = receipt('shipment-tracking@amazon.co.jp', '発送のお知らせ', body, html=True)
+        [purchase] = mail.extract(raw, 'p')
+        self.assertEqual((purchase['title'], purchase['order_reference'], purchase['status']),
+                         ('Fixture Game', AMAZON_REFERENCE, 'shipped'))
+        self.assertNotIn('_issue', purchase)
+
+    def test_amazon_duplicate_display_titles_keep_distinct_stable_sources(self):
+        order = f'<p>Order # {AMAZON_REFERENCE}</p>'
+        first = amazon_link('t', 'Fixture Game')
+        second = amazon_link('t', 'Fixture Game', 'B000000002')
+        raw = amazon_receipt('Shipped', order + first + second + first)
+        results = mail.extract(raw, 'p')
+        self.assertEqual([p['title'] for p in results], ['Fixture Game', 'Fixture Game'])
+        keys = {p['id'] for p in results}
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(results, mail.extract(raw, 'p'))
+        reordered = amazon_receipt('Shipped', order + second + first)
+        self.assertEqual(keys, {p['id'] for p in mail.extract(reordered, 'p')})
+        [legacy] = mail.extract(amazon_receipt('Shipped', '<p>Item: Fixture Game</p>'), 'p')
+        self.assertIn(legacy['id'], keys)
+
+    def test_amazon_html_alternatives_compare_order_and_item_facts(self):
+        order = f'<p>Order # {AMAZON_REFERENCE}</p>'
+        first = amazon_link('t', 'First item')
+        second = amazon_link('t', 'Second item', 'B000000002')
+        for replacement, expected in (
+            (order + second + first, ['First item', 'Second item']),
+            (order + first, [mail.UNPARSED_TITLE]),
+            (order.replace(AMAZON_REFERENCE, '456-1234567-1234567') + first + second,
+             [mail.UNPARSED_TITLE]),
+        ):
+            with self.subTest(expected=expected, replacement=replacement):
+                message = BytesParser(policy=policy.default).parsebytes(amazon_receipt('Delivered', order + first + second))
+                message.add_alternative(replacement, subtype='html')
+                result = mail.extract(message.as_bytes(), 'p')
+                self.assertCountEqual([p['title'] for p in result], expected)
+
+    def test_amazon_incomplete_items_do_not_hide_resolved_items(self):
+        order = f'<p>Order # {AMAZON_REFERENCE}</p>'
+        known = amazon_link('t', 'First item')
+        incomplete = amazon_link('t', 'Truncated...', 'B000000002')
+        incomplete += amazon_link('t', 'Another...', 'B000000003')
+        incomplete += amazon_link('i', '<img alt="Conflicting title">', 'B000000003')
+        raw = amazon_receipt('Delivered', order + known + incomplete)
+        result = mail.extract(raw, 'p')
+        self.assertCountEqual(
+            [(p['title'], p.get('_issue')) for p in result],
+            [('First item', None), (mail.UNPARSED_TITLE, 'incomplete_item_title'),
+             (mail.UNPARSED_TITLE, 'incomplete_item_title')],
+        )
+        self.assertTrue(all(p['order_reference'] == AMAZON_REFERENCE and p['status'] == 'delivered' for p in result))
+        self.assertEqual(len({p['id'] for p in result}), 3)
+
+    def test_amazon_ignores_forwarded_mime_content(self):
+        outer = BytesParser(policy=policy.default).parsebytes(amazon_receipt('Delivered', '<p>Unknown layout</p>'))
+        inner = BytesParser(policy=policy.default).parsebytes(amazon_receipt('Shipped'))
+        outer.add_attachment(inner)
+        self.assertEqual(mail.extract(outer.as_bytes(), 'p')[0]['_issue'], 'unrecognized_layout')
+
     def test_five_retailers_and_japanese_encoding(self):
         cases=[('a@amazon.co.jp','ご注文の確認','注文番号: 123-1234567-1234567\n商品名: ゼルダ Switch 2','amazon_jp','ordered'),('a@joshin.co.jp','ご予約の確認','ご注文番号: J12345\n商品名: ゼルダ コレクターズ Switch','joshin','preordered'),('a@square-enix.com','商品出荷のお知らせ','受注番号: E12345\n商品名: FINAL FANTASY PS5','square_enix','shipped'),('a@accounts.nintendo.com','ご購入明細','注文番号: N12345\nソフト名: マリオカート','nintendo','purchased'),('a@steampowered.com','Steam purchase receipt','Transaction ID: 12345678\nItem: Hades II','steam','purchased')]
         for sender,subject,body,retailer,status in cases:
@@ -55,6 +176,45 @@ class FakeIMAP:
         assert 'BODY.PEEK[]' in args[-1];return 'OK',[(b'1 BODY[]',raw)]
     def logout(self):self.commands.append('LOGOUT')
 class IMAP(unittest.TestCase):
+    def test_amazon_out_for_delivery_passes_header_filter(self):
+        class Delivery(FakeIMAP):
+            def __init__(self, raw):
+                super().__init__()
+                self.raw = raw
+                self.header = raw.split(b'\n\n', 1)[0] + b'\n\n'
+                self.fetched_body = False
+
+            def uid(self, command, *args):
+                if command == 'search':
+                    return 'OK', [b'1']
+                if 'HEADER' in args[-1]:
+                    return 'OK', [(f'1 (UID 1 RFC822.SIZE {len(self.raw)} BODY[HEADER]'.encode(), self.header)]
+                self.fetched_body = True
+                return 'OK', [(b'1 BODY[]', self.raw)]
+
+        profile = dict(id='p', username='u', password='p',
+                       certificate_sha256=mail.hashlib.sha256(b'certificate').hexdigest())
+        original = amazon_receipt('Out for delivery')
+        for subject, expected in (
+            ('Out for delivery: "Fixture Game"', True),
+            ('Out for delivery – "Fixture Game"', True),
+            ('Out for delivery', True),
+            ('Out for deliveryish: "Fixture Game"', False),
+        ):
+            with self.subTest(subject=subject):
+                message = BytesParser(policy=policy.default).parsebytes(original)
+                message.replace_header('Subject', subject)
+                server = Delivery(message.as_bytes())
+                with patch.object(mail.imaplib, 'IMAP4', return_value=server):
+                    result = mail.fetch_batch(profile, '')
+                self.assertEqual(server.fetched_body, expected)
+                self.assertEqual([p['status'] for p in result['purchases']],
+                                 ['out_for_delivery'] if expected else [])
+                if expected:
+                    self.assertIsNone(result['details'][0]['issue'])
+                    self.assertTrue(result['details'][0]['amazon_order_card'])
+                self.assertEqual(json.loads(result['cursor']), {'INBOX': dict(validity=42, uid=1)})
+
     def test_list_preserves_exact_names_and_rejects_malformed_results(self):
         class Mailboxes:
             def __init__(self, rows):

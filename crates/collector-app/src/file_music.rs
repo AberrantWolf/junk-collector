@@ -257,6 +257,7 @@ impl CollectionService {
                 }
             };
             rows.push(MusicTrackAvailability {
+                can_stream_original: true,
                 album_selection,
                 display_position: edit.and_then(|e| e.display_position).or_else(|| {
                     audio

@@ -1,5 +1,5 @@
 import {waitForServer as waitUntilReady} from './support/runtime.mjs';
-import {stopProcess} from './support/runtime.mjs';
+import {closeHttpFixture,fixturePort,stopProcess} from './support/runtime.mjs';
 import {clickAction,showAction} from './actions.mjs';
 import {chromium,expect,chooseFolder} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
@@ -17,9 +17,8 @@ const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-browser-'));
 const password=randomBytes(24).toString('hex');
 const localSetup=process.env.LOCAL_SETUP==='1';
-const port=19843;
-const accurateRipPort=19844;
-const metadataProviderPort=19845;
+const publicPort=await fixturePort(),privatePort=await fixturePort(),port=await fixturePort();
+const publicOrigin=`http://localhost:${publicPort}`,privateOrigin=`http://localhost:${privatePort}`;
 const releaseIds={english:'11111111-1111-4111-8111-111111111111',alternate:'22222222-2222-4222-8222-222222222222',japanese:'33333333-3333-4333-8333-333333333333'};
 // Full public entity shapes are required by the community MusicBrainz decoder.
 const fixtureMedium=(discId,index,tracks=[])=>({id:`77777777-7777-4777-8777-${String(index+1).padStart(12,'0')}`,position:index+1,'track-count':tracks.length,discs:[{id:discId,'offset-count':1,offsets:[150],sectors:300}],tracks:tracks.map((title,n)=>({id:`88888888-8888-4888-8888-${String(index*100+n+1).padStart(12,'0')}`,position:n+1,number:String(n+1),title}))});
@@ -41,17 +40,18 @@ const dbar=Buffer.alloc(31);dbar[0]=2;dbar.writeUInt32LE(676,1);dbar.writeUInt32
 for(let index=0;index<2;index++){const offset=13+index*9;dbar[offset]=17;dbar.writeUInt32LE(checksums[index],offset+1);dbar.writeUInt32LE(0,offset+5);}
 let accurateRipRequests=0;let accurateRipDelay=0;
 const accurateRipServer=createServer(async(_request,response)=>{accurateRipRequests++;if(accurateRipDelay)await new Promise(resolve=>setTimeout(resolve,accurateRipDelay));response.writeHead(200,{'content-type':'application/octet-stream','content-length':dbar.length});response.end(dbar);});
-await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(accurateRipPort,'127.0.0.1',resolve);});
+await new Promise((resolve,reject)=>{accurateRipServer.once('error',reject);accurateRipServer.listen(0,'127.0.0.1',resolve);});
 let bulkFixture=false;const bulkDiscIds=[];
 const metadataRequests=[];const metadataProviderServer=createServer((request,response)=>{metadataRequests.push(request.url);const url=new URL(request.url,'http://fixture.invalid');if(url.pathname.startsWith('/ws/2/discid/')){const discId=url.pathname.split('/').at(-1);if(bulkFixture&&!bulkDiscIds.includes(discId))bulkDiscIds.push(discId);const body=Buffer.from(JSON.stringify({id:discId,releases:releases.map(value=>({...value,...bulkFixture?{title:'Bulk resolved album'}:{},media:bulkFixture?bulkDiscIds.map((id,index)=>fixtureMedium(bulkDiscIds[value.id===releaseIds.japanese?bulkDiscIds.length-1-index:index],index,['Opening'])):[fixtureMedium(discId,0)]}))}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname==='/ws/2/release/'){const matches=url.searchParams.get('query')?.includes('unmatched fixture')?[]:releases;const body=Buffer.from(JSON.stringify({releases:matches}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.startsWith('/ws/2/release/')){const id=url.pathname.split('/').filter(Boolean).at(-1);const body=Buffer.from(JSON.stringify(releases.find(value=>value.id===id)||releases[0]));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+$/)){const id=url.pathname.split('/').at(-1);const body=Buffer.from(JSON.stringify({release:`https://musicbrainz.org/release/${id}`,images:[{id:'9001',front:true,back:false,approved:true,types:['Front'],comment:'Fixture cover',edit:42}]}));response.writeHead(200,{'content-type':'application/json','content-length':body.length});response.end(body);return;}if(url.pathname.match(/^\/release\/[^/]+\/9001(?:-250)?$/)){if(refuseCoverSize&&!url.pathname.endsWith('-250')){response.writeHead(200,{'content-type':'image/png','content-length':128*1024*1024+1});response.end();return;}const body=useLargeCover&&!url.pathname.endsWith('-250')?providerLargePng:providerPng;response.writeHead(200,{'content-type':'image/png','content-length':body.length});response.end(body);return;}response.writeHead(404);response.end();});
-await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(metadataProviderPort,'127.0.0.1',resolve);});
+await new Promise((resolve,reject)=>{metadataProviderServer.once('error',reject);metadataProviderServer.listen(0,'127.0.0.1',resolve);});
+const accurateRipPort=accurateRipServer.address().port,metadataProviderPort=metadataProviderServer.address().port;
 const config=path.join(scratch,'collector.toml');
 const inbox=path.join(scratch,'inbox');await mkdir(path.join(inbox,'reference-disc'),{recursive:true});await writeFile(path.join(inbox,'reference-disc','disc.bin'),'inbox data');
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${publicPort}"\nprivate_bind = "127.0.0.1:${privatePort}"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nauthentication_origin = "https://localhost:${port}"\nallowed_origins = ["https://localhost:${port}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["https://localhost:${port}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
 const datPath=path.join(scratch,'fixture.dat');
 await writeFile(datPath,'<datafile><header><name>Game Boy</name><author>No-Intro</author><version>1</version></header><game name="Browser game"><rom name="game.bin" size="5" crc="9271ee57"/></game></datafile>');
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
-if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19841"\nprivate_bind = "127.0.0.1:19842"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
+if(localSetup)await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${publicPort}"\nprivate_bind = "127.0.0.1:${privatePort}"\nlan_bind = "127.0.0.1:${port}"\nlocal_playback_enabled = false\nallowed_origins = []\n[inboxes]\n"Optical shelf" = "${inbox}"\n`);
 if(hasFlac){const slowFlac=path.join(scratch,'slow-flac.sh');await writeFile(slowFlac,`#!/bin/sh\nif [ "$1" != "--version" ]; then delay=3; for arg in "$@"; do if [ "$arg" = "--input-size=531552" ]; then delay=9; fi; done; sleep "$delay"; fi\nexec "${flacPath}" "$@"\n`);await chmod(slowFlac,0o755);const probe=spawnSync(slowFlac,['--version'],{encoding:'utf8',timeout:180000});assert.equal(probe.status,0,`Test encoder wrapper could not start: ${probe.error||probe.stderr}`);await writeFile(config,`\n[encoders]\nflac = "${slowFlac}"\n`,{flag:'a'});}
 await writeFile(config,`\n[dat_sources.browser]\npath = "${datPath}"\nsystem = "gb"\ncatalog = "No-Intro"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`,{flag:'a'});
 await writeFile(config,'\n[providers]\nmusicbrainz_user_agent = "junk-collector-smoke/0.1 (test@example.invalid)"\n',{flag:'a'});
@@ -62,12 +62,12 @@ if(localSetup){
  const repeat=spawnSync(binary,['--config',config,'setup'],{input:'',encoding:'utf8'});assert.equal(repeat.status,0,repeat.stderr);
  assert.equal(await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8'),certificateBefore,'repair setup replaced the TLS identity');
  const repairedConfig=await readFile(config,'utf8');
- assert.match(repairedConfig,/http:\/\/localhost:19842/);
+ assert.ok(repairedConfig.includes(privateOrigin),'setup did not save the exact private origin');
  assert.match(repairedConfig,/public_curation = false/);
 }
 let logs='';let server;
 function startServer(){const child=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${accurateRipPort}/`,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:`http://127.0.0.1:${metadataProviderPort}/`}});child.stderr.on('data',d=>logs+=d);child.stdout.on('data',d=>logs+=d);return child;}
-async function waitForServer(){await waitUntilReady('http://127.0.0.1:19841/healthz',server,{logs:()=>logs,timeout:120000});}
+async function waitForServer(){await waitUntilReady(`http://127.0.0.1:${publicPort}/healthz`,server,{logs:()=>logs,timeout:120000});}
 async function stopServer(){await stopProcess(server);}
 async function archiveUnavailableOwnerFixture(collectionId,itemId){
  const collectionRoot=path.join(scratch,'archive/collections');
@@ -98,18 +98,18 @@ try{
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  if(localSetup){
   const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);
-  const features=await(await fetch('http://localhost:19841/api/v1/features')).json();assert.equal(features.administration,false);assert.equal(features.curation,false);
-  await page.goto('http://127.0.0.1:19842');
+  const features=await(await fetch(`${publicOrigin}/api/v1/features`)).json();assert.equal(features.administration,false);assert.equal(features.curation,false);
+  await page.goto(`http://127.0.0.1:${privatePort}`);
   await page.getByLabel('Username',{exact:true}).fill(localSetup?'collector':'owner');await page.getByLabel('Password',{exact:true}).fill(password);
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByText('This browser address is not enabled',{exact:false}).waitFor();
  }
- await page.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
+ await page.goto(localSetup?privateOrigin:`https://localhost:${port}`);
  await page.getByLabel('Username',{exact:true}).fill(localSetup?'collector':'owner');await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
  // Exercise the actual approval page with the browser's logged-in account.
- const pairBase=localSetup?'http://localhost:19842':`https://localhost:${port}`;
+ const pairBase=localSetup?privateOrigin:`https://localhost:${port}`;
  const pairingStart=await page.request.post(`${pairBase}/api/v1/enrollments/start`,{data:{device_name:'Trash Amp browser journey'}});
  assert.equal(pairingStart.status(),200);
  const enrollment=await pairingStart.json();
@@ -880,14 +880,18 @@ try{
   const [providerRequest]=await Promise.all([page.waitForRequest(request=>request.method()==='POST'&&request.url().includes('/accuraterip-check')),cdDocket.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).click()]);
   // A separate low-level API owner shares the workflow's provider acquisition.
   const duplicate=await page.evaluate(async({item,source})=>{
-   const record=await(await fetch('/api/v1/items/'+item)).json();const capture=record.captures.find(c=>c.representations.some(r=>r.id===source));
-   const plan=await(await fetch(`/api/v1/captures/${capture.id}/operations/plan`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operation:'org.junk.music.accuraterip-verification',operation_version:1,representation_id:source,snapshot_id:null,selection:{maximum_offset:0}})})).json();
+   const {api}=await import('/app.js');
+   const signal=AbortSignal.timeout(8000);
+   const record=await api('/items/'+item,{signal,operation:'Read the AccurateRip fixture album'});
+   const capture=record.captures.find(c=>c.representations.some(r=>r.id===source));
+   if(!capture)throw Error('The fixture album does not own the submitted audio source');
+   const plan=await api(`/captures/${capture.id}/operations/plan`,{method:'POST',signal,operation:'Plan the AccurateRip fixture check',body:JSON.stringify({operation:'org.junk.music.accuraterip-verification',operation_version:1,representation_id:source,snapshot_id:null,selection:{maximum_offset:0}})});
    const response=await fetch(`/api/v1/captures/${capture.id}/accuraterip-snapshots`,{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({representation_id:source,structure_observation_id:plan.accuraterip_structure_observation_id})});if(!response.ok)throw Error(await response.text());return response.json();
   },{item:checkedAlbumId,source:JSON.parse(providerRequest.postData()).representation_id});
   await expect.poll(()=>accurateRipRequests,{timeout:3000}).toBe(beforeDownload+1);
   assert.equal(await page.evaluate(async()=>((await(await fetch('/api/v1/jobs?limit=100')).json()).items).filter(job=>job.kind==='music_derivative'&&job.state==='running').length),2,'provider download waited for encoding capacity');
   await expect(cdDocket.getByRole('button',{name:'Checking disc with AccurateRip…'})).toBeDisabled();
-  const cancellationPage=await context.newPage();await cancellationPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
+  const cancellationPage=await context.newPage();await cancellationPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
   await cancellationPage.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
   await cancellationPage.locator(`[data-work-open="job:${duplicate.job_id||duplicate.id}"]`).click();
   await cancellationPage.getByRole('button',{name:'Cancel task',exact:true}).click();
@@ -904,7 +908,7 @@ try{
 
   await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
-  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await concurrentPage.locator('.collection-scope summary').click();await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
+  const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);await concurrentPage.locator('.collection-scope summary').click();await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
   await albumBatch.getByText('2/2 ready',{exact:true}).waitFor({timeout:30000});
   await preparation.getByText('All album tracks are ready as FLAC.',{exact:false}).waitFor();
   assert.equal(await preparation.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).count(),0,'completed album still offers preparation');
@@ -973,9 +977,9 @@ try{
   await playbackContext.clearCookies();
   playbackContext.setDefaultTimeout(30000);
   const playbackPage=await playbackContext.newPage();const playbackErrors=[];playbackPage.on('pageerror',error=>playbackErrors.push(error.message));
-  await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
+  await playbackPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
   await playbackPage.evaluate(async({username,password})=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password,device_name:'Playback qualification'})});if(!response.ok)throw new Error(`viewer login: ${response.status} ${await response.text()}`);},{username:'playback-viewer',password:playbackPassword});
-  if(localSetup){await playbackPage.goto('http://localhost:19841');await playbackPage.getByText('Client access only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
+  if(localSetup){await playbackPage.goto(publicOrigin);await playbackPage.getByText('Client access only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
   await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();await player.getByRole('button',{name:'Queue (0)',exact:true}).waitFor();const album=playbackPage.getByRole('region',{name:'Album tracks'});
   const viewerArtwork=playbackPage.locator('.detail').getByRole('img',{name:/Cover Art Archive image/});await viewerArtwork.waitFor();
@@ -1046,9 +1050,9 @@ try{
     await playbackPage.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
   assert.deepEqual(await expiredAudio.evaluate(element=>({paused:element.paused,src:element.getAttribute('src')})),{paused:true,src:null},'expired session retained audio');
   await expiredAudio.dispose();
-  await playbackPage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);
+  await playbackPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
   await playbackPage.evaluate(async password=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'playback-viewer',password,device_name:'Playback reauthentication'})});if(!response.ok)throw new Error(`viewer reauthentication: ${response.status}`);},playbackPassword);
-  if(localSetup)await playbackPage.goto('http://localhost:19841');else await playbackPage.reload();
+  if(localSetup)await playbackPage.goto(publicOrigin);else await playbackPage.reload();
   await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();await rebuiltPlayer.waitFor();
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
 
@@ -1056,7 +1060,7 @@ try{
   let directRequested;const requestedDirect=new Promise(resolve=>{directRequested=resolve;});
   await playbackPage.route(`**/api/v1/items/${playbackFixture.itemId}/client-playback`,async route=>{directRequested();await heldDirect;await route.continue();},{times:1});
   const queueBeforeDenied=await playbackPage.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
-  await playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('button',{name:'Play album',exact:true}).click();await requestedDirect;
+  await playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('button',{name:'Play album',exact:true}).click();await deadline(requestedDirect,'album playback fixture request');
   await page.evaluate(async({collectionId})=>{const grants=await(await fetch(`/api/v1/collections/${collectionId}/grants`)).json();const grant=grants.items.find(value=>value.username==='playback-viewer');const response=await fetch(`/api/v1/collections/${collectionId}/grants/playback-viewer?expected_revision=${grant.revision}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`grant revocation: ${response.status} ${await response.text()}`);},playbackFixture);
   releaseDirect();
   await expect.poll(()=>playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('alert').count()).toBeGreaterThan(0);
@@ -1070,7 +1074,7 @@ try{
  assert.equal(await page.locator('.collection-row img').count(),1);
  if(localSetup){
   const clientPage=await context.newPage();
-  await clientPage.goto('http://localhost:19841');
+  await clientPage.goto(publicOrigin);
   await clientPage.getByText('Client access only at this address.',{exact:false}).waitFor();
   assert.equal(await clientPage.getByRole('button',{name:'Administration',exact:true}).count(),0);
   assert.equal(await clientPage.getByRole('button',{name:'Manage collections',exact:true}).count(),0);
@@ -1235,7 +1239,7 @@ try{
  const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
  await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});
  await fixturePage.route('**/api/v1/collection-search?*',async route=>{const response=await route.fetch();const body=await response.json();body.items.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
- await fixturePage.goto(localSetup?'http://localhost:19842':`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Add entry manually',exact:true}).click();await stampForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Browser stamp fixture/}).click();await expect(stampForm.locator('.type-label')).toHaveCount(0);assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('This information is saved but cannot be edited here.',{exact:true}).waitFor();
+ await fixturePage.goto(localSetup?privateOrigin:`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Add entry manually',exact:true}).click();await stampForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Browser stamp fixture/}).click();await expect(stampForm.locator('.type-label')).toHaveCount(0);assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('This information is saved but cannot be edited here.',{exact:true}).waitFor();
  let submittedStamp;
  await fixturePage.route('**/api/v1/items/*',async route=>{if(route.request().method()!=='PUT')return route.continue();submittedStamp=route.request().postDataJSON();await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'invalid_request',message:'Renderer fixture: submission inspected without persistence.'}})});});
  await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add entry',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
@@ -1340,4 +1344,4 @@ try{
  await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial, WebAuthn registration/login and mobile layout.');
-}catch(error){console.error(logs);const failurePage=browser?.contexts().flatMap(context=>context.pages()).at(-1)||page;if(failurePage){console.error((await failurePage.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await failurePage.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await new Promise(resolve=>accurateRipServer.close(resolve));await new Promise(resolve=>metadataProviderServer.close(resolve));await rm(scratch,{recursive:true,force:true});}
+}catch(error){console.error(logs);const failurePage=browser?.contexts().flatMap(context=>context.pages()).at(-1)||page;if(failurePage){console.error((await failurePage.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await failurePage.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await Promise.all([closeHttpFixture(accurateRipServer,'AccurateRip fixture'),closeHttpFixture(metadataProviderServer,'metadata fixture')]);await rm(scratch,{recursive:true,force:true});}

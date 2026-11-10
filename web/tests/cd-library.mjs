@@ -1,6 +1,6 @@
 // Real UI + HTTP + durable jobs, with only the remote AccurateRip database fixture replaced.
 import {chromium,expect} from './support/browser.mjs';
-import {spawn,spawnSync,serverBinary,stopProcess,waitForServer} from './support/runtime.mjs';
+import {closeHttpFixture,fixturePort,spawn,spawnSync,serverBinary,stopProcess,waitForServer} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
@@ -9,13 +9,12 @@ import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-cd-library-')),password=randomBytes(24).toString('hex');
 let server,browser,page,logs='',providerRequests=0;
-async function port(){const listener=createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));const p=listener.address().port;await new Promise(r=>listener.close(r));return p;}
 const frames=451*588,pcm=Buffer.alloc(frames*4);for(let i=0;i<frames;i++)pcm.writeInt16LE(1,i*4);
 const checksum=Number(BigInt(2940+frames-2940)*BigInt(frames-5879)/2n)&0xffffffff;
 const dbar=Buffer.alloc(22);dbar[0]=1;dbar.writeUInt32LE(451,1);dbar.writeUInt32LE(903,5);dbar.writeUInt32LE(0x02000601,9);dbar[13]=17;dbar.writeUInt32LE(checksum>>>0,14);
 const provider=createServer((req,res)=>{providerRequests++;res.setHeader('content-type','application/octet-stream');res.end(dbar);});await new Promise(r=>provider.listen(0,'127.0.0.1',r));
 try{
- const publicPort=await port(),privatePort=await port(),lanPort=await port(),origin=`http://localhost:${privatePort}`,config=path.join(scratch,'collector.toml');
+ const publicPort=await fixturePort(),privatePort=await fixturePort(),lanPort=await fixturePort(),origin=`http://localhost:${privatePort}`,config=path.join(scratch,'collector.toml');
  await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${publicPort}"\nprivate_bind = "127.0.0.1:${privatePort}"\nlan_bind = "127.0.0.1:${lanPort}"\nlocal_playback_enabled = false\nallowed_origins = ["${origin}"]\n`);
  const setup=spawnSync(serverBinary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${provider.address().port}/`}});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);await waitForServer(origin+'/healthz',server,{logs:()=>logs});
@@ -53,5 +52,46 @@ try{
  await expect(batch.getByRole('button',{name:'More album results',exact:true})).toHaveCount(0);
  assert.equal(providerRequests,1,'excluded confirmed audio was checked again');
  await admin.getByRole('button',{name:'Close administration'}).click();await page.reload();await page.getByRole('searchbox',{name:'Search collection'}).fill('Older CD');await expect(page.locator(`[data-item-id="${imported.target_item_id}"]`)).toBeVisible();await expect(page.getByRole('button',{name:/AccurateRip for Older CD: Verified\..*Open audio checks/})).toBeVisible();
- assert.deepEqual(errors,[]);console.log('CD library UI passed: saved collection defaults, preserved uninspected original without acquisition, one-click library batch, automatic structure/response/audio confirmation, refreshed verified library row, and no excluded rows or empty result pages across 104 skipped entries.');
-}catch(e){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw e;}finally{await browser?.close();await stopProcess(server);await new Promise(r=>provider.close(r));await rm(scratch,{recursive:true,force:true});}
+ // The account setting is reachable at phone width, and the desktop dock
+ // reflects it. This track has no saved derivative.
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'Menu',exact:true}).click();
+ await page.getByRole('button',{name:'Account & security',exact:true}).click();
+ const account=page.getByRole('dialog',{name:'Account & security'});
+ await account.getByRole('button',{name:'Playback',exact:true}).click();
+ await account.getByLabel('Playback format').selectOption('opus');
+ await account.getByLabel('Opus bitrate (kbps)').fill('113');
+ await account.getByRole('button',{name:'Apply bitrate',exact:true}).click();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await account.getByRole('button',{name:'Close account and security',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1000});
+ await page.reload();
+ await page.locator(`[data-item-id="${imported.target_item_id}"]`).click();
+ const player=page.getByRole('region',{name:'Music player'});
+ await expect(player.getByLabel('Playback format')).toHaveValue('opus');
+ await expect(player.getByLabel('Opus bitrate (kbps)')).toHaveValue('113');
+ const tracks=page.getByRole('region',{name:'Album tracks'});
+ const liveResponse=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('bitrate=113'));
+ await tracks.getByRole('button',{name:'Play album',exact:true}).click();
+ const live=await liveResponse;
+ assert.equal(live.status(),200);
+ assert.match(live.headers()['content-type'],/audio\/ogg/);
+ const audio=player.locator('audio');
+ await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
+ const seek=player.getByRole('slider',{name:/Seek in /});
+ const sought=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('start_ms=2500'));
+ await seek.evaluate(slider=>{
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'2.5');
+  slider.dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ assert.equal((await sought).status(),200);
+ await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
+ await player.getByRole('button',{name:'Pause',exact:true}).click();
+ await expect.poll(()=>audio.evaluate(a=>a.paused&&!a.hasAttribute('src'))).toBe(true);
+ await player.getByLabel('Playback format').selectOption('flac');
+ const flac=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('format=flac'));
+ await player.getByRole('button',{name:'Play',exact:true}).click();
+ assert.equal((await flac).headers()['content-type'],'audio/flac');
+ await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
+ assert.deepEqual(errors,[]);console.log('CD library UI passed: saved collection defaults, preserved uninspected original without acquisition, one-click library batch, automatic structure/response/audio confirmation, refreshed verified library row, no excluded rows or empty result pages across 104 skipped entries, mobile format settings, and real Opus/FLAC playback and seek from the raw original.');
+}catch(e){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw e;}finally{await browser?.close();await stopProcess(server);await closeHttpFixture(provider,'CD provider fixture');await rm(scratch,{recursive:true,force:true});}

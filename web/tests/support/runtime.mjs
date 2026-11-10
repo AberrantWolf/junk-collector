@@ -37,6 +37,37 @@ export async function fixturePort(){
  await new Promise(resolve=>listener.close(resolve));
  return value;
 }
+// A provider fixture may intentionally hold a response. Stop accepting
+// connections first, then close active sockets so they cannot pin teardown.
+export async function closeHttpFixture(server,label='HTTP fixture'){
+ if(!server.listening)return;
+ const closed=new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+ server.closeAllConnections();
+ await deadline(closed,label+' shutdown',5000);
+}
+
+export async function runJourneys(journeys,{report=console.log}={}){
+ const failures=[];
+ for(const {name,command,args=[],options={},timeout} of journeys){
+  report(`Starting ${name}`);
+  const start=Date.now();
+  let child;
+  try{
+   child=spawn(command,args,options);
+   const ended=new Promise((resolve,reject)=>{
+    child.once('error',reject);
+    child.once('exit',(code,signal)=>code===0?resolve():reject(Error(`${name} failed (${signal||code})`)));
+   });
+   try{await deadline(ended,name,timeout);}finally{if(child.pid)await stopProcess(child);}
+   report(`${name}: ${((Date.now()-start)/1000).toFixed(2)}s`);
+  }catch(error){
+   failures.push({name,error});
+   report(String(error));
+  }
+ }
+ return failures;
+}
+
 export async function waitForServer(url,child,{timeout=20000,logs=()=>''}={}){
  const until=Date.now()+timeout;
  while(Date.now()<until){

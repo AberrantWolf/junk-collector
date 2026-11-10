@@ -7,7 +7,9 @@ pub use catalog_inspection::*;
 mod accuraterip;
 pub use accuraterip::*;
 mod conversion;
+mod live_audio;
 pub use conversion::*;
+pub use live_audio::*;
 mod metadata;
 pub use metadata::*;
 

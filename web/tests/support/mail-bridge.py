@@ -1,5 +1,5 @@
 """Offline TLS IMAP fixture for real browser connection setup. No real mailbox."""
-import socketserver, ssl, sys, threading, json
+import socketserver, ssl, sys, json
 from pathlib import Path
 def controls():
     return json.loads(Path(sys.argv[4]).read_text()) if len(sys.argv)>4 else {}
@@ -42,7 +42,22 @@ class Handler(socketserver.StreamRequestHandler):
                         +tag+' OK list')
             elif command=='EXAMINE':answer='* 0 EXISTS\r\n'+tag+' OK [READ-ONLY] mailbox'
             elif command=='STATUS':answer=f"* STATUS INBOX (UIDVALIDITY 42 UIDNEXT {controls().get('uidnext',1)})\r\n"+tag+' OK status'
-            elif command=='UID' and parts[2].upper().startswith('SEARCH '):answer='* SEARCH\r\n'+tag+' OK search'
+            elif command=='UID' and parts[2].upper().startswith('SEARCH '):
+                first,last=map(int,parts[2].split()[-1].split(':'))
+                uid=' 1' if controls().get('amazon_receipt') and first<=1<=last else ''
+                answer=f'* SEARCH{uid}\r\n{tag} OK search'
+            elif command=='UID' and parts[2].startswith('FETCH 1 ') and controls().get('amazon_receipt'):
+                raw=Path(sys.argv[5]).read_bytes()
+                if 'BODY.PEEK[HEADER.FIELDS ' in parts[2]:
+                    data=raw.split(b'\r\n\r\n',1)[0]+b'\r\n\r\n'
+                    field=f'RFC822.SIZE {len(raw)} BODY[HEADER]'
+                elif 'BODY.PEEK[]' in parts[2]:
+                    data=raw
+                    field='BODY[]'
+                else:
+                    return
+                self.wfile.write(f'* 1 FETCH (UID 1 {field} {{{len(data)}}}\r\n'.encode()+data+b')\r\n')
+                answer=tag+' OK fetch'
             else:answer=tag+' BAD unexpected fixture command'
             self.wfile.write((answer+'\r\n').encode());self.wfile.flush()
 class Server(socketserver.ThreadingTCPServer):

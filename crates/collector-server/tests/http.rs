@@ -2305,7 +2305,142 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
             collector_providers::ProcessAudioConverter::default(),
         ));
     let without_encoder = router(without_encoder);
+    let mut separate = state.clone();
+    separate.remote_media_allowed = false;
+    separate.direct_media = false;
+    let separate = router(separate);
+    #[cfg(unix)]
+    let stalled = {
+        use std::os::unix::fs::PermissionsExt;
+        let tool = root.path().join("stalled-encoder");
+        std::fs::write(
+            &tool,
+            r#"#!/bin/sh
+/bin/sleep 60 &
+printf '%s %s\n' "$$" "$!" > "$0.pid"
+printf fLaC
+wait
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut stalled = state.clone();
+        stalled.live_audio_ffmpeg = tool;
+        router(stalled)
+    };
     let app = router(state);
+    let live_path = format!(
+        "/api/v1/items/{}/music-stream/{}",
+        item.id, published.representation_id
+    );
+    let live_request = |query: &str, token: Option<&str>, range: Option<&str>| {
+        let mut req = Request::builder().uri(format!("{live_path}?{query}"));
+        if let Some(token) = token {
+            req = req.header("authorization", format!("Bearer {token}"));
+        }
+        if let Some(range) = range {
+            req = req.header("range", range);
+        }
+        req.body(Body::empty()).unwrap()
+    };
+    let live_flac = "track=1&format=flac";
+    for (router, token, query, status) in [
+        (app.clone(), None, live_flac, StatusCode::UNAUTHORIZED),
+        (
+            separate,
+            Some(viewer_token.as_str()),
+            live_flac,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            app.clone(),
+            Some(viewer_token.as_str()),
+            "track=1&format=opus&bitrate=257",
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let result = router
+            .oneshot(live_request(query, token, None))
+            .await
+            .unwrap();
+        assert_eq!(result.status(), status);
+    }
+    #[cfg(unix)]
+    {
+        let response = stalled
+            .oneshot(live_request(live_flac, Some(&viewer_token), None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let pids = std::fs::read_to_string(root.path().join("stalled-encoder.pid")).unwrap();
+        let running = |pid: &str| {
+            std::process::Command::new("kill")
+                .args(["-0", pid])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assert_eq!(pids.split_whitespace().count(), 2);
+        assert!(
+            pids.split_whitespace().all(running),
+            "both fixture processes must be alive before disconnect"
+        );
+        drop(response);
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while pids.split_whitespace().any(running) {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("disconnect should terminate and reap the live encoder");
+    }
+    if std::env::var_os("COLLECTOR_TEST_FFMPEG").is_some() {
+        // Both listeners encode independently without running a durable job.
+        let request = |query| {
+            app.clone()
+                .oneshot(live_request(query, Some(&viewer_token), None))
+        };
+        let (lossless, opus) = tokio::join!(
+            request("track=1&format=flac&start_ms=10"),
+            request("track=1&format=opus&bitrate=113")
+        );
+        let lossless = lossless.unwrap();
+        let opus = opus.unwrap();
+        assert_eq!(lossless.status(), StatusCode::OK);
+        assert_eq!(lossless.headers()["accept-ranges"], "none");
+        assert_eq!(opus.status(), StatusCode::OK);
+        assert_eq!(opus.headers()["content-type"], "audio/ogg; codecs=opus");
+        let (lossless, opus) = tokio::join!(
+            axum::body::to_bytes(lossless.into_body(), 65536),
+            axum::body::to_bytes(opus.into_body(), 65536)
+        );
+        let opus = opus.unwrap();
+        assert!(opus.starts_with(b"OggS") && opus.windows(8).any(|x| x == b"OpusHead"));
+        let encoded = root.path().join("live-audio.flac");
+        std::fs::write(&encoded, lossless.unwrap()).unwrap();
+        let decoded = std::process::Command::new("flac")
+            .args([
+                "-d",
+                "-c",
+                "--force-raw-format",
+                "--endian=little",
+                "--sign=signed",
+            ])
+            .arg(encoded)
+            .output()
+            .unwrap();
+        assert!(
+            decoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        assert_eq!(
+            decoded.stdout,
+            pcm[441 * 4..],
+            "live FLAC must preserve the exact PCM suffix"
+        );
+    }
     let availability_path = format!("/api/v1/items/{}/music-tracks", item.id);
     let response = app
         .clone()
@@ -2534,6 +2669,40 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     .unwrap();
     assert_eq!(available[0]["state"]["status"], "available");
     assert_eq!(available[0]["state"]["media_type"], "audio/flac");
+    let passthrough = app
+        .clone()
+        .oneshot(live_request(
+            live_flac,
+            Some(&viewer_token),
+            Some("bytes=0-3"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(passthrough.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        axum::body::to_bytes(passthrough.into_body(), 16)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"fLaC"
+    );
+    let (opus_source, _) = service
+        .music_stream(
+            &actor,
+            item.id,
+            published.representation_id,
+            collector_app::MusicStreamRequest {
+                coordinate: collector_app::StreamCoordinate::Track(1),
+                codec: collector_app::StreamCodec::Opus(113),
+                start_ms: 0,
+            },
+            &|| Ok(()),
+        )
+        .unwrap();
+    assert!(matches!(
+        opus_source,
+        collector_app::StreamInput::File(_, "flac")
+    ));
     let export_path = format!(
         "/api/v1/items/{}/music-exports/{}/1",
         item.id, published.representation_id
@@ -2713,6 +2882,12 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
         .await
         .unwrap();
     assert_eq!(revoked.status(), StatusCode::FORBIDDEN);
+    let revoked_live = app
+        .clone()
+        .oneshot(live_request(live_flac, Some(&viewer_token), None))
+        .await
+        .unwrap();
+    assert_eq!(revoked_live.status(), StatusCode::FORBIDDEN);
 
     drop(app);
     drop(service);

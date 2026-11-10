@@ -234,6 +234,9 @@ pub struct MusicTrackAvailability {
     pub state: MusicTrackAvailabilityState,
     /// Current actor, module, source and encoder permit explicit preparation.
     pub can_prepare: bool,
+    /// An authorized original can supply PCM for live conversion.
+    #[serde(default)]
+    pub can_stream_original: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]

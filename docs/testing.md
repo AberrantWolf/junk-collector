@@ -172,10 +172,17 @@ certificate in `COLLECTOR_TEST_CERTIFICATE_PEM` when enabling
 `COLLECTOR_TEST_SELF_SIGNED=1`; this pins the disposable key across browser requests
 and reloads. Never point its mutation workflow at production.
 
-The shared harness bounds shutdown, reaps owned processes on interruption/failure
-and leaves unrelated Chrome sessions alone. `node web/tests/harness-check.mjs`
-checks process ownership/reaping without a browser. The repeated launch check
-also exercises assertion failure and interruption with real browser processes.
+The shared harness reports the current journey, bounds shutdown, reaps owned
+processes and closes held fixture HTTP responses. The named suite runs serially
+and keeps running independent journeys after a failure; its final exit status
+still fails CI if any journey failed or timed out. It does not rerun failed
+journeys. For a normal browser read during concurrent fixture work, use the
+app API so the test gets the same bounded retry for typed catalog contention
+and an actionable error if the read still fails. Command and behavior
+assertions remain failures. `node web/tests/harness-check.mjs` checks
+process ownership, held HTTP teardown and failure isolation without a browser.
+The repeated launch check also exercises assertion failure and interruption with
+real browser processes. Unrelated Chrome sessions are left alone.
 
 ## Packaging and release evidence
 

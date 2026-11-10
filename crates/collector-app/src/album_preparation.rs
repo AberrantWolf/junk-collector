@@ -1178,6 +1178,7 @@ mod tests {
         let first = RepresentationId::new();
         let second = RepresentationId::new();
         let row = |source_representation_id| MusicTrackAvailability {
+            can_stream_original: false,
             album_selection: collector_api_types::MusicAlbumSelection::Included,
             display_position: None,
             audio_format: None,
@@ -1211,6 +1212,7 @@ mod tests {
         let source = RepresentationId::new();
         let oversized = (1..=257)
             .map(|track_position| MusicTrackAvailability {
+                can_stream_original: false,
                 album_selection: collector_api_types::MusicAlbumSelection::Included,
                 display_position: None,
                 audio_format: None,

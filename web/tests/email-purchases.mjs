@@ -17,7 +17,22 @@ try{
  const profiles=path.join(scratch,'profiles.json'),managed=path.join(scratch,'mail-profiles'),status=path.join(scratch,'bridge-status.json'),certificate=path.join(scratch,'cert.pem'),key=path.join(scratch,'key.pem'),mailCommands=path.join(scratch,'mail-commands.log'),mailControls=path.join(scratch,'mail-controls.json');
  await writeFile(mailControls,'{}');await writeFile(profiles,'[]',{mode:0o600});await mkdir(managed);
  const cert=spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-subj','/CN=localhost','-days','1','-keyout',key,'-out',certificate],{encoding:'utf8'});assert.equal(cert.status,0,cert.stderr);
- bridge=spawn('python3',['-u',fileURLToPath(new URL('./support/mail-bridge.py',import.meta.url)),certificate,key,mailCommands,mailControls],{stdio:['ignore','pipe','pipe']});
+ const amazonReceipt=path.join(scratch,'amazon.eml');
+ const amazonHeaders=[
+  'From: shipment-tracking@amazon.co.jp',
+  'Subject: Out for delivery - "Fixture Delivery..."',
+  'Message-ID: <amazon-delivery@fixture.invalid>',
+  'Date: Sun, 8 Nov 2026 09:00:00 +0900',
+  'Content-Type: text/html; charset=UTF-8',
+  '',
+ ];
+ await writeFile(amazonReceipt,[...amazonHeaders,'<p>Item: Fixture Delivery Adventure</p>'].join('\r\n'));
+ const recoveredAmazonBody=[
+  '<div><span>Order # </span><span>&#8235;123-1234567-1234567&#8236;</span></div>',
+  '<a href="https://www.amazon.co.jp/gp/r.html?ref_=pe_1_2_i_fed_asin_title&amp;U=https%3A%2F%2Fwww.amazon.co.jp%2Fdp%2FB000000001"><img alt="Fixture Delivery Adventure"></a>',
+  '<a href="https://www.amazon.co.jp/gp/r.html?ref_=pe_1_2_t_fed_asin_title&amp;U=https%3A%2F%2Fwww.amazon.co.jp%2Fdp%2FB000000002">Shortened title...</a>',
+ ];
+ bridge=spawn('python3',['-u',fileURLToPath(new URL('./support/mail-bridge.py',import.meta.url)),certificate,key,mailCommands,mailControls,amazonReceipt],{stdio:['ignore','pipe','pipe']});
  const imapPort=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('IMAP fixture startup timed out')),10000);bridge.stdout.once('data',v=>{clearTimeout(timer);resolve(Number(v.toString().trim()));});bridge.once('exit',()=>{clearTimeout(timer);reject(Error('IMAP fixture exited before listening'));});});
  const fingerprint=createHash('sha256').update(new X509Certificate(await readFile(certificate)).raw).digest('hex');
  function report(){
@@ -181,6 +196,41 @@ db.commit()
  await page.reload();await page.getByLabel('Review status',{exact:true}).selectOption('accepted');await expect(page.locator('article')).toHaveCount(1);
  const screenshot=process.env.COLLECTOR_SCREENSHOTS;if(screenshot){await mkdir(screenshot,{recursive:true});await page.screenshot({path:path.join(screenshot,'purchase-inbox-desktop.png'),fullPage:true});}
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile purchase inbox overflow');if(screenshot)await page.screenshot({path:path.join(screenshot,'purchase-inbox-mobile.png'),fullPage:true});
+ // Rescan through real IMAP, the embedded parser, private persistence and the review UI.
+ await writeFile(mailControls,JSON.stringify({password:'fixture-rotated-password',uidnext:2,amazon_receipt:true}));
+ async function rescanAmazon(){
+  await connection.getByRole('button',{name:'Rescan configured folders',exact:true}).click();
+  await expect.poll(async()=>await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0].cursor)).toBe('');
+  await stopProcess(server);server=undefined;await start();await page.reload();
+ }
+ async function waitForInbox(content){
+  await expect(async()=>{
+   await page.getByRole('button',{name:'Refresh inbox',exact:true}).click();
+   await expect(content).toBeVisible({timeout:500});
+  }).toPass({timeout:20000});
+ }
+ await rescanAmazon();
+ const delivery=page.locator('article').filter({has:page.getByRole('heading',{name:'Fixture Delivery Adventure',exact:true})});
+ await waitForInbox(delivery);
+ await expect(delivery.getByText(/Order 123-1234567-1234567/)).toHaveCount(0);
+ await writeFile(amazonReceipt,[...amazonHeaders,...recoveredAmazonBody].join('\r\n'));
+ await rescanAmazon();
+ await waitForInbox(delivery.getByText(/Order 123-1234567-1234567/));
+ const incomplete=page.locator('article').filter({hasText:'The full title for this item could not be recovered.'});
+ await expect(incomplete.getByText(/Order 123-1234567-1234567/)).toBeVisible();
+ await incomplete.getByRole('button',{name:'Review suggestion',exact:true}).click();
+ await expect(incomplete.getByRole('button',{name:'Accept collection update',exact:true})).toBeDisabled();
+ await expect(delivery.getByText(/Amazon Japan · out for delivery/)).toBeVisible();
+ await expect(delivery.getByText(/Order 123-1234567-1234567/)).toBeVisible();
+ await delivery.getByRole('button',{name:'Review suggestion',exact:true}).click();
+ await expect(delivery.getByLabel('Status',{exact:true})).toHaveValue('out_for_delivery');
+ await expect(delivery.getByLabel('Format',{exact:true})).toHaveValue('physical');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile delivery review overflow');
+ if(screenshot)await page.screenshot({path:path.join(screenshot,'amazon-delivery-review-mobile.png'),fullPage:true});
+ await delivery.getByRole('button',{name:'Accept collection update',exact:true}).click();
+ await expect(delivery).toHaveCount(0);
+ await page.getByLabel('Review status',{exact:true}).selectOption('accepted');
+ await expect(delivery.getByText('Accepted',{exact:true})).toBeVisible();
  assert.equal(await page.evaluate(async()=>{const r=await fetch('/purchase-inbox.js');return r.status;}),200);
  // The public listener does not compose the inbox page, asset or APIs.
  for(const route of ['/purchase-inbox','/purchase-inbox.js','/api/v1/mail/profiles','/api/v1/collections/'+ids.collection+'/purchase-inbox'])assert.equal((await fetch(`http://127.0.0.1:${publicPort}${route}`)).status,404,route);

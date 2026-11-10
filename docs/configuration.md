@@ -93,6 +93,7 @@ public_administration = false
 [encoders]
 flac = "/usr/bin/flac"
 # opus = "/usr/bin/opusenc"
+# ffmpeg = "/usr/bin/ffmpeg" # live playback; defaults to ffmpeg on PATH
 
 [providers]
 musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
@@ -101,6 +102,31 @@ musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
 rips = "/srv/incoming"
 ```
 
+
+### Live playback format
+
+Use **Playback format** in the player, or **Account & security → Playback** on
+a phone. Choose **Saved audio**, **FLAC**, or **Opus**. Opus accepts any whole
+target bitrate from 6 to 256 kbps, including on mono sources. The preference
+is saved for this account in this browser and takes effect the next time you
+press Play or start a track.
+
+With normal authenticated audio, Collector can stream a track directly from a
+supported raw CD rip without preparing a file. It prefers saved FLAC for the
+selected track, then its original, and can use a retained Opus copy when the
+original cannot be read. FLAC avoids a new lossy encode; converting MP3 or Opus to FLAC
+does not recover lost detail. Changing format does not change
+the library or its saved files. An existing matching saved file can use regular
+HTTP byte ranges. Live audio seeks by starting a new stream from the requested
+time; the player needs a known duration to show a live seek bar.
+
+The server uses FFmpeg (with its FLAC and libopus encoders) for live conversion.
+The container includes it; native installs can set `encoders.ffmpeg` or install it
+on PATH. Each live stream has its own encoder and source reader. A server accepts
+up to eight concurrent live requests, with two per session or native credential
+to allow overlap during seek and track changes. This limit is separate from
+background processing. No conversion is saved. Dedicated WebTransport and
+separate HTTPS media still deliver saved audio; they do not carry live conversion.
 
 ### CD library defaults
 

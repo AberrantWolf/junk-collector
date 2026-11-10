@@ -138,7 +138,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.rust == 'true'
-        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev flac opus-tools
+        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libssl-dev flac opus-tools ffmpeg
       - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.web == 'true'
         run: npm --prefix web ci
       - if: steps.scope.outputs.reused != 'true' && steps.scope.outputs.browsers != ''

@@ -96,3 +96,5 @@ async function waitForReadRetry(milliseconds:number,signal?:AbortSignal|null){
   if(signal?.aborted)cancel();
  });
 }
+
+export {usePlaybackPreference,setPlaybackPreference,validOpusBitrate,type PlaybackFormat} from './playback-preference';

@@ -6151,6 +6151,115 @@
         }
       }
     },
+    "/api/v1/items/{id}/music-stream/{source}": {
+      "get": {
+        "operationId": "music_stream",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RepresentationId"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "flac",
+                "opus"
+              ]
+            }
+          },
+          {
+            "name": "bitrate",
+            "in": "query",
+            "description": "Required for Opus. Target variable bitrate in kbps, 6–256.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 256,
+              "minimum": 6
+            }
+          },
+          {
+            "name": "track",
+            "in": "query",
+            "description": "Track number when playing a source-bound track.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "description": "File index when playing a directly queued original file.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "description": "Start position in milliseconds for a live stream.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "audio/flac": {},
+              "audio/ogg": {}
+            }
+          },
+          "206": {
+            "description": "Partial Content"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/music-tracks": {
       "get": {
         "operationId": "music_track_availability",
@@ -16127,7 +16236,8 @@
           "unsupported_content",
           "too_large",
           "too_many_parts",
-          "unrecognized_layout"
+          "unrecognized_layout",
+          "incomplete_item_title"
         ]
       },
       "MailProfile": {
@@ -18178,6 +18288,10 @@
           "can_prepare": {
             "type": "boolean",
             "description": "Current actor, module, source and encoder permit explicit preparation."
+          },
+          "can_stream_original": {
+            "type": "boolean",
+            "description": "An authorized original can supply PCM for live conversion."
           },
           "capture_id": {
             "$ref": "#/components/schemas/CaptureId"
@@ -21745,6 +21859,7 @@
           "ordered",
           "purchased",
           "shipped",
+          "out_for_delivery",
           "delivered",
           "cancelled",
           "refunded",

@@ -673,14 +673,17 @@ fn isolated_command(path: &Path) -> Command {
     command
 }
 
+#[cfg(unix)]
+pub(super) fn kill_process_group(pid: u32) {
+    // The child starts its own group; descendants must not retain its pipes.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
 fn terminate(child: &mut Child) {
     #[cfg(unix)]
-    {
-        // The child is spawned in its own group; descendants must not retain pipes.
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-    }
+    kill_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }

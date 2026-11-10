@@ -108,12 +108,55 @@ pub enum MailParseIssue {
     TooLarge,
     TooManyParts,
     UnrecognizedLayout,
+    IncompleteItemTitle,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MailReceiptDetails {
     pub key: String,
     pub source: MailSource,
     pub issue: Option<MailParseIssue>,
+    #[serde(default)]
+    pub amazon_order_card: bool,
+}
+
+/// Fill missing fields from a recognized order card for the same source.
+/// Existing receipt facts and the original observation time retain authority.
+pub fn recover_amazon_purchase_fields(
+    existing: &mut PurchaseOrder,
+    parsed: &PurchaseOrder,
+) -> Option<bool> {
+    if existing.retailer != "amazon_jp"
+        || parsed.retailer != existing.retailer
+        || parsed.id != existing.id
+        || parsed.source_keys != existing.source_keys
+        || parsed.title != existing.title
+        || parsed.order_reference.is_empty()
+        || parsed.format != "physical"
+        || !matches!(
+            parsed.status,
+            PurchaseStatus::Ordered
+                | PurchaseStatus::Shipped
+                | PurchaseStatus::OutForDelivery
+                | PurchaseStatus::Delivered
+        )
+        || (!existing.order_reference.is_empty()
+            && existing.order_reference != parsed.order_reference)
+    {
+        return None;
+    }
+    let missing_reference = existing.order_reference.is_empty();
+    let missing_format = existing.format == "unknown" || existing.format.is_empty();
+    let missing_status = existing.status == PurchaseStatus::Unknown;
+    if missing_reference {
+        existing.order_reference.clone_from(&parsed.order_reference);
+    }
+    if missing_format {
+        existing.format.clone_from(&parsed.format);
+    }
+    if missing_status {
+        existing.status = parsed.status.clone();
+    }
+    Some(missing_reference || missing_format || missing_status)
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MailFolderProgress {

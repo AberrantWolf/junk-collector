@@ -1,7 +1,8 @@
 import {useSyncExternalStore} from 'react';
+import {setPlaybackPreferenceUser} from './playback-preference';
 
 // Personal browser activity: immutable coordinates, never paths or media bytes.
-export type QueuedTrack={id:string;itemId:string;collectionId:string;album:string;artist?:string;title:string;position:number;representationId:string;fileIndex:number;mediaType:string;artwork?:string;original?:boolean};
+export type QueuedTrack={id:string;itemId:string;collectionId:string;album:string;artist?:string;title:string;position:number;representationId:string;fileIndex:number;mediaType:string;artwork?:string;original?:boolean;sourceId?:string;sourcePosition?:number;seconds?:number;opusBitrate?:number;liveOnly?:boolean};
 export const MAX_MUSIC_QUEUE=5000;
 type Queue={tracks:QueuedTrack[];current:string|null;playRequest?:string};
 const empty:Queue={tracks:[],current:null};
@@ -10,9 +11,10 @@ let state:Queue=empty;
 const listeners=new Set<()=>void>();
 const storageKey=()=>`collector.music-queue.v1.${owner}`;
 const uuid=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f-]{36}$/i.test(v);
-function valid(v:QueuedTrack){return v&&uuid(v.id)&&uuid(v.itemId)&&uuid(v.collectionId)&&uuid(v.representationId)&&Number.isInteger(v.fileIndex)&&v.fileIndex>=0&&Number.isInteger(v.position)&&v.position>=0&&typeof v.album==='string'&&v.album.length<=4096&&typeof v.title==='string'&&v.title.length<=4096&&(v.artist===undefined||typeof v.artist==='string'&&v.artist.length<=4096)&&typeof v.mediaType==='string'&&v.mediaType.length<100&&(!v.artwork||uuid(v.artwork))&&(v.original===undefined||typeof v.original==='boolean');}
+function valid(v:QueuedTrack){return v&&uuid(v.id)&&uuid(v.itemId)&&uuid(v.collectionId)&&uuid(v.representationId)&&Number.isInteger(v.fileIndex)&&v.fileIndex>=0&&Number.isInteger(v.position)&&v.position>=0&&typeof v.album==='string'&&v.album.length<=4096&&typeof v.title==='string'&&v.title.length<=4096&&(v.artist===undefined||typeof v.artist==='string'&&v.artist.length<=4096)&&typeof v.mediaType==='string'&&v.mediaType.length<100&&(!v.artwork||uuid(v.artwork))&&(v.original===undefined||typeof v.original==='boolean')&&(v.liveOnly===undefined||typeof v.liveOnly==='boolean')&&(v.seconds===undefined||Number.isFinite(v.seconds)&&v.seconds>0)&&(v.sourceId===undefined&&v.sourcePosition===undefined||uuid(v.sourceId)&&Number.isInteger(v.sourcePosition)&&v.sourcePosition!>0&&v.sourcePosition!<=65535)&&(v.opusBitrate===undefined||Number.isInteger(v.opusBitrate)&&v.opusBitrate>=6&&v.opusBitrate<=256);}
 function publish(next:Queue,persist=true){state=next;if(owner&&persist)try{localStorage.setItem(storageKey(),JSON.stringify(next));}catch{/* Disabled/full local storage must not prevent playback. */}for(const listener of listeners)listener();}
 export function setMusicQueueUser(user?:string){
+ setPlaybackPreferenceUser(user);
  if(owner===user)return;owner=user;let next=empty;
  if(user)try{const text=localStorage.getItem(storageKey());if(text&&text.length<8_000_000){const value=JSON.parse(text);if(Array.isArray(value.tracks)&&value.tracks.length<=MAX_MUSIC_QUEUE&&value.tracks.every(valid)&&new Set(value.tracks.map((v:QueuedTrack)=>v.id)).size===value.tracks.length)next={tracks:value.tracks,current:value.tracks.some((v:QueuedTrack)=>v.id===value.current)?value.current:value.tracks[0]?.id||null};}}catch{/* Malformed local state starts empty. */}
  publish(next,false);
@@ -24,6 +26,14 @@ export function removeMusicTrack(id:string){const index=state.tracks.findIndex(t
 export function reorderMusicTrack(id:string,delta:number){const tracks=[...state.tracks];const index=tracks.findIndex(t=>t.id===id);const next=index+delta;if(index<0||next<0||next>=tracks.length)return;[tracks[index],tracks[next]]=[tracks[next],tracks[index]];publish({...state,tracks});}
 export function clearMusicQueue(){publish(empty);}
 export function musicTrackUrl(track:QueuedTrack){return `/api/v1/items/${track.itemId}/representations/${track.representationId}/${track.fileIndex}`;}
+
+export function streamTrackUrl(track:QueuedTrack,format:'flac'|'opus',bitrate:number,start=0){
+ const query=new URLSearchParams({format});
+ if(format==='opus')query.set('bitrate',String(bitrate));
+ if(track.sourceId&&track.sourcePosition)query.set('track',String(track.sourcePosition));else query.set('file',String(track.fileIndex));
+ if(start>0)query.set('start_ms',String(Math.floor(start*1000)));
+ return `/api/v1/items/${track.itemId}/music-stream/${track.sourceId||track.representationId}?${query}`;
+}
 
 export function audioMediaType(name:string):string|undefined{return ({flac:'audio/flac',mp3:'audio/mpeg',wav:'audio/wav',opus:'audio/ogg; codecs=opus',ogg:'audio/ogg'} as Record<string,string>)[name.split('.').pop()?.toLowerCase()||''];}
 

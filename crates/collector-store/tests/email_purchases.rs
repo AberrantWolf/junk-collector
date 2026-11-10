@@ -1053,14 +1053,26 @@ fn folder_edits_are_owned_revision_fenced_replayable_and_preserve_history() {
     assert!(!retained.enabled);
 }
 
-fn review_fixture() -> (
+type ReviewFixture = (
     tempfile::TempDir,
     Arc<Store>,
     CollectionService,
     Principal,
     CollectionId,
     Arc<Mail>,
-) {
+);
+
+fn review_fixture() -> ReviewFixture {
+    let mut recent = purchase("b", PurchaseStatus::Cancelled);
+    recent.observed_at = "2026-10-31T10:00:00Z".parse().unwrap();
+    review_fixture_with(vec![
+        purchase("a", PurchaseStatus::Preordered),
+        recent,
+        purchase("c", PurchaseStatus::Ordered),
+    ])
+}
+
+fn review_fixture_with(purchases: Vec<PurchaseOrder>) -> ReviewFixture {
     let root = tempfile::tempdir().unwrap();
     let store =
         Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
@@ -1083,8 +1095,6 @@ fn review_fixture() -> (
         )
         .unwrap()
         .id;
-    let mut recent = purchase("b", PurchaseStatus::Cancelled);
-    recent.observed_at = "2026-10-31T10:00:00Z".parse().unwrap();
     let provider = Arc::new(Mail {
         profile: MailProfile {
             id: "recovery".into(),
@@ -1096,11 +1106,7 @@ fn review_fixture() -> (
         },
         batch: Mutex::new(MailBatch {
             cursor: "history".into(),
-            purchases: vec![
-                purchase("a", PurchaseStatus::Preordered),
-                recent,
-                purchase("c", PurchaseStatus::Ordered),
-            ],
+            purchases,
             details: vec![],
             progress: vec![],
             failure: None,
@@ -1134,6 +1140,169 @@ fn review_command(s: &PurchaseSuggestion, item: ItemId, revision: Revision) -> R
         intentional_duplicate: true,
         purchase: s.purchase.clone(),
     }
+}
+
+#[test]
+fn amazon_rescan_recovers_missing_fields_and_preserves_prior_decisions() {
+    let legacy: Vec<_> = ["a", "b", "c"]
+        .into_iter()
+        .map(|key| {
+            let status = if key == "b" {
+                PurchaseStatus::Unknown
+            } else {
+                PurchaseStatus::Shipped
+            };
+            let mut purchase = purchase(key, status);
+            purchase.retailer = "amazon_jp".into();
+            purchase.order_reference.clear();
+            purchase.format = "unknown".into();
+            purchase
+        })
+        .collect();
+    let (root, store, service, actor, collection, provider) = review_fixture_with(legacy.clone());
+    let pending = store.purchase_suggestion(&legacy[0].id).unwrap();
+    let dismissed = store.purchase_suggestion(&legacy[1].id).unwrap();
+    let accepted = store.purchase_suggestion(&legacy[2].id).unwrap();
+    service
+        .dismiss_purchase(&actor, &dismissed.id, dismissed.revision, &context())
+        .unwrap();
+    let mut review = review_command(&accepted, ItemId::new(), Revision(0));
+    review.purchase.order_reference = "MANUALLY-REVIEWED".into();
+    review.purchase.title = "Reviewed title".into();
+    let item = service
+        .review_purchase(&actor, &accepted.id, review, &context())
+        .unwrap();
+    let revision = service.mail_connections(&actor).unwrap()[0].revision;
+    service
+        .configure_mail(
+            &actor,
+            &provider.profile.id,
+            ConfigureMail {
+                rescan: true,
+                folders: None,
+                collection_id: collection,
+                enabled: true,
+                expected_revision: revision,
+            },
+            &context(),
+        )
+        .unwrap();
+    let mut batch = MailBatch {
+        cursor: "rescanned".into(),
+        purchases: legacy,
+        details: vec![],
+        progress: vec![MailFolderProgress {
+            checked_at: chrono::Utc::now(),
+            folder: "INBOX".into(),
+            uid_validity: 42,
+            scanned_through: 3,
+            available_through: 3,
+            caught_up: true,
+        }],
+        failure: None,
+    };
+    for (index, purchase) in batch.purchases.iter_mut().enumerate() {
+        purchase.order_reference = "123-1234567-1234567".into();
+        purchase.format = "physical".into();
+        purchase.platform.clear();
+        purchase.edition.clear();
+        purchase.status = PurchaseStatus::OutForDelivery;
+        purchase.observed_at = "2026-11-01T10:00:00Z".parse().unwrap();
+        batch.details.push(MailReceiptDetails {
+            key: purchase.id.clone(),
+            source: MailSource {
+                folder: "INBOX".into(),
+                uid_validity: 42,
+                uid: index as u64 + 1,
+                message_id: format!("<fixture-{index}>"),
+                subject: "Shipped: Fixture game".into(),
+                date: String::new(),
+            },
+            issue: None,
+            amazon_order_card: true,
+        });
+    }
+    *provider.batch.lock().unwrap() = batch.clone();
+    service.sync_purchase_mail().unwrap();
+    assert_eq!(
+        service.mail_connections(&actor).unwrap()[0].cursor,
+        "rescanned"
+    );
+    let recovered = store.purchase_suggestion(&pending.id).unwrap();
+    assert_eq!(recovered.purchase.order_reference, "123-1234567-1234567");
+    assert_eq!(recovered.purchase.format, "physical");
+    assert_eq!(recovered.purchase.status, pending.purchase.status);
+    assert_eq!(recovered.purchase.observed_at, pending.purchase.observed_at);
+    assert_eq!(recovered.purchase.platform, pending.purchase.platform);
+    assert_eq!(recovered.purchase.edition, pending.purchase.edition);
+    assert_eq!(recovered.revision, Revision(pending.revision.0 + 1));
+    assert!(matches!(
+        service.review_purchase(
+            &actor,
+            &pending.id,
+            review_command(&pending, ItemId::new(), Revision(0)),
+            &context()
+        ),
+        Err(Error::Conflict)
+    ));
+    let dismissed_after = store.purchase_suggestion(&dismissed.id).unwrap();
+    assert!(dismissed_after.dismissed);
+    assert_eq!(
+        dismissed_after.purchase.status,
+        PurchaseStatus::OutForDelivery
+    );
+    assert_eq!(
+        dismissed_after.purchase.order_reference,
+        recovered.purchase.order_reference
+    );
+    let accepted_after = store.purchase_suggestion(&accepted.id).unwrap();
+    assert_eq!(accepted_after.accepted_item, Some(item.id));
+    assert_eq!(accepted_after.revision, accepted.revision);
+    assert!(accepted_after.purchase.order_reference.is_empty());
+    assert_eq!(
+        service
+            .purchase_inbox(&actor, collection, "", PurchaseInboxView::Pending)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>(),
+        vec![pending.id.clone()]
+    );
+    // Exact replay and conflicting facts must not advance the review generation.
+    service.sync_purchase_mail().unwrap();
+    batch.purchases[0].order_reference = "456-1234567-1234567".into();
+    *provider.batch.lock().unwrap() = batch;
+    service.sync_purchase_mail().unwrap();
+    drop(service);
+    drop(store);
+    let reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    reopened.reindex().unwrap();
+    let saved = reopened.purchase_suggestion(&pending.id).unwrap();
+    assert_eq!(saved.revision, recovered.revision);
+    assert_eq!(
+        saved.purchase.order_reference,
+        recovered.purchase.order_reference
+    );
+    assert!(
+        reopened
+            .purchase_suggestion(&dismissed.id)
+            .unwrap()
+            .dismissed
+    );
+    assert_eq!(
+        reopened
+            .purchase_suggestion(&accepted.id)
+            .unwrap()
+            .accepted_item,
+        Some(item.id)
+    );
+    let published = Catalog::item(&reopened, item.id).unwrap();
+    assert_eq!(published.revision, item.revision);
+    assert_eq!(
+        serde_json::to_value(&published.purchase_orders).unwrap(),
+        serde_json::to_value(&item.purchase_orders).unwrap()
+    );
 }
 #[test]
 fn out_of_order_evidence_restore_and_reopen_allow_safe_correction_and_reassignment() {
@@ -1331,6 +1500,7 @@ fn scan_health_and_source_locators_survive_retries_and_rescan_without_rewriting_
             key: original.id.clone(),
             source: source.clone(),
             issue: None,
+            amazon_order_card: false,
         }],
         progress: vec![MailFolderProgress {
             checked_at: chrono::Utc::now(),

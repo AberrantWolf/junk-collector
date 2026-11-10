@@ -16,6 +16,7 @@ import sys
 import unicodedata
 from email.parser import BytesParser
 from email.message import EmailMessage
+from urllib.parse import parse_qs, urlsplit
 
 MAX_MAIL = 2 * 1024 * 1024
 RETAILERS = {
@@ -34,6 +35,10 @@ LABELS = {
     'steam': r'ゲーム名|商品名|Item|Product|Title',
 }
 ORDER = re.compile(r'(?:注文番号|ご注文番号|受注番号|注文受付番号|お取引番号|取引ID|Order\s*(?:number|#|ID)|Transaction\s*(?:ID|#)|Confirmation\s*(?:number|#))\s*[:：#]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,99})', re.I)
+AMAZON_PHASE = re.compile(r'^(ordered|shipped|out for delivery|delivered)\b', re.I)
+AMAZON_ORDER = re.compile(r'(?:注文番号|\bOrder\s*(?:number\b|#))\s*:?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})(?![\w-])', re.I)
+BIDI_CONTROLS = str.maketrans('', '', '\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069')
+UNPARSED_TITLE = 'Unparsed receipt — review original email'
 
 
 def clean(text):
@@ -57,9 +62,9 @@ class TextHTML(html.parser.HTMLParser):
             self.hide += 1
         if tag in ('br', 'tr', 'p', 'div', 'td', 'li'):
             self.parts.append('\n')
-        if tag == 'a' and re.match(r'https://store\.steampowered\.com/(?:app|sub)/\d+', attrs.get('href', '')):
+        if tag == 'a' and re.match(r'https://store\.steampowered\.com/(?:app|sub)/\d+', attrs.get('href') or ''):
             self.link = []
-        if tag in ('td', 'span') and re.search(r'(?:item_name|itemname|receipt_item_name)', attrs.get('class', ''), re.I):
+        if tag in ('td', 'span') and re.search(r'(?:item_name|itemname|receipt_item_name)', attrs.get('class') or '', re.I):
             self.capture = 1
             self.captured = []
 
@@ -84,6 +89,90 @@ class TextHTML(html.parser.HTMLParser):
                 self.captured.append(text)
 
 
+def amazon_product_link(href):
+    """Identify item links in the order card using only their inline markup."""
+    try:
+        redirect = urlsplit(href)
+        if (redirect.scheme, redirect.netloc, redirect.path) != ('https', 'www.amazon.co.jp', '/gp/r.html'):
+            return None
+        query = parse_qs(redirect.query, max_num_fields=32)
+        marker, = query.get('ref_', [])
+        target, = query.get('U', [])
+        match = re.search(r'_(i|t)_fed_asin_title$', marker)
+        if match:
+            product = urlsplit(target)
+            asin = re.fullmatch(r'/dp/([A-Z0-9]{10})/?', product.path)
+            if (product.scheme, product.netloc) == ('https', 'www.amazon.co.jp') and asin:
+                return asin[1], match[1]
+    except ValueError:
+        pass
+    return None
+
+
+class AmazonHTML(TextHTML):
+    def __init__(self):
+        super().__init__()
+        self.products = {}
+        self.item = None
+        self.item_text = []
+
+    def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
+        if self.hide:
+            return
+        if tag == 'a':
+            self.item = amazon_product_link(dict(attrs).get('href') or '')
+            self.item_text = []
+            if self.item:
+                self.products.setdefault(self.item[0], {})
+        elif tag == 'img' and self.item and self.item[1] == 'i':
+            self.item_text.append(dict(attrs).get('alt') or '')
+
+    def handle_endtag(self, tag):
+        super().handle_endtag(tag)
+        if tag == 'a' and self.item:
+            asin, kind = self.item
+            if title := clean(''.join(self.item_text).translate(BIDI_CONTROLS)):
+                self.products[asin].setdefault(kind, set()).add(title)
+            self.item = None
+
+    def handle_data(self, text):
+        super().handle_data(text)
+        if not self.hide and self.item and self.item[1] == 't':
+            self.item_text.append(text)
+
+    def order_items(self):
+        text = unicodedata.normalize('NFKC', ''.join(self.parts)).translate(BIDI_CONTROLS)
+        references = set(AMAZON_ORDER.findall(text))
+        if len(references) != 1 or len(self.products) > 20:
+            return None
+        items = []
+        for asin, names in sorted(self.products.items()):
+            link_titles = names.get('t', set())
+            alt_titles = names.get('i', set())
+            if len(link_titles) > 1:
+                items.append((asin, None))
+                continue
+            title = next(iter(link_titles), '')
+            if not title or title.endswith('...'):
+                prefix = title.removesuffix('...').rstrip().casefold()
+                alt = next(iter(alt_titles), '') if len(alt_titles) == 1 else ''
+                title = alt if alt and not alt.endswith('...') and alt.casefold().startswith(prefix) else None
+            items.append((asin, title))
+        reference, = references
+        return reference, tuple(items)
+
+
+def receipt_parts(message):
+    if message.get_content_disposition() == 'attachment':
+        return
+    if message.get_content_maintype() == 'multipart':
+        for part in message.iter_parts():
+            yield from receipt_parts(part)
+    elif message.get_content_type() in ('text/plain', 'text/html'):
+        yield message
+
+
 def retailer_for(message):
     sender = email.utils.parseaddr(str(message.get('From', '')))[1].lower()
     domain = sender.rpartition('@')[2]
@@ -93,8 +182,15 @@ def retailer_for(message):
     return None
 
 
-def status_for(subject):
+def receipt_subject(retailer, subject):
+    return retailer and (RECEIPT.search(subject)
+                         or retailer == 'amazon_jp' and AMAZON_PHASE.match(clean(subject)))
+
+
+def status_for(retailer, subject):
     # Subject-only status avoids refund/cancellation help text in receipt footers.
+    if retailer == 'amazon_jp' and (phase := AMAZON_PHASE.match(subject)):
+        return phase[1].lower().replace(' ', '_')
     for pattern, status in [
         (r'返金|refund', 'refunded'), (r'キャンセル|取消|cancell', 'cancelled'),
         (r'配達完了|お届け完了|delivered', 'delivered'), (r'発送|出荷|shipped|dispatched', 'shipped'),
@@ -120,7 +216,7 @@ def extract(raw, namespace, received_at=None):
         message._collector_raw_digest = hashlib.sha256(raw).hexdigest()
         message._collector_raw_identity_only = True
         retailer = retailer_for(message)
-        if not retailer or not RECEIPT.search(str(message.get('Subject', ''))):
+        if not receipt_subject(retailer, str(message.get('Subject', ''))):
             return []
         return [unparsed(message, retailer, namespace, received_at, 'too_many_parts' if isinstance(failure, MimeLimitError) else 'unsupported_content')]
 
@@ -138,14 +234,10 @@ def _extract(raw, namespace, received_at=None):
     message._collector_raw_digest = hashlib.sha256(raw).hexdigest()
     retailer = retailer_for(message)
     subject = clean(str(message.get('Subject', '')))
-    if not retailer or not RECEIPT.search(subject):
+    if not receipt_subject(retailer, subject):
         return []
-    plain, html_titles = [], []
-    for part in message.walk():
-        if part.get_content_disposition() == 'attachment' or part.get_content_maintype() != 'text':
-            continue
-        if part.get_content_type() not in ('text/plain', 'text/html'):
-            continue
+    plain, html_titles, amazon_cards = [], [], []
+    for part in receipt_parts(message):
         data = part.get_payload(decode=True) or b''
         charset = part.get_content_charset() or 'utf-8'
         try:
@@ -154,13 +246,39 @@ def _extract(raw, namespace, received_at=None):
             # Fail visibly; lossy title decoding must not silently become an identity.
             return [unparsed(message, retailer, namespace, received_at, 'unsupported_content')]
         if part.get_content_type() == 'text/html':
-            parser = TextHTML()
+            parser = AmazonHTML() if retailer == 'amazon_jp' else TextHTML()
             parser.feed(text)
+            parser.close()
             plain.append(''.join(parser.parts))
             if retailer == 'steam':
                 html_titles.extend(parser.titles)
+            if isinstance(parser, AmazonHTML) and parser.products:
+                amazon_cards.append(parser.order_items())
         else:
             plain.append(text)
+    if amazon_cards and AMAZON_PHASE.match(subject):
+        card = amazon_cards[0]
+        if card is None or any(other != card for other in amazon_cards[1:]):
+            return [unparsed(message, retailer, namespace, received_at)]
+        reference, items = card
+        purchases = []
+        seen_titles = set()
+        for asin, title in items:
+            # Keep the existing title-based source key for the first ASIN with a
+            # resolved title so previously reviewed or dismissed sources still match.
+            item_key = asin if not title or title in seen_titles else None
+            purchase = make_purchase(message, retailer, namespace, title or UNPARSED_TITLE,
+                                     reference, received_at, item_key=item_key)
+            if '_issue' in purchase:
+                return [purchase]
+            purchase['format'] = 'physical'
+            if title:
+                seen_titles.add(title)
+                purchase['_amazon_order_card'] = True
+            else:
+                purchase['_issue'] = 'incomplete_item_title'
+            purchases.append(purchase)
+        return purchases
     text = unicodedata.normalize('NFKC', '\n'.join(plain))
     order = ORDER.search(text + '\n' + subject)
     reference = order.group(1) if order else ''
@@ -205,10 +323,13 @@ def message_identity(message):
     return hashlib.sha256(message.as_bytes()).hexdigest()
 
 
-def make_purchase(message, retailer, namespace, title, reference, received_at, safe_date=False):
+def make_purchase(message, retailer, namespace, title, reference, received_at, safe_date=False, item_key=None):
     # A profile-scoped message+line hash survives folder duplicates and UIDVALIDITY resets.
     identity = message_identity(message)
-    source = hashlib.sha256((namespace + '\0' + identity + '\0' + title).encode()).hexdigest()
+    source_input = namespace + '\0' + identity + '\0' + title
+    if item_key is not None:
+        source_input += '\0' + item_key
+    source = hashlib.sha256(source_input.encode()).hexdigest()
     try:
         date_value = next((v for k, v in message.raw_items() if k.lower() == 'date'), None)
         when = email.utils.parsedate_to_datetime(date_value) if date_value is not None else received_at
@@ -222,13 +343,13 @@ def make_purchase(message, retailer, namespace, title, reference, received_at, s
         when = received_at or dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
     return dict(id=source, retailer=retailer, order_reference=reference, title=title, platform='', edition='',
                 format='digital' if retailer in ('steam', 'nintendo') else 'unknown',
-                status=status_for(clean(str(message.get('Subject', '')))), observed_at=when.astimezone(dt.timezone.utc).isoformat(),
+                status=status_for(retailer, clean(str(message.get('Subject', '')))), observed_at=when.astimezone(dt.timezone.utc).isoformat(),
                 intentional_duplicate=False, source_keys=[source])
 
 
 def unparsed(message, retailer, namespace, received_at, issue='unrecognized_layout'):
     reference = ORDER.search(clean(str(message.get('Subject', ''))))
-    value = make_purchase(message, retailer, namespace, 'Unparsed receipt — review original email', reference.group(1) if reference else '', received_at, safe_date=True)
+    value = make_purchase(message, retailer, namespace, UNPARSED_TITLE, reference.group(1) if reference else '', received_at, safe_date=True)
     value['status'] = 'unknown'
     value['_issue'] = issue
     return value
@@ -418,10 +539,11 @@ def fetch_batch(profile, cursor, probe=False, auth_only=False):
                     received_at = None
                     if internal:
                         received_at = email.utils.parsedate_to_datetime(internal.group(1).decode('ascii').replace('-', ' '))
-                    if retailer_for(header) and RECEIPT.search(str(header.get('Subject', ''))):
+                    retailer = retailer_for(header)
+                    if receipt_subject(retailer, str(header.get('Subject', ''))):
                         size = int(re.search(rb'RFC822.SIZE (\d+)', parts[0][0]).group(1))
                         if size > MAX_MAIL:
-                            extracted = [unparsed(header, retailer_for(header), profile['id'], received_at, 'too_large')]
+                            extracted = [unparsed(header, retailer, profile['id'], received_at, 'too_large')]
                         else:
                             full = checked(client.uid('fetch', uid, f'(BODY.PEEK[]<0.{MAX_MAIL+1}>)'))
                             literal = [x[1] for x in full if isinstance(x, tuple)]
@@ -434,7 +556,8 @@ def fetch_batch(profile, cursor, probe=False, auth_only=False):
                             return dict(cursor=json.dumps(state), purchases=purchases, details=details, progress=progress)
                         for purchase in extracted:
                             issue = purchase.pop('_issue', None)
-                            details.append(dict(key=purchase['id'], issue=issue, source=dict(
+                            amazon_order_card = purchase.pop('_amazon_order_card', False)
+                            details.append(dict(key=purchase['id'], issue=issue, amazon_order_card=amazon_order_card, source=dict(
                                 folder=folder, uid_validity=validity, uid=int(uid),
                                 message_id=bounded_header(header, 'Message-ID', 512),
                                 subject=bounded_header(header, 'Subject', 512),

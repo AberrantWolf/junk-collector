@@ -1,4 +1,4 @@
-import {stopProcess} from './support/runtime.mjs';
+import {closeHttpFixture,fixturePort,stopProcess,waitForServer} from './support/runtime.mjs';
 // Isolated real-server inbox review acceptance with deterministic offline providers.
 import {chromium} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
@@ -16,7 +16,8 @@ const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-intake-review-'));
 const config=path.join(scratch,'collector.toml');
 const password=randomBytes(24).toString('hex');
-const origin='https://localhost:19873';
+const publicPort=await fixturePort(),privatePort=await fixturePort(),lanPort=await fixturePort();
+const origin=`https://localhost:${lanPort}`;
 const releaseId='11111111-1111-4111-8111-111111111111';
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 // Fixed one-track TOC vectors: 225–228 audio sectors, offset 150.
@@ -40,15 +41,17 @@ const provider=createServer((request,response)=>{
  const respond=()=>{response.writeHead(200,{'content-type':type,'content-length':body.length});response.end(body);};
  if(holdMusicBrainz&&url.pathname.startsWith('/ws/2/discid/')){pendingProviderResponses.add(respond);response.once('close',()=>pendingProviderResponses.delete(respond));}else respond();
 });
-await new Promise((resolve,reject)=>{provider.once('error',reject);provider.listen(19874,'127.0.0.1',resolve);});
+await new Promise((resolve,reject)=>{provider.once('error',reject);provider.listen(0,'127.0.0.1',resolve);});
+const providerOrigin=`http://127.0.0.1:${provider.address().port}/`;
 await mkdir(path.join(scratch,'inbox'));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19871"\nprivate_bind = "127.0.0.1:19872"\nlan_bind = "127.0.0.1:19873"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${scratch}/inbox"\n[providers]\nmusicbrainz_user_agent = "collector-intake-review/0.1 (fixture@example.invalid)"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${publicPort}"\nprivate_bind = "127.0.0.1:${privatePort}"\nlan_bind = "127.0.0.1:${lanPort}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\n"Optical shelf" = "${scratch}/inbox"\n[providers]\nmusicbrainz_user_agent = "collector-intake-review/0.1 (fixture@example.invalid)"\n`);
 if(process.env.INGEST_WORKERS)await writeFile(config,(await readFile(config,'utf8'))+`\n[jobs]\nprocessing_workers = ${Number(process.env.INGEST_WORKERS)}\ncopy_workers = 1\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='',server,browser,page;
-async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:'http://127.0.0.1:19874/',JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:'http://127.0.0.1:19874/',JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:'http://127.0.0.1:19874/'}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
- for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19871/healthz')).ok)return;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timed out');}
+async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
+ await waitForServer(`http://127.0.0.1:${publicPort}/healthz`,server,{timeout:30000,logs:()=>logs});}
+
 async function stopServer(){await stopProcess(server);}
 try{
  await startServer();browser=await chromium.launch({headless:true});
@@ -67,8 +70,9 @@ try{
  const cleanupFixture=await intakeReviewJourney(page,{scratch,startProviderFixture:()=>{},restartServer:async()=>{await stopServer();await startServer();}});
  await inboxCleanupJourney(page,{...cleanupFixture,scratch,restartServer:async()=>{await stopServer();await startServer();}});
  }
+ console.log('Checking activity while the metadata provider is held.');
  await ingestProgressJourney(page,{scratch,holdProvider,collectionId:collection});
  }
  assert.deepEqual(errors,[]);console.log(`Chrome ${await browser.version()}; temporary artifacts: ${scratch}`);
 }catch(error){console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;
-}finally{await browser?.close();await stopServer();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));}
+}finally{await browser?.close();await stopServer();await closeHttpFixture(provider,'intake provider fixture');}

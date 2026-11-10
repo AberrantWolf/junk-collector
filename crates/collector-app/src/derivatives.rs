@@ -700,13 +700,31 @@ impl ConversionValidation {
     }
 }
 
-struct ConversionHost<'a> {
+pub(super) struct ConversionHost<'a> {
     port: &'a dyn crate::ProcessingPort,
     access: collector_modules::PackageAccess,
     claim: Option<(&'a dyn crate::JobPort, &'a JobClaim)>,
+    read_checkpoint: Option<&'a dyn Fn() -> Result<()>>,
+}
+impl<'a> ConversionHost<'a> {
+    pub(super) fn for_read(
+        port: &'a dyn crate::ProcessingPort,
+        access: collector_modules::PackageAccess,
+        checkpoint: &'a dyn Fn() -> Result<()>,
+    ) -> Self {
+        Self {
+            port,
+            access,
+            claim: None,
+            read_checkpoint: Some(checkpoint),
+        }
+    }
 }
 impl collector_modules::ModuleHost for ConversionHost<'_> {
     fn checkpoint(&self) -> collector_modules::ModuleResult<()> {
+        if let Some(checkpoint) = self.read_checkpoint {
+            checkpoint().map_err(crate::processing_module_error)?;
+        }
         if let Some((jobs, claim)) = self.claim
             && jobs
                 .cancellation_requested(claim.id, &claim.claim_token)
@@ -841,6 +859,7 @@ impl CollectionService {
                 scope: source,
             },
             claim: None,
+            read_checkpoint: None,
         };
         let mut disc_audio = None;
         let wav = self.file_conversion_track(
@@ -1296,6 +1315,7 @@ impl CollectionService {
         recorded_only: bool,
     ) -> Result<(Vec<MusicTrackAvailability>, bool)> {
         let item_id = item.id;
+        let role = self.reader.role(user_id, item.collection_id)?;
         if item.deleted {
             return Err(Error::NotFound);
         }
@@ -1369,6 +1389,7 @@ impl CollectionService {
                             scope: PackageScope::Representation(source.id),
                         },
                         claim: None,
+                        read_checkpoint: None,
                     };
                     if let Ok(pcm) = collector_modules::music::open_conversion_pcm_selection(
                         &host,
@@ -1544,6 +1565,11 @@ impl CollectionService {
                             MusicTrackAvailabilityState::Unavailable { reason }
                         };
                         rows.push(MusicTrackAvailability {
+                            can_stream_original: source_readable
+                                && (role != collector_core::Role::Viewer
+                                    || source.files.iter().all(|f| {
+                                        f.visibility == collector_core::Visibility::Shared
+                                    })),
                             album_selection: collector_api_types::MusicAlbumSelection::Included,
                             display_position: None,
                             audio_format: None,
@@ -1752,6 +1778,7 @@ impl CollectionService {
                 scope: frozen.recipe.source_fingerprint.source,
             },
             claim: Some((self.jobs.as_ref(), claim)),
+            read_checkpoint: None,
         };
         if let Some(expected) = &frozen.disc_audio {
             let actual = collector_modules::disc_audio::inspect(

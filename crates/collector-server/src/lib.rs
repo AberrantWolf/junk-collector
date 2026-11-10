@@ -6,7 +6,9 @@ use collector_app::{
     WorkEntry, WorkHistoryCommand, WorkJobView, WorkJobsQuery, WorkQuery, WorkTarget,
 };
 mod email_purchases;
+mod music_stream;
 use email_purchases::*;
+use music_stream::{__path_music_stream, music_stream};
 pub mod local_playback;
 pub mod passkeys;
 pub mod remote_media;
@@ -84,6 +86,8 @@ pub struct AppState {
     artwork_preview_slots: Arc<tokio::sync::Semaphore>,
     catalog_upload_slots: Arc<tokio::sync::Semaphore>,
     music_export_slots: Arc<tokio::sync::Semaphore>,
+    live_audio_slots: Arc<music_stream::LiveSlots>,
+    pub live_audio_ffmpeg: std::path::PathBuf,
 }
 impl AppState {
     pub fn new(store: Arc<Store>, pairing: Pairing) -> Self {
@@ -114,6 +118,8 @@ impl AppState {
             artwork_preview_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             catalog_upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             music_export_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            live_audio_slots: Arc::default(),
+            live_audio_ffmpeg: "ffmpeg".into(),
             passkeys: passkeys::Configuration::Disabled(passkeys::UnavailableReason::NotConfigured),
         }
     }
@@ -517,19 +523,22 @@ async fn blocking<T: Send + 'static>(
         })?
         .map_err(Into::into)
 }
-fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthenticatedPrincipal> {
-    let bearer = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
-    let cookie = headers
+fn browser_session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
         .get(header::COOKIE)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| {
             s.split(';')
                 .map(str::trim)
                 .find_map(|p| p.strip_prefix("collector_session="))
-        });
+        })
+}
+fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthenticatedPrincipal> {
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+    let cookie = browser_session_cookie(headers);
     let authenticated = if let Some(cookie) = cookie {
         state.service.authenticate(cookie)?
     } else {
@@ -705,6 +714,7 @@ fn client_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(music_album_coverage))
         .routes(routes!(media))
         .routes(routes!(music_flac_export))
+        .routes(routes!(music_stream))
 }
 
 fn curation_api_router() -> OpenApiRouter<AppState> {
@@ -2790,8 +2800,8 @@ impl std::io::Seek for LeasedExportReader {
         self.reader.seek(position)
     }
 }
-struct CancelExport(std::sync::Arc<std::sync::atomic::AtomicBool>);
-impl Drop for CancelExport {
+struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -2819,7 +2829,7 @@ async fn music_flac_export(
         .try_acquire_owned()
         .map_err(|_| Error::Unavailable("FLAC downloads are busy; try again shortly".into()))?;
     let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let _cancel = CancelExport(flag.clone());
+    let _cancel = CancelOnDrop(flag.clone());
     let resource = blocking(move || {
         let mut resource =
             state

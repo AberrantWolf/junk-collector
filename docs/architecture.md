@@ -1,3 +1,20 @@
+## Live playback format preference — 2026-11-10
+
+Browser preferences are local to the signed-in account on this browser. The
+normal authenticated audio listener accepts a typed format and optional Opus
+bitrate for a source-bound track (or an explicitly queued original file).
+Application services resolve current readable sources, preferring saved FLAC
+and then the original before a lossy derivative. Disc traversal uses the same
+package/PCM reader as durable preparation. List and library reads neither start
+an encoder nor hash audio payloads.
+
+The encoder adapter feeds bounded blocks to an isolated FFmpeg process for
+each live playback request. The HTTP adapter owns independent live-stream
+admission, cancellation, and periodic access checks. Live streams create no
+Jobs, derivatives, or archive state. An exact saved output can retain ordinary
+byte-range playback. Dedicated media delivery still uses its existing
+authorized saved-file contracts.
+
 ## Operator audio connection policy — 2026-11-04
 
 Audio uses the normal authenticated connection by default, including proxy/tunnel
@@ -174,6 +191,12 @@ Malformed candidate content becomes an unparsed suggestion; transport/incomplete
 responses do not advance the cursor. No raw email is retained. Private source
 coordinates can refresh without replacing receipt facts; per-folder progress is an
 observed Bridge high-water snapshot, not proof of an exhaustive mailbox search.
+
+An Amazon order-card rescan can fill missing fields on the same unaccepted
+suggestion. Application policy limits the merge to the existing source and
+protects recorded fields and observation time. Store commits the merge and a new
+review revision with the cursor, serializing it with acceptance under the archive
+writer. Dismissals and accepted purchase history retain their authority.
 
 Provider configuration guards serialize admitted batches/errors with credential
 replacement. A probed active profile is atomically replaced; runtime fencing advances
