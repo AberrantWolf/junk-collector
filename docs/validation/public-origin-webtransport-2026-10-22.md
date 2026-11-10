@@ -17,7 +17,7 @@ The operator explicitly approved the prepared Cloudflare route:
 
 ```text
 hostname: collector.example.com
-path: ^/__collector_lan_test_20261022(/.*)?$
+path: ^/__collector_lan_test(/.*)?$
 service: http://127.0.0.1:19980
 priority: before the existing catch-all → http://127.0.0.1:9841
 ```
@@ -31,7 +31,7 @@ The temporary forwarding rule was retired to a static 404, as described below.
 
 The fixture retains its own synthetic archive and accounts. Its public-origin
 cookie is separately named `collector_wt_public_session`, Secure, HttpOnly,
-SameSite=Strict and limited to `/__collector_lan_test_20261022/`. Production cookies
+SameSite=Strict and limited to `/__collector_lan_test/`. Production cookies
 are not forwarded to the isolated Collector. The worker script and registration
 scope are restricted to that test path; production-page clients remain outside
 its scope. The unchanged real player still requests its normal media URLs, which
@@ -39,7 +39,7 @@ the test document's controlling worker adapts to bounded WebTransport reads.
 The same-origin fixture can run trusted JavaScript; this path is an experiment
 deployment, not an extension of the production account/enrollment contract.
 
-The test page's CSP permits only self plus `https://192.168.1.20:19979` for
+The test page's CSP permits only self plus `https://192.0.2.20:19979` for
 connections. Production retains `connect-src 'self'`: the current production app
 cannot silently acquire LAN WebTransport by changing its URL. A test-only
 `?block-wt=1` variant retains that stricter connection policy as a negative control;
@@ -55,7 +55,7 @@ trust delivery for the synthetic server, not production server pairing.
 
 ## Network classification and permissions
 
-Home split DNS resolves the public hostname to `192.168.1.20`. Loading that path
+Home split DNS resolves the public hostname to `192.0.2.20`. Loading that path
 directly from the NAS would not exercise a public-to-private network transition;
 the existing NAS proxy correctly returns 404 for the new Cloudflare-only path.
 Normal TLS curl with the hostname explicitly resolved to the publicly obtained
@@ -127,9 +127,9 @@ Save diagnostics, instead of replacing the entire summary with “saved”.
 The final saved negative control records, at 10:44:17 UTC:
 
 ```text
-WebTransportError: Refused to connect to 'https://192.168.1.20:19979/media'
+WebTransportError: Refused to connect to 'https://192.0.2.20:19979/media'
 because it violates the document's Content Security Policy
-CSP blocked connect-src: https://192.168.1.20:19979/media
+CSP blocked connect-src: https://192.0.2.20:19979/media
 ```
 
 Its Local network permission remains `granted`, secure context and Cloudflare

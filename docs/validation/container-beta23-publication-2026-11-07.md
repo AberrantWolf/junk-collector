@@ -57,7 +57,7 @@ the stopped snapshot. Private recovery metadata retains the old image,
 configuration, systemd and Compose files, and media authority key.
 
 - Fi: `/var/backups/collector-fi-pairs/before-beta23-20261107-ed65d66/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-beta23-20261107-ed65d66`,
+- archive-host.example.com: `/volume1/collector-recovery/before-beta23-20261107-ed65d66`,
   snapshot UUID `553973a2-9d56-d140-ba7d-ebdd56053a3c`.
 
 Core and media run the published beta.23 digest with zero restarts. Core is

@@ -114,7 +114,7 @@ would not recover the installation.
   isolated network namespace and no private state/config/inbox access.
 - All **18 other containers**, including Caddy/tunnels, retain IDs, images and
   start times. NAS exports/permissions, router and tunnels were not changed.
-  Local playback retains `192.168.1.20:9845`; public hostnames remain stable.
+  Local playback retains `192.0.2.20:9845`; public hostnames remain stable.
 - Public HTTPS uses normal system trust. HTML and **12 assets** pass; their bytes
   match the newly running core. Protected control returns 401, media control 404
   and grantless media reads 401. Public media identity traverses the authority
@@ -123,7 +123,7 @@ would not recover the installation.
   The **1 account, 1 grant and 2,585 jobs** match the stopped snapshot. There are no
   unfinished jobs after restart. This adds no active-job interruption claim.
 - Private operation scripts/receipts are retained at
-  `/volume1/homes/rynban/collector-beta14-update-20261030`, including the failed
+  `/volume1/homes/operator/collector-beta14-update-20261030`, including the failed
   read-only snapshot check, explicit resume and final verification. No authenticated
   production browser/playback session was exercised in this update; browser and
   media functional acceptance ran against isolated qualified source/images.

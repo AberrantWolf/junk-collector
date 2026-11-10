@@ -53,7 +53,7 @@ Set these additional values alongside the existing `.env`:
 ```dotenv
 COLLECTOR_MEDIA_HOST=collector-media.example.com
 COLLECTOR_CONTROL_ORIGIN=https://collector.example.com
-COLLECTOR_MEDIA_BIND_IP=192.168.1.20
+COLLECTOR_MEDIA_BIND_IP=192.0.2.20
 COLLECTOR_MEDIA_HTTPS_PORT=9443
 # Optional: pin your reviewed Caddy image digest rather than the default caddy:2.
 COLLECTOR_MEDIA_PROXY_IMAGE=caddy:2

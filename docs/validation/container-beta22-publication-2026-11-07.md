@@ -47,7 +47,7 @@ also records the old image, environment, Compose and systemd files, and media
 authority key.
 
 - Fi: `/var/backups/collector-fi-pairs/before-beta22-20261107-6faa8cd/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-beta22-20261107-6faa8cd`,
+- archive-host.example.com: `/volume1/collector-recovery/before-beta22-20261107-6faa8cd`,
   snapshot UUID `7f9cfd26-73c6-1247-b518-b6c34fd25ad1`.
 
 The service now runs the immutable beta.22 index for core and media. Both use the

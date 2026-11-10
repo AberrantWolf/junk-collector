@@ -52,7 +52,7 @@ deployment; automatic home/away selection for both clients remains the real
 solution to implement.
 
 The dedicated name has a DNS-only public A record for the reserved NAS address,
-`192.168.1.20`, so a VPN resolver can look it up without using home DNS. No WAN
+`192.0.2.20`, so a VPN resolver can look it up without using home DNS. No WAN
 forwarding is added; the private address is useful only where the NAS is reachable.
 Home DNS also serves this name explicitly, avoiding upstream private-address
 filtering without disabling rebinding protection. The operator confirmed both
@@ -73,7 +73,7 @@ independent second connection for the same account. Returning to remote access
 requires reconnecting at the remote URL. Existing offline data is keyed to the
 same server/account, not to a second LAN catalog.
 
-Ordinary DNS-based HTTPS now reaches `192.168.1.20` with normal CA/hostname
+Ordinary DNS-based HTTPS now reaches `192.0.2.20` with normal CA/hostname
 validation, the exact issued certificate and expected ServerId. Firefox renders
 the login page with Let's Encrypt trust. The operator confirmed work-Mac browser
 password login, playback and scrubbing, and confirmed the requested Trash Amp
@@ -182,13 +182,13 @@ resolution with the VPN connected, and test connectivity to the known NAS
 address/HTTPS port separately. On macOS, use the system resolver via
 `dscacheutil -q host -a name collector.example.com`; on Windows use
 `Resolve-DnsName collector.example.com`. The home override is now installed:
-clients using it should receive only `192.168.1.20`, with no public AAAA or HTTPS
+clients using it should receive only `192.0.2.20`, with no public AAAA or HTTPS
 address hints. Cloudflare answers on a client require checking effective resolver
 selection and caches. The current personal Mac still reaches Cloudflare with
 Tailscale DNS active; this is not evidence about the work machine's GlobalProtect.
 
 For an initial HTTPS data-path check, use `curl -I --connect-timeout 5 --max-time 10
-https://192.168.1.20/` (Windows: `curl.exe`). This unauthenticated check makes no
+https://192.0.2.20/` (Windows: `curl.exe`). This unauthenticated check makes no
 configuration changes. A direct-IP request still does not test Collector's hostname
 certificate. The operator reported a certificate error from this preliminary test
 before Collector HTTPS was installed; it only establishes that a TLS endpoint

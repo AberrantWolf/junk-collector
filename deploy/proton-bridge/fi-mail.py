@@ -17,7 +17,7 @@ c.add_argument('--owner',required=True)
 c.add_argument('--folder',action='append',default=[])
 s.add_parser('status',help='Show stack state without printing credentials or mail')
 a=p.parse_args()
-if a.command in ('login','configure') and not sys.stdin.isatty():sys.exit('Use a private terminal: ssh -t fi-home /home/link/bin/collector-mail '+a.command)
+if a.command in ('login','configure') and not sys.stdin.isatty():sys.exit('Open a private SSH terminal with a TTY and run collector-mail '+a.command)
 if a.command=='login':
     subprocess.run(compose+['stop','proton-bridge'],check=True)
     try:

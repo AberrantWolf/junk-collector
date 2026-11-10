@@ -727,22 +727,22 @@ mod tests {
             .collect();
         interfaces.extend([
             interface("docker0", "172.16.0.1"),
-            interface("ovs_eth0", "192.168.1.106"),
+            interface("ovs_eth0", "192.168.50.106"),
             interface("lo", "127.0.0.1"),
         ]);
         let ips = select_addresses("0.0.0.0:9845".parse().unwrap(), interfaces, None).unwrap();
-        let lan: IpAddr = "192.168.1.106".parse().unwrap();
+        let lan: IpAddr = "192.168.50.106".parse().unwrap();
         assert_eq!(ips[0], lan);
         assert_eq!(ips.len(), 8);
         let (identity, descriptor) = make_identity(&ips, 9845, ServerId::new()).unwrap();
         let endpoint = descriptor
             .endpoints
             .iter()
-            .find(|endpoint| endpoint.https_url == "https://192.168.1.106:9845")
+            .find(|endpoint| endpoint.https_url == "https://192.168.50.106:9845")
             .expect("the browser/native descriptor must retain the NAS LAN route");
         assert_eq!(
             endpoint.webtransport_url,
-            "https://192.168.1.106:9845/playback"
+            "https://192.168.50.106:9845/playback"
         );
         let leaf = CertificateDer::from(identity.certificate_chain().as_slice()[0].der().to_vec());
         assert_eq!(
@@ -768,7 +768,7 @@ mod tests {
                 .verify_server_cert(
                     &leaf,
                     &[],
-                    &ServerName::IpAddress("192.168.1.107".parse::<IpAddr>().unwrap().into()),
+                    &ServerName::IpAddress("192.168.50.107".parse::<IpAddr>().unwrap().into()),
                     &[],
                     UnixTime::now(),
                 )
@@ -781,7 +781,7 @@ mod tests {
         let mut interfaces: Vec<_> = (17..=30)
             .map(|n| interface(&format!("custom{n}"), &format!("172.{n}.0.1")))
             .collect();
-        let lan = interface("custom-uplink", "192.168.1.106");
+        let lan = interface("custom-uplink", "192.168.50.106");
         interfaces.push(lan.clone());
         let selected = select_addresses(
             "0.0.0.0:0".parse().unwrap(),
@@ -803,13 +803,13 @@ mod tests {
         let mut interfaces = vec![interface("docker0", "10.0.0.1"); 16];
         interfaces.extend([
             interface("eth0", "10.0.0.1"),
-            interface("eth1", "192.168.1.106"),
+            interface("eth1", "192.168.50.106"),
             interface("lo", "127.0.0.1"),
         ]);
         let ips = select_addresses("0.0.0.0:0".parse().unwrap(), interfaces, None).unwrap();
         assert_eq!(
             ips,
-            ["10.0.0.1", "192.168.1.106", "127.0.0.1"].map(|ip| ip.parse::<IpAddr>().unwrap())
+            ["10.0.0.1", "192.168.50.106", "127.0.0.1"].map(|ip| ip.parse::<IpAddr>().unwrap())
         );
     }
 
@@ -861,8 +861,8 @@ mod tests {
     #[test]
     fn explicit_bind_still_overrides_discovery_and_rejects_public_addresses() {
         assert_eq!(
-            select_addresses("192.168.1.106:9845".parse().unwrap(), [], None).unwrap(),
-            ["192.168.1.106".parse::<IpAddr>().unwrap()]
+            select_addresses("192.168.50.106:9845".parse().unwrap(), [], None).unwrap(),
+            ["192.168.50.106".parse::<IpAddr>().unwrap()]
         );
         assert!(select_addresses("8.8.8.8:9845".parse().unwrap(), [], None).is_err());
     }

@@ -51,7 +51,7 @@ revocation are not accepted by this record.
 
 | Input | Executed value |
 |---|---|
-| Host | macOS 26.6.2 build 25G83, arm64, Darwin 25.6.0; LAN `192.168.1.241`; Tailscale `100.81.55.61` |
+| Host | macOS 26.6.2 build 25G83, arm64, Darwin 25.6.0; LAN `192.0.2.241`; Tailscale `198.51.100.61` |
 | Rust / Node | rustc and cargo 1.95.0; Node 24.3.0; npm 11.4.2 |
 | Browser | Codex in-app browser, Codex 26.623.81905 with bundled Chromium framework 149.0.7827.197 |
 | FLAC | `/opt/homebrew/bin/flac`, FLAC 1.5.0 |

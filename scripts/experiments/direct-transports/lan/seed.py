@@ -1,6 +1,7 @@
 """Seed only the disposable loopback Collector, using its actual HTTP API."""
 import http.cookiejar
 import json
+import os
 from pathlib import Path
 import secrets
 import time
@@ -8,7 +9,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-ORIGIN = 'https://collector-lan.awkwardexplorer.com:19978'
+ORIGIN = os.environ['EXPERIMENT_LAN_ORIGIN']
 BASE = 'http://127.0.0.1:19982'
 ROOT = Path('/fixture')
 jar = http.cookiejar.CookieJar()
