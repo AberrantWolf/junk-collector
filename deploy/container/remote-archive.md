@@ -1,4 +1,4 @@
-# Fi local state with a remote FatChocobo archive
+# Local private state with a remote NFS archive
 
 The [routine Fi beta update procedure](fi-beta-update.md) applies to the
 installed split stack. The migration assessment below was prepared 2026-10-30.
@@ -33,7 +33,7 @@ publication copies, recovery points and normal SSD free space. Size this from th
 actual pending workload before approving migration.
 
 Keep existing public control/media hostnames, authentication origin, keys and
-endpoint identity. Review the old `192.168.1.106:9845` local playback bind and other
+endpoint identity. Review the old `192.0.2.106:9845` local playback bind and other
 NAS listener addresses for Fi during the later migration. This preparation does
 not change DNS, ingress, router, tunnels, export configuration or permissions.
 
@@ -153,7 +153,7 @@ archive = "/data/archive"
 state = "/data/state"
 
 [archive_mount]
-nfs_source = "FatChocobo:/REPLACE/archive-export"
+nfs_source = "archive-host.example.com:/REPLACE/archive-export"
 ```
 
 Use the exact source spelling observed in Fi's mount table (a hostname may be
@@ -326,7 +326,7 @@ Fi/NAS stack only in a separately approved disposable test area.
 For a repeatable fixture filesystem setup, first install the distribution's NFS
 server/client tools in two **disposable Linux VMs**. The following example uses
 server `192.0.2.11` and client `192.0.2.12` on an isolated test network; replace both
-with the fixture addresses. These commands are **never for FatChocobo or any
+with the fixture addresses. These commands are **never for a production archive host or any
 production host**. On the fixture server only:
 
 ```sh

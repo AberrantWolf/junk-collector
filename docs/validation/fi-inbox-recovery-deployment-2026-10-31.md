@@ -22,7 +22,7 @@ The retained environment pins the new image for core/media. Compose, systemd,
 Bridge configuration/image/home, proxy/tunnel settings, listeners and mount sources
 remain unchanged. The reviewed host mail-helper guidance was updated. Source/build,
 qualification logs and operation scripts are retained privately under
-`/home/link/collector-inbox-0bec4af` on Fi.
+`/home/operator/collector-inbox-0bec4af` on Fi.
 
 ## Qualification before activation
 
@@ -61,7 +61,7 @@ under its established normal-stop policy. All container PIDs were zero before sy
 and snapshots. Both read-only snapshots succeeded before the pair was sealed:
 
 - Fi: `/var/backups/collector-fi-pairs/before-inbox-recovery-20261031-0bec4af/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-inbox-recovery-20261031-0bec4af`.
+- archive-host.example.com: `/volume1/collector-recovery/before-inbox-recovery-20261031-0bec4af`.
 - NAS snapshot UUID: `ac167c0c-9644-4e4c-83f6-7af96ead7943`.
 
 The Fi snapshot covers all local private state/WAL, profiles, Bridge vault/cache,

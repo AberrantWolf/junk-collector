@@ -579,7 +579,7 @@ source tests. No live infrastructure is changed by source implementation.
 ## Existing private playback and dated LAN design
 
 The accepted home-listening **stopgap** uses a dedicated manual LAN HTTPS hostname,
-`collector-lan.awkwardexplorer.com`, resolving to the reserved NAS address even
+`lan.collector.example.com`, resolving to the reserved NAS address even
 through public DNS. It serves the same public/client listener and account store;
 the exact browser origin is allowlisted without changing the configured passkey
 authentication origin. It introduces no application transport or helper subsystem.

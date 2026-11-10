@@ -23,7 +23,7 @@ LAN URL, second account or route-change re-enrollment. Existing queues, saved
 connections and downloaded/offline files keep their identities. Native streaming
 and explicit downloads share the same range reader and route policy.
 
-The personal `https://collector-lan.awkwardexplorer.com/` address remains the
+The personal `https://lan.collector.example.com/` address remains the
 **deployed manual stopgap** until the new server and clients are installed. It is
 not detection and does not become the normal endpoint for other users.
 

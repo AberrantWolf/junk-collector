@@ -115,5 +115,5 @@ no synthetic production Item/account or mail was created. Functional authenticat
 browser/audio and upgrade/recovery acceptance ran against disposable fixtures.
 Physical audio output, live provider recognition and personal receipt calibration
 retain their previously documented limits. Private source/operation logs remain
-under `/home/link/collector-beta15-6c0f42a` on Fi; local evidence is under
+under `/home/operator/collector-beta15-6c0f42a` on Fi; local evidence is under
 `/tmp/collector-beta15`.

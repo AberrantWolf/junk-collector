@@ -1,7 +1,7 @@
 # Beta.13 publication and NAS update — 2026-10-28 JST
 
 [Beta.13](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.13)
-is published on `preview` and installed on `fatchocobo`. It prepares Library
+is published on `preview` and installed on the archive host. It prepares Library
 summaries when data changes and after startup/reindex, independently of browsing.
 Library reads return ready summaries or safe basic pending rows without running
 the detailed resolver. See [release notes](../releases/v0.1.0-beta.13.md) and

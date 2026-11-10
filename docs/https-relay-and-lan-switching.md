@@ -32,7 +32,7 @@ live DNS/configuration, publish packages or authorize a paid service purchase.
 
 **Scope clarification, 2026-10-22:** the real solution requires automatic LAN
 detection and route selection in **both the browser and Trash Amp**. The deployed
-`https://collector-lan.awkwardexplorer.com/` is an accepted manual stopgap, not
+`https://lan.collector.example.com/` is an accepted manual stopgap, not
 completion of this plan or HL-12. Both clients must detect a reachable trusted
 local server from their normal entry point/saved connection, prefer local media
 traffic and retain/recover authorized remote access without manual URL selection

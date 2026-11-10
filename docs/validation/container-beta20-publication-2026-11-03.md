@@ -177,4 +177,4 @@ No production matching retry, mailbox login, credential replacement or mutation
 acceptance fixture was issued. Functional playback/import acceptance used isolated
 fixtures. Installed Trash Amp remains unchanged. Hardware/phone/cellular acceptance
 is outside this release's claims. Private operation evidence is retained on Fi in
-`/home/link/collector-beta20-253e37e` and locally in `/tmp/collector-beta20`.
+`/home/operator/collector-beta20-253e37e` and locally in `/tmp/collector-beta20`.

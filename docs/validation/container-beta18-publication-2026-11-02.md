@@ -100,6 +100,6 @@ Docker reports **7.154 GB + 10.58 GB** reclaimed from unused build cache (about
 Post-cleanup container identities/unrelated service start times and public/LAN
 HTTPS/assets pass again. Current deployment configuration remains under its existing
 `/opt/junk-collector-beta14` path because the live service still uses those files.
-Private operation evidence remains in `/home/link/collector-beta18-4fecd6f` on Fi
+Private operation evidence remains in `/home/operator/collector-beta18-4fecd6f` on Fi
 and `/tmp/collector-beta18` locally. Hardware/phone/cellular acceptance remains
 outside this release's claims.

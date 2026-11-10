@@ -25,7 +25,7 @@ Keep `state` on local disk, even if `archive` is on a NAS. Allow space for retai
 | `public_bind` | `"127.0.0.1:9841"` | HTTP upstream for a public HTTPS proxy or tunnel. Must bind loopback. |
 | `private_bind` | `"127.0.0.1:9842"` | HTTP management listener for local use or a private HTTPS proxy. Must bind loopback. |
 | `lan_bind` | `"0.0.0.0:9843"` | Direct TLS listener, using the public route composition. The default listens on all IPv4 interfaces; choose a specific interface to narrow it. |
-| `private_tls_bind` | Unset | Optional direct TLS management listener. Must name an explicit interface address, such as `"192.168.1.20:9844"`; wildcard addresses are rejected. |
+| `private_tls_bind` | Unset | Optional direct TLS management listener. Must name an explicit interface address, such as `"192.0.2.20:9844"`; wildcard addresses are rejected. |
 | `tls_names` | `["localhost", "junk-collector.local", "127.0.0.1"]` | DNS names/IP addresses included in the server-managed certificate when setup creates it. Choose these before initialization. Changing this list does not replace an existing certificate. |
 | `allowed_origins` | HTTPS origins for `localhost:9843` and `junk-collector.local:9843`; setup adds the local management origin | Exact browser origins allowed for session operations. Include the scheme, hostname, and non-default port. This does not establish certificate trust or grant access. |
 | `authentication_origin` | Unset | Stable HTTPS origin for WebAuthn passkey registration/login. Also include it in `allowed_origins`. |
@@ -280,7 +280,7 @@ For browser access, use HTTPS trusted by that browser. The certificate generated
 | Connection | Destination | Setup |
 |---|---|---|
 | Private HTTPS reverse proxy or Tailscale Serve | `http://127.0.0.1:9842` | Provides management to trusted network users; application login and roles still apply. |
-| Direct private HTTPS | Explicit `private_tls_bind`, e.g. `192.168.1.20:9844` | Trust the server certificate in the browser and ensure its names cover the hostname/IP you use. |
+| Direct private HTTPS | Explicit `private_tls_bind`, e.g. `192.0.2.20:9844` | Trust the server certificate in the browser and ensure its names cover the hostname/IP you use. |
 | Direct client HTTPS | `lan_bind`, normally port `9843` | Uses the server certificate and public exposure settings. |
 | Public HTTPS reverse proxy or Cloudflare Tunnel | `http://127.0.0.1:9841` | Client access by default; enable public curation/admin only if desired. |
 

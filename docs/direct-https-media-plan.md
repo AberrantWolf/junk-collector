@@ -234,7 +234,7 @@ non-active, correctly typed and nosniff in either deployment mode.
 | Existing private media | Existing HTTPS/WebTransport private listeners | Existing private playback; its generated trust and permissions remain separate |
 | Private management | Existing explicit private listeners | Existing administration/curation with authentication and role checks; never a public-media upstream |
 
-Use a provisional hostname such as `collector-media.awkwardexplorer.com`;
+Use a provisional hostname such as `media.collector.example.com`;
 confirm the exact name and unused ports during deployment preparation. Keep the
 existing control hostname, authentication origin, tunnel destination and browser
 session unchanged. Do not add a shared cookie Domain or a direct route to login.

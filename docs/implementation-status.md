@@ -495,7 +495,7 @@ and [deployment evidence](validation/mail-bridge-status-2026-10-31.md).
 
 Fi now runs the release-mode image built from merged source `83a9e0d`, with
 Proton Bridge 3.18.0 in the same Compose stack. Private state and Bridge home are
-local to Fi; FatChocobo retains the NFS archive. Paired stopped-writer recovery
+local to Fi; the archive host retains the NFS archive. Paired stopped-writer recovery
 snapshots, exact-image upgrade/recovery/media checks, release-image browser smoke,
 retained data/configuration and loopback-only mail listeners pass. No registry
 release was published. Proton account login and live receipt intake remain the
@@ -543,7 +543,7 @@ update or migration is included. Source and browser checks pass; validation resu
 Digital matching and archive safeguards now ship in beta.14. Exact-source full
 checks, all 29 browser journeys, both native runtime/media qualifications and
 release-image acceptance pass. The published installation bundle includes guarded
-remote deployment support. FatChocobo core/media use the verified immutable image
+remote deployment support. archive host core/media use the verified immutable image
 after a complete stopped-server recovery snapshot and explicit legacy enrollment.
 Config/TLS/ServerId, accounts/grants/jobs, isolation/mounts, all 18 unrelated
 containers, public HTTPS and 12 current assets are retained/verified. Both services
@@ -1128,7 +1128,7 @@ See [dated source acceptance](validation/automatic-private-playback-2026-10-22.m
 for actual playback/seek, trust, revocation, rollover and regression results and
 remaining device/deployment limits. Private reachability does not establish a
 physical LAN path or zero ISP upload. No new source is deployed to the NAS by
-this delivery. The personal `collector-lan.awkwardexplorer.com` address remains the
+this delivery. The personal `lan.collector.example.com` address remains the
 accepted **manual stopgap** until the updated server and clients are installed.
 
 Earlier feasibility records remain dated history: [primitive transports](validation/direct-transports-2026-10-22.md),

@@ -2,7 +2,7 @@
 
 The user authorized committing the MusicBrainz fixes, publishing a new release
 and deploying it to the NAS. Beta.8 is published on `preview` and installed on
-`fatchocobo`. Unrelated raw-CD helper and beta.6 documentation edits remain
+`archive host`. Unrelated raw-CD helper and beta.6 documentation edits remain
 uncommitted and were excluded from this release.
 
 ## Source and publication

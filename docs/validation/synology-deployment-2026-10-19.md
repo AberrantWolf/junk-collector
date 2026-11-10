@@ -18,7 +18,7 @@ not completed failure/recovery, power-loss, scale or public-ingress qualificatio
   Public curation/administration disabled. Encoders and MusicBrainz contact
   unconfigured. No encoder/playback or live metadata acceptance is claimed.
 - Browser access uses SSH local forwarding from Mac localhost:9842 to NAS
-  127.0.0.1:9842. DSM initially prohibited forwarding; a `Match User rynban`
+  127.0.0.1:9842. DSM initially prohibited forwarding; a `archive host`
   rule allows local forwarding with `PermitOpen 127.0.0.1:9842`.
   The `.local` hostname became unavailable; numeric LAN IP restored connectivity.
   This is private tunneled HTTP, not remote trusted-HTTPS/passkey qualification.
@@ -102,7 +102,7 @@ inspection, not independent remote administration of the NAS.
 - A dedicated `cloudflare/cloudflared:2026.9.1` host-network connector runs in
   that stack with its token held in Portainer configuration. The existing
   bridge-network connector and other service routes were left in place. The
-  new tunnel connects `https://collector.awkwardexplorer.com` to the public
+  new tunnel connects `https://collector.example.com` to the public
   loopback HTTP listener on 9841. Authentication/allowed origins use that HTTPS
   origin; public administration is explicitly enabled (also enabling curation).
   Operator reported working browser access. This does not complete the broader
@@ -177,7 +177,7 @@ The NAS has not yet been updated to that repair, and actual recovery is pending.
 
 ## Lightweight live HTTPS check — 2026-10-21
 
-The operator selected the existing `https://collector.awkwardexplorer.com` for
+The operator selected the existing `https://collector.example.com` for
 public-ingress checks and challenged the disproportionate qualification scope.
 An additional isolated tunnel is not required. Reuse existing backend/isolated
 coverage and operator-reported working browser access/playback; broader proxy,

@@ -3580,7 +3580,7 @@ Google Chrome 153.0.8010.37.
 
 Owned-corpus results:
 
-- Five explicit package directories were copied from `/Users/scott/dumps` into
+- Five explicit package directories were copied from `archive host/dumps` into
   `/private/tmp/junk-collector-la3-owned.YFRhnq/inbox`. Final `diff -rq` checks for
   all five source/copy pairs returned no differences. The package set comprised 17
   nested mixed-mode game files (1,090,422,259 bytes), a flat 13-file two-track CD
@@ -3709,7 +3709,7 @@ export/change bundles. No commit was made.
 ## LA3 owned local-DAT qualification and bounded cache — 2026-09-19
 
 LA3 remains partially qualified and unaccepted. The source corpus at
-`/Users/scott/dumps` was not read for mutation or changed. Provider artifacts were
+`archive host/dumps` was not read for mutation or changed. Provider artifacts were
 stored only under
 `/private/tmp/junk-collector-la3-owned.YFRhnq/catalogs`, and only the restored
 qualification identity ran during catalog work.

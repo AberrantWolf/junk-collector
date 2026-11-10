@@ -7,7 +7,7 @@ For installation use the [container guide](../deploy/container/README.md) or
 
 ## Supplied corpus inventory — 2026-09-17
 
-The user supplied `/Users/scott/dumps` for LA3. Read-only enumeration found 12
+The user supplied `archive host/dumps` for LA3. Read-only enumeration found 12
 package directories: two under `bad`, ten under `likely-valid`. Those names are
 user assessments, not verification evidence. No source files were changed, copied,
 or hashed during this inventory, and no import/playback qualification is claimed.
@@ -51,7 +51,7 @@ revocation are not accepted by this record.
 
 | Input | Executed value |
 |---|---|
-| Host | macOS 26.6.2 build 25G83, arm64, Darwin 25.6.0; LAN `192.168.1.241`; Tailscale `100.81.55.61` |
+| Host | macOS 26.6.2 build 25G83, arm64, Darwin 25.6.0; LAN `192.0.2.241`; Tailscale `198.51.100.61` |
 | Rust / Node | rustc and cargo 1.95.0; Node 24.3.0; npm 11.4.2 |
 | Browser | Codex in-app browser, Codex 26.623.81905 with bundled Chromium framework 149.0.7827.197 |
 | FLAC | `/opt/homebrew/bin/flac`, FLAC 1.5.0 |
@@ -70,11 +70,11 @@ were copied. `bad` and `likely-valid` were never offered as packages.
 
 | Test package | Source directory | Files / bytes | Initial relative-tree SHA-256 | Result |
 |---|---|---:|---|---|
-| `game-mixed-nested` | `/Users/scott/dumps/likely-valid/2026-07-23-019f8ef8` | 17 / 1,090,422,259 | `d33043af3b7beb0f08bf962d68a5be8d3d99ada2757def44b30a7c432e452c5b` | Nested `raw/` mixed-mode PS1 CUE plus retained `dump.toml` and historical evidence; preservation and 17-file raw hash observation succeeded; no DAT match attempted. |
-| `cd-flat-two-track` | `/Users/scott/dumps/likely-valid/_QyyxioVRyBqTsJQKgyelNOp7rE-_4938068001041` | 13 / 334,449,135 | `470cc5bb377a07ef61d33ef6e30cf8214d4ba25091ce6b8d80b9b5371f5ab689` | Explicit Redumper TOC selection produced two tracks and MusicBrainz disc ID `_QyyxioVRyBqTsJQKgyelNOp7rE-`; FLAC preparation and playback succeeded. This is structure/provider identity, not catalog or audio verification. |
-| `cd-flac-sidecars` | `/Users/scott/dumps/likely-valid/octopath_0_ost_2` | 40 / 2,455,327,621 | `8dc1312346b0210a7c8f7614bd7b4e95d6ec8af0be70ec144f8be9a541cb3872` | Redumper analysis produced 16 tracks and disc ID `RjOjvqcI8e7qgLeHfx4EtnidRps-`. All 16 supplied FLACs remain members of the 40-file `preservation_master`; none was relabelled a Collector derivative. |
-| `damaged-audio` | `/Users/scott/dumps/bad/GUST-9001` | 8 / 510,365,466 | `e8d5db0e27cca5e3024ce7041c285081bc1f09e92512a83b3aca6258ab8911bb` | The user label did not substitute for analysis: the retained package produced a supported one-track Redumper layout and disc ID `2MbcqB6O3GeZQ4HZqr4O4mTi2Zw-`. |
-| `damaged-no-anchor` | `/Users/scott/dumps/bad/SCES-00344` | 6 / 950,108,972 | `115f2371f565016da5f9921491c427fdbe2daa18f7145d1083130c35ae8b179b` | Originals published; analysis reported exactly `redumper mixed-mode or four-channel CD audio` and made no supported-layout or verification claim. |
+| `game-mixed-nested` | `archive host/dumps/likely-valid/2026-07-23-019f8ef8` | 17 / 1,090,422,259 | `d33043af3b7beb0f08bf962d68a5be8d3d99ada2757def44b30a7c432e452c5b` | Nested `raw/` mixed-mode PS1 CUE plus retained `dump.toml` and historical evidence; preservation and 17-file raw hash observation succeeded; no DAT match attempted. |
+| `cd-flat-two-track` | `archive host/dumps/likely-valid/_QyyxioVRyBqTsJQKgyelNOp7rE-_4938068001041` | 13 / 334,449,135 | `470cc5bb377a07ef61d33ef6e30cf8214d4ba25091ce6b8d80b9b5371f5ab689` | Explicit Redumper TOC selection produced two tracks and MusicBrainz disc ID `_QyyxioVRyBqTsJQKgyelNOp7rE-`; FLAC preparation and playback succeeded. This is structure/provider identity, not catalog or audio verification. |
+| `cd-flac-sidecars` | `archive host/dumps/likely-valid/octopath_0_ost_2` | 40 / 2,455,327,621 | `8dc1312346b0210a7c8f7614bd7b4e95d6ec8af0be70ec144f8be9a541cb3872` | Redumper analysis produced 16 tracks and disc ID `RjOjvqcI8e7qgLeHfx4EtnidRps-`. All 16 supplied FLACs remain members of the 40-file `preservation_master`; none was relabelled a Collector derivative. |
+| `damaged-audio` | `archive host/dumps/bad/GUST-9001` | 8 / 510,365,466 | `e8d5db0e27cca5e3024ce7041c285081bc1f09e92512a83b3aca6258ab8911bb` | The user label did not substitute for analysis: the retained package produced a supported one-track Redumper layout and disc ID `2MbcqB6O3GeZQ4HZqr4O4mTi2Zw-`. |
+| `damaged-no-anchor` | `archive host/dumps/bad/SCES-00344` | 6 / 950,108,972 | `115f2371f565016da5f9921491c427fdbe2daa18f7145d1083130c35ae8b179b` | Originals published; analysis reported exactly `redumper mixed-mode or four-channel CD audio` and made no supported-layout or verification claim. |
 
 Initial and final `diff -rq` comparisons of every source directory against its
 inbox copy returned no differences. The inbox picker enumerated each direct child

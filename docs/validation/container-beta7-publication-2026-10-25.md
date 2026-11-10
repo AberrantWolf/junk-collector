@@ -1,7 +1,7 @@
 # Beta.7 publication and NAS update — 2026-10-25 JST
 
 The user authorized committing/pushing the album repair and security updates and
-deploying them. Beta.7 is published on `preview` and installed on `fatchocobo`.
+deploying them. Beta.7 is published on `preview` and installed on the archive host.
 
 ## Source and publication
 

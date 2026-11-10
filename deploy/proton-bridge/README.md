@@ -18,14 +18,14 @@ home were not replaced. Connected profiles now offer **Edit scanned folders**,
 
 The merged implementation is installed on **Fi**, alongside Proton Bridge 3.18.0
 in the existing `junk-collector` Compose stack. Collector private state, Bridge
-home and the mail profile are on Fi's local SSD; the archive remains on FatChocobo
+home and the mail profile are on Fi's local SSD; the archive remains on the archive host
 over NFS. See [the deployment and recovery record](../../docs/validation/fi-email-deployment-2026-10-31.md).
 This is an exact-source local release-mode image, not a new published release.
 
 Use your private terminal on the Mac to authenticate:
 
 ```sh
-ssh -t fi-home /home/link/bin/collector-mail login
+ssh -t application-host '~/bin/collector-mail login'
 ```
 
 At the Bridge prompt, run `login` and complete its password/2FA prompts. Use `info`
@@ -47,7 +47,7 @@ Proton account passwords/2FA are never entered into this form.
 Query progress without stopping Bridge or keeping the terminal open:
 
 ```sh
-ssh fi-home /home/link/bin/collector-mail status
+ssh application-host '~/bin/collector-mail status'
 ```
 
 Progress may initially be unknown after a restart until Bridge emits a fresh
@@ -58,7 +58,7 @@ It does not alter Bridge's account-wide encrypted cache.
 For management access through SSH:
 
 ```sh
-ssh -N -L 9842:127.0.0.1:9842 fi-home
+ssh -N -L 9842:127.0.0.1:9842 application-host
 ```
 
 Open [Purchase inbox](http://localhost:9842/purchase-inbox) and sign in. The
@@ -72,7 +72,7 @@ Fi's guarded systemd unit owns lifecycle, including Bridge. Mail data is under
 `/srv/junk-collector/state/mail-profiles`; both are inside the local data subvolume
 for complete paired recovery points. The installed
 operator helper is `/opt/junk-collector-beta14/scripts/fi-mail.py`; its wrapper is
-`/home/link/bin/collector-mail`. Check state with its `status` command over `ssh -t`.
+`/home/operator/bin/collector-mail`. Check state with its `status` command over `ssh -t`.
 The existing logged-in Bridge resumed syncing after the qualified update.
 Actual personal receipt calibration and archived-folder coverage remain operator
 acceptance; the saved connection remains paused. The original isolated build/setup

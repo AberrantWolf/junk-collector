@@ -102,4 +102,4 @@ The existing exposure/media-access policy remains unchanged. Production acceptan
 used read-only runtime/state/asset checks; no synthetic production Items/accounts
 or mail were created. Functional authenticated browser/audio and upgrade/recovery
 acceptance ran against disposable fixtures. Private operation evidence remains in
-`/home/link/collector-beta16-a6bc202` on Fi and `/tmp/collector-beta16` locally.
+`/home/operator/collector-beta16-a6bc202` on Fi and `/tmp/collector-beta16` locally.

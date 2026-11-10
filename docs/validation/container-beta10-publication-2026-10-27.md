@@ -2,7 +2,7 @@
 
 The user authorized releasing all current changes and deploying them to the NAS.
 [Beta.10](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.10)
-is published on `preview` and installed on `fatchocobo`. It includes one-click and
+is published on `preview` and installed on the archive host. It includes one-click and
 automatic-ingest AccurateRip checks, collection CD defaults, live worker settings,
 original provider artwork, Library import progress and the standalone capture/
 naming helper follow-ups. See [release notes](../releases/v0.1.0-beta.10.md).

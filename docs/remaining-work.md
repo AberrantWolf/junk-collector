@@ -505,7 +505,7 @@ below retain their original delivery scope.
 
 The requested server update is complete: Fi runs merged source `83a9e0d` as a
 qualified release-mode container, with persistent Proton Bridge in its retained
-stack. FatChocobo serves the NFS archive; it is no longer the application host.
+stack. archive host serves the NFS archive; it is no longer the application host.
 Paired snapshots and retained-state/runtime checks pass. See
 [deployment evidence](validation/fi-email-deployment-2026-10-31.md).
 Next, the operator signs into Bridge privately, exports its certificate, provisions
@@ -546,7 +546,7 @@ update or migration is included. Source and browser checks pass; validation resu
 
 ## Beta.14 published and installed on the current NAS — 2026-10-30
 
-Beta.14 is published on `preview` and runs on FatChocobo core/media at the verified
+Beta.14 is published on `preview` and runs on the archive host core/media at the verified
 immutable digest. Full exact-source checks (558 Rust tests passed, 5 ignored), all
 29 browser journeys, both native runtime/media qualifications and release-image
 browser acceptance pass. Publication reuses the sealed images without compiling.
@@ -1562,7 +1562,7 @@ This source repair is after alpha.3. No live service changed.
 #### NAS administration follow-up — not a product release gate
 
 Investigate supported DSM updates/settings to enable SFTP on the DS1522+
-(`fatchocobo.local`). Modern `scp` failed with `subsystem request failed on
+(`archive-host.example.com`). Modern `scp` failed with `subsystem request failed on
 channel 0`; `scp -O` successfully transferred the images. Assess missing
 post-quantum SSH key exchange separately from SFTP availability. This operator
 task does not block Collector deployment or require a Collector code change.
@@ -2125,7 +2125,7 @@ in a bounded design/feasibility step. The native Iroh trial informs implementati
 but cannot substitute for browser acceptance. No new implementation is claimed here.
 
 **Accepted stopgap, 2026-10-22:** configure the explicit manual
-`https://collector-lan.awkwardexplorer.com/` route for browser and Trash Amp,
+`https://lan.collector.example.com/` route for browser and Trash Amp,
 without a Mac helper. Public DNS-only and home A records point to the NAS; the
 certificate is installed/assigned and the exact origin is added to the running
 server. Normal DNS-based HTTPS, expected certificate/ServerId and Firefox login

@@ -109,5 +109,5 @@ production accounts/Items were created and no failed production import was
 silently retried. Failed identification can now be explicitly retried from
 **Review import → Retry this step**. Installed Trash Amp is unchanged.
 
-Private operation evidence is retained in `/home/link/collector-beta17-fe7b95c`
+Private operation evidence is retained in `/home/operator/collector-beta17-fe7b95c`
 on Fi and `/tmp/collector-beta17` locally.

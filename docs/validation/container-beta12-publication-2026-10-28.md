@@ -1,7 +1,7 @@
 # Beta.12 publication and NAS update — 2026-10-28 JST
 
 [Beta.12](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.12)
-is published on `preview` and installed on `fatchocobo`. It delivers compact,
+is published on `preview` and installed on the archive host. It delivers compact,
 server-cached Library rows while keeping authorized album details fresh and
 import progress live. See [release notes](../releases/v0.1.0-beta.12.md) and
 [cache behavior and regression evidence](library-row-cache-2026-10-28.md).

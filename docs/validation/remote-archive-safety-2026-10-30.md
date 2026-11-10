@@ -144,6 +144,6 @@ actual local-SSD check; preflight does not relocate Docker storage.
 5. Both members of a complete stopped-writer recovery point exist, and an isolated
    paired restore demonstrates credentials/grants/manual data, original/derivative
    reads and pending-work resumption, including deliberate rollback after new writes.
-6. Fi-specific listener addresses (including the old `192.168.1.106:9845` bind),
+6. Fi-specific listener addresses (including the old `192.0.2.106:9845` bind),
    retained public hostnames/authentication origin/TLS/ServerId and the real
    sign-in/import/playback cutover acceptance plan have been reviewed.

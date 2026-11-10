@@ -1,7 +1,7 @@
 # Fi email intake deployment — 2026-10-31 JST
 
 The user requested updating the already migrated Fi server and adding Proton
-Bridge for local account setup. Fi is the application host; FatChocobo supplies
+Bridge for local account setup. Fi is the application host; the archive host supplies
 the retained NFS archive. No new migration, registry publication, release tag or
 mailbox login was performed.
 

@@ -140,7 +140,7 @@ part of local setup, without uploading messages to chat.
 ## Proton Bridge deployment
 
 See [the Portainer and authentication runbook](../deploy/proton-bridge/README.md).
-Fi is the AMD64 Linux application host; FatChocobo supplies the NFS archive.
+Fi is the AMD64 Linux application host; the archive host supplies the NFS archive.
 Proton offers CLI mode and the Linux `pass` keychain; container packaging is
 self-managed. Official Linux packages are used
 unchanged; no Proton protocol reimplementation or public IMAP proxy is included.
@@ -166,7 +166,7 @@ including its private key. The terminal query uses the same snapshot without
 opening another Bridge process or interrupting sync:
 
 ```sh
-ssh fi-home /home/link/bin/collector-mail status
+ssh application-host '~/bin/collector-mail status'
 ```
 
 `POST /api/v1/mail/setup` binds the profile owner to the authenticated enabled

@@ -119,7 +119,7 @@ Complete read-only recovery points retain local databases/WAL, Bridge vault/cach
 configuration and the matching archive:
 
 - Fi: `/var/backups/collector-fi-pairs/before-mail-status-20261031/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-mail-status-20261031`.
+- archive-host.example.com: `/volume1/collector-recovery/before-mail-status-20261031`.
 
 Snapshot database quick checks pass. The private Fi recovery directory additionally
 retains paired-point metadata, old deployment/environment/unit, authority key,
@@ -132,7 +132,7 @@ The existing proxy and tunnel container identities remain unchanged. Public HTTP
 health and served application asset equality pass; IMAP/SMTP remain refused over
 Fi's LAN address. The fresh reporter certificate matches the original Bridge
 certificate without a mailbox LOGIN. Bridge resumed its existing account sync and
-reported **27.9%** at acceptance. `ssh fi-home /home/link/bin/collector-mail status`
+reported **27.9%** at acceptance. `ssh application-host '~/bin/collector-mail status'`
 works noninteractively and does not stop Bridge.
 
 The operator can now enter local IMAP credentials in Purchase inbox and explicitly
