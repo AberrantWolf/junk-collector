@@ -8,6 +8,39 @@ when release notes call for a conversion, durable work needs to be resumed, or
 the update changes mounts, ingress, config, companion images or the service unit.
 Run a targeted live workflow when the release affects that path.
 
+Fi and the NAS have an existing Docker operator route for host administration.
+Use SSH with the configured operator accounts. On each host, use an already
+installed, trusted helper image pinned by its local image ID. The helper runs
+as root in a short-lived privileged container and enters the host mount
+namespace. Verify the route on both hosts before stopping writers.
+
+```bash
+# Run this function on each host with that host's trusted local image ID.
+host_admin() {
+  docker run --pull=never --rm -i --user 0:0 --privileged --pid=host \
+    --network=none --entrypoint nsenter "$helper_image_id" \
+    -t 1 -m -- "$@"
+}
+host_admin /usr/bin/id -u  # must return 0
+```
+
+Use the same wrapper on the NAS for the read-only snapshot. Run the interactive
+checker from a terminal with `docker run -it` in the wrapper so it can prompt
+for the session securely. For the checker's HTTPS probes, use the established
+Fi helper with `--network=host` in place of `--network=none`. Keep the other
+host administration commands on the isolated route.
+
+For a separately requested tunnel update, verify the upstream release, pull its
+exact AMD64 digest, and run its version and tunnel command checks before
+downtime. Render the installed Compose configuration with the candidate pins
+without replacing the live environment. Retain the old connector image and
+environment in the same recovery point. During activation change the
+`COLLECTOR_CONNECTOR_IMAGE` pin as well. Verify the new image, version, stable
+container and public HTTPS through the tunnel after activation. The routine
+checker expects companion containers to retain their identities. For this
+extended update, compare the changed connector against its candidate pin and
+compare the other companions against the baseline.
+
 1. Read the target release notes. Run `sha256sum --check SHA256SUMS` with the
    downloaded release bundle and `release-image.json`. Pull the record's exact
    immutable `reference` on Fi with `docker pull --platform linux/amd64` before
@@ -22,6 +55,7 @@ Run a targeted live workflow when the release affects that path.
    tunnel runs outside this Compose project, include it with `--companion`.
 
    ```bash
+   # Use absolute host paths for source_dir, release_record, pair and lan_ca.
    check_args=(
      --project "$project" --release "$release_record" --pair-dir "$pair" \
      --public "$public_origin" --lan "$lan_origin" --media "$media_origin" \
@@ -30,7 +64,7 @@ Run a targeted live workflow when the release affects that path.
    # Add these only when applicable:
    # check_args+=(--companion "$tunnel_container")
    # check_args+=(--lan-ca "$retained_lan_certificate")
-   sudo python3 -B scripts/fi_update_check.py before "${check_args[@]}"
+   host_admin /usr/bin/python3 -B "$source_dir/scripts/fi_update_check.py" before "${check_args[@]}"
    ```
 
    Use `--lan-ca` when Fi does not trust the retained LAN certificate through
@@ -41,7 +75,7 @@ Run a targeted live workflow when the release affects that path.
    of arguments, the baseline and the output. The checker sends it only to the
    specified public HTTPS origin and refuses redirects. Keep that session
    available for the second check.
-3. Run `sudo systemctl stop junk-collector-remote.service` and verify all stack
+3. Run `host_admin systemctl stop junk-collector-remote.service` and verify all stack
    containers and every other writer on both hosts have stopped. Follow the
    [paired checkpoint steps](remote-archive.md#coordinated-recovery-points-and-rollback)
    while writers remain stopped. Sync the mounted archive and Fi local roots.
@@ -56,7 +90,7 @@ Run a targeted live workflow when the release affects that path.
    the Fi snapshot UUID and fingerprints for the post-update comparison.
 
    ```bash
-   sudo python3 -B scripts/fi_update_check.py cutoff "${check_args[@]}" \
+   host_admin /usr/bin/python3 -B "$source_dir/scripts/fi_update_check.py" cutoff "${check_args[@]}" \
      --nas-snapshot-uuid "$nas_snapshot_uuid"
    ```
 
@@ -65,12 +99,12 @@ Run a targeted live workflow when the release affects that path.
    the operator's sealed pair record. Wait for the cutoff check to pass.
 4. Edit only `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` in the installed
    EnvironmentFile to the verified immutable reference. Run
-   `sudo systemctl start junk-collector-remote.service` so the mount preflight runs.
+   `host_admin systemctl start junk-collector-remote.service` so the mount preflight runs.
    Keep normal traffic and receipt scanning quiet during acceptance. Run the
    post-update check with the same session.
 
    ```bash
-   sudo python3 -B scripts/fi_update_check.py after "${check_args[@]}"
+   host_admin /usr/bin/python3 -B "$source_dir/scripts/fi_update_check.py" after "${check_args[@]}"
    ```
 
 5. Record the pass beside the sealed pair, then resume ordinary use and restore
