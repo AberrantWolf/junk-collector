@@ -1,5 +1,9 @@
 # Isolated direct HTTPS music
 
+Architectural rules: [ADR 0009](../../docs/decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0010](../../docs/decisions/0010-trust-before-credentials-and-native-enrollment.md), [ADR 0014](../../docs/decisions/0014-playback-delivery-separate-from-integrity.md), [ADR 0015](../../docs/decisions/0015-isolated-direct-media-delivery.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Source delivery instructions; do not assume an older published image contains
 `collector-media`. Build this source or select a release explicitly documenting
 the feature. No DNS/router changes are made by these files.
@@ -49,7 +53,7 @@ Set these additional values alongside the existing `.env`:
 ```dotenv
 COLLECTOR_MEDIA_HOST=collector-media.example.com
 COLLECTOR_CONTROL_ORIGIN=https://collector.example.com
-COLLECTOR_MEDIA_BIND_IP=192.168.1.106
+COLLECTOR_MEDIA_BIND_IP=192.168.1.20
 COLLECTOR_MEDIA_HTTPS_PORT=9443
 # Optional: pin your reviewed Caddy image digest rather than the default caddy:2.
 COLLECTOR_MEDIA_PROXY_IMAGE=caddy:2

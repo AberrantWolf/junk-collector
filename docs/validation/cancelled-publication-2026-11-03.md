@@ -1,8 +1,11 @@
 # Cancelled publication conflict prevention — 2026-11-03
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+
 The user requested an underlying fix for the cancelled publication conflict found
-on Fi, regression coverage, review, commit and push. This source delivery does not
-publish another release or change Fi's installed beta.20. Its earlier inspected
+on application-host, regression coverage, review, commit and push. This source delivery does not
+publish another release or change application-host's installed beta.20. Its earlier inspected
 quarantine and snapshots remain untouched.
 
 ## Cause and boundary
@@ -28,7 +31,7 @@ rule was added. Pre-existing conflicting journals still require inspected recove
 
 `cancelled_processing_publication_cannot_poison_a_later_observation_or_restart`
 failed against the original code at reopening the Store, with the same
-`publication artifact digest mismatch` as Fi. It now passes with:
+`publication artifact digest mismatch` as application-host. It now passes with:
 
 - Actual cancellation after journal preparation and after bytes are staged.
 - Typed catalog-busy and lost-claim interruption after staging, followed by owner

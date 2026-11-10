@@ -1,5 +1,7 @@
 # Remote archive safety — 2026-10-30
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Prepared on `codex/remote-archive-safety` in the separate worktree, based on
 `0ed9a017519dc713fd9c82cc85a159af0dd28d25`. Existing uncommitted work in the original
 checkout was not incorporated or changed. No production storage, deployment,
@@ -116,7 +118,7 @@ execution context outside macOS seatbelt.
 
 Docker daemon was unavailable. No container runtime/systemd boot, automatic-restart
 failure test, actual Linux anchored-directory execution, NFS mount/disconnect,
-server durability test or coordinated Fi/NAS restore was performed. The filesystem
+server durability test or coordinated application-host/NAS restore was performed. The filesystem
 probe's unit test uses synthetic NFS admission over disposable local files; it is
 **not** evidence of NFS behavior. Actual NFS qualification uses the separate
 marked disposable export and VM procedure in the runbook, never production paths.
@@ -128,14 +130,14 @@ preflight owns inbox source admission; manual core/CLI startup is not a supporte
 bypass for that service owner. Docker's data root/named private volumes need an
 actual local-SSD check; preflight does not relocate Docker storage.
 
-**A later Fi migration remains unapproved until:**
+**A later application-host migration remains unapproved until:**
 
 1. A qualified release image/digest for core and media is available and its actual
    container/Linux filesystem, first-boot and missing/wrong-mount restart tests pass.
-2. Isolated tests on the intended Fi/NAS stack establish required NFS atomicity,
+2. Isolated tests on the intended application-host/NAS stack establish required NFS atomicity,
    synchronization, disconnect/server-restart recovery and numeric UID/GID access,
    with media unable to write and inbox independently mounted.
-3. Fi has measured SSD capacity/headroom for the complete 76-GB private tree,
+3. application-host has measured SSD capacity/headroom for the complete 76-GB private tree,
    concurrent work and recovery points; SQLite/config/Caddy/Docker private storage
    are confirmed local. No `state/imports` exclusion/deletion is assumed.
 4. The old NAS writer, CLI schedules and other restart owners are fenced; the
@@ -144,6 +146,6 @@ actual local-SSD check; preflight does not relocate Docker storage.
 5. Both members of a complete stopped-writer recovery point exist, and an isolated
    paired restore demonstrates credentials/grants/manual data, original/derivative
    reads and pending-work resumption, including deliberate rollback after new writes.
-6. Fi-specific listener addresses (including the old `192.168.1.106:9845` bind),
+6. application-host-specific listener addresses (including the old `192.168.1.20:9845` bind),
    retained public hostnames/authentication origin/TLS/ServerId and the real
    sign-in/import/playback cutover acceptance plan have been reviewed.

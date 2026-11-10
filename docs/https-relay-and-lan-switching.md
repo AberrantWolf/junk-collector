@@ -9,7 +9,7 @@ qualification retain their original scope.
 
 **Remote direction selected, 2026-10-23:** use the
 [direct HTTPS media plan](direct-https-media-plan.md): existing Cloudflare control/
-login plus a dedicated direct public media-only origin. This is design only and
+login plus a dedicated direct public media-only origin. This selected direction is implemented in the linked contract and
 supersedes the relay/Iroh-first remote ordering below for that delivery. Existing
 private playback remains implemented separately; HL-12 is still the only queue.
 The same-day isolation refinement selects a separate read-only media executable/
@@ -18,21 +18,21 @@ can retain that process boundary; the chosen home setup uses two ingress origins
 
 **Source update, 2026-10-22:** [automatic private playback](automatic-private-playback.md)
 is now implemented for web and Trash Amp. See [dated acceptance](validation/automatic-private-playback-2026-10-22.md)
-and the [sole queue](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation)
+and the [sole queue](remaining-work.md)
 for deployment/device limits and deferred public relay work. The manual LAN URL
 remains the deployed stopgap. The older planning/feasibility statements below
 are retained as dated history, not current implementation status.
 
 Planning record, 2026-10-22. Requested outcome; **not implemented or qualified**.
 This is a delivery design, not another remaining-work queue. Tracking belongs to
-[HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation),
+[HL-12](remaining-work.md),
 with deployment acceptance under HL-05. Preserve the unrelated active assignment
 in that queue. This planning request does not provision infrastructure, change
 live DNS/configuration, publish packages or authorize a paid service purchase.
 
 **Scope clarification, 2026-10-22:** the real solution requires automatic LAN
 detection and route selection in **both the browser and Trash Amp**. The deployed
-`https://collector-lan.awkwardexplorer.com/` is an accepted manual stopgap, not
+`https://lan.collector.example.com/` is an accepted manual stopgap, not
 completion of this plan or HL-12. Both clients must detect a reachable trusted
 local server from their normal entry point/saved connection, prefer local media
 traffic and retain/recover authorized remote access without manual URL selection

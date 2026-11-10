@@ -1,5 +1,9 @@
 # Album metadata and artwork for players
 
+Architectural rules: [ADR 0007](decisions/0007-manual-metadata-authority.md), [ADR 0013](decisions/0013-bounded-projections-and-client-refresh-state.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Collector resolves accepted/manual metadata and artwork on the server. Remote
 players such as Trash Amp read that published state; a Library refresh does not
 query MusicBrainz, acquire Cover Art Archive images or prepare audio. Metadata

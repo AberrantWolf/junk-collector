@@ -1,5 +1,7 @@
 # Synology deployment qualification — 2026-10-19
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Partial HL-05 acceptance, performed interactively by the operator on a Synology
 DS1522+, DSM 7.4.1-90080. This is an actual-host smoke and persistence check,
 not completed failure/recovery, power-loss, scale or public-ingress qualification.
@@ -102,7 +104,7 @@ inspection, not independent remote administration of the NAS.
 - A dedicated `cloudflare/cloudflared:2026.9.1` host-network connector runs in
   that stack with its token held in Portainer configuration. The existing
   bridge-network connector and other service routes were left in place. The
-  new tunnel connects `https://collector.awkwardexplorer.com` to the public
+  new tunnel connects `https://collector.example.com` to the public
   loopback HTTP listener on 9841. Authentication/allowed origins use that HTTPS
   origin; public administration is explicitly enabled (also enabling curation).
   Operator reported working browser access. This does not complete the broader
@@ -134,7 +136,7 @@ inspection, not independent remote administration of the NAS.
   Phono-specific instructions despite that retired target.
 
 Open fixes and requests live only in the
-[remaining-work queue](../remaining-work.md#placement-of-the-2026-10-19-live-use-findings),
+[remaining-work queue](../remaining-work.md),
 triaged to HL-05 deployment/recovery, HL-07 release usability/packaging and HL-09
 optional inbox cleanup. The chronological evidence here does not assign work.
 New-installation import/download equality, playback, restart persistence,
@@ -177,7 +179,7 @@ The NAS has not yet been updated to that repair, and actual recovery is pending.
 
 ## Lightweight live HTTPS check — 2026-10-21
 
-The operator selected the existing `https://collector.awkwardexplorer.com` for
+The operator selected the existing `https://collector.example.com` for
 public-ingress checks and challenged the disproportionate qualification scope.
 An additional isolated tunnel is not required. Reuse existing backend/isolated
 coverage and operator-reported working browser access/playback; broader proxy,

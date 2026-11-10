@@ -1,84 +1,11 @@
-# Official Proton Bridge with Collector email intake
+# Proton Bridge email intake
 
-## Fi beta.15 update — 2026-11-01
+Use a published Collector installation bundle containing `compose.mail.yaml` and
+the Bridge build context. Collector images already include the mail connector;
+only Bridge needs a local image build. The packaged Bridge target is Linux AMD64.
+Keep credentials and mailbox cache on private local storage.
 
-Collector core/media now run published beta.15, including the inbox/Bridge work
-since beta.14 and WAV support. The existing Bridge image/home, private profiles,
-paused connection/cursor and installation paths are retained. See
-[release and preservation evidence](../../docs/validation/container-beta15-publication-2026-11-01.md).
-The dated installation baseline below remains a historical/setup reference.
-
-## Current Fi installation — 2026-10-31
-
-The reviewed inbox recovery update (`0bec4af`) is installed. Its existing Bridge
-profile/credentials and paused connection/cursor are retained; Bridge's image and
-home were not replaced. Connected profiles now offer **Edit scanned folders**,
-**Rescan configured folders**, and **Revalidate Bridge connection**. See
-[deployment and preservation evidence](../../docs/validation/fi-inbox-recovery-deployment-2026-10-31.md).
-
-The merged implementation is installed on **Fi**, alongside Proton Bridge 3.18.0
-in the existing `junk-collector` Compose stack. Collector private state, Bridge
-home and the mail profile are on Fi's local SSD; the archive remains on FatChocobo
-over NFS. See [the deployment and recovery record](../../docs/validation/fi-email-deployment-2026-10-31.md).
-This is an exact-source local release-mode image, not a new published release.
-
-Use your private terminal on the Mac to authenticate:
-
-```sh
-ssh -t fi-home /home/link/bin/collector-mail login
-```
-
-At the Bridge prompt, run `login` and complete its password/2FA prompts. Use `info`
-to view the **local IMAP** credentials, then `exit`. Keep these credentials in your
-private terminal. Telemetry and automatic updates were disabled during setup;
-the helper stops only Bridge for CLI use and restarts its daemon on exit.
-This follows the [official CLI workflow](https://proton.me/support/bridge-cli-guide).
-
-In Collector's **Purchase inbox**, the visible **Connect your email** card shows
-Bridge status, last-reported sync progress and estimated remaining time. Enter
-the local IMAP username/password and exact folder names, then choose **Connect
-Bridge**. The background reporter automatically exports the certificate inside
-Bridge's private home and supplies its public fingerprint; no manual certificate
-copy or owner ID is needed for this web flow. A failed credential/TLS/folder check
-saves no profile. A successful connection stays paused until you select Games and
-choose **Enable receipt scanning**. INBOX alone does not cover archived history.
-Proton account passwords/2FA are never entered into this form.
-
-Query progress without stopping Bridge or keeping the terminal open:
-
-```sh
-ssh fi-home /home/link/bin/collector-mail status
-```
-
-Progress may initially be unknown after a restart until Bridge emits a fresh
-event. A missing/stale reporter is an explicit unavailable state. The status
-snapshot contains no account names, credentials, raw logs or message identifiers.
-It does not alter Bridge's account-wide encrypted cache.
-
-For management access through SSH:
-
-```sh
-ssh -N -L 9842:127.0.0.1:9842 fi-home
-```
-
-Open [Purchase inbox](http://localhost:9842/purchase-inbox) and sign in. The
-initial `[]` operator profile file deliberately supplies
-no account before provisioning. Bridge IMAP/SMTP bind only `127.0.0.1:1143/1025`.
-Both were inaccessible from the Mac over Fi's LAN address.
-
-Fi's guarded systemd unit owns lifecycle, including Bridge. Mail data is under
-`/srv/junk-collector/mail` (Bridge home, status directory and mode-0600 legacy
-`profiles.json`). Web-managed profiles and their receipts live under
-`/srv/junk-collector/state/mail-profiles`; both are inside the local data subvolume
-for complete paired recovery points. The installed
-operator helper is `/opt/junk-collector-beta14/scripts/fi-mail.py`; its wrapper is
-`/home/link/bin/collector-mail`. Check state with its `status` command over `ssh -t`.
-The existing logged-in Bridge resumed syncing after the qualified update.
-Actual personal receipt calibration and archived-folder coverage remain operator
-acceptance; the saved connection remains paused. The original isolated build/setup
-procedure below remains useful for another installation.
-
-## Verified feasibility and remaining qualification
+## Pinned Bridge package
 
 On 2026-10-30 Proton's official release manifest returned stable **3.18.0**,
 commit `0800aeea50ee8a474e64355a4b7df124c0bcee91`. Its unchanged AMD64 DEB has
@@ -91,9 +18,9 @@ credentials. Base OS/package updates remain administrator-managed.
 The release source implements `--cli` and `--noninteractive`; its Linux helper
 selects `pass` when usable and its mail listener host is `127.0.0.1`. Official
 package inspection and signature verification can be performed without logging
-in. Running the CLI, credential persistence and IMAP sync on your NAS still need
-the isolated acceptance steps below. Source inspection is not a successful NAS
-login or Docker runtime test. No Proton account credentials are bundled.
+in. Qualify CLI authentication, persistence and read-only IMAP on the intended host
+using the acceptance steps below. Existing dated records establish only their
+named versions and environments. No Proton account credentials are bundled.
 
 Primary references:
 
@@ -107,41 +34,34 @@ Primary references:
 
 ## Prepare an isolated installation
 
-Use a disposable candidate Collector installation and its own config/state/archive,
-following the existing [container instructions](../container/README.md). The
-candidate Collector image must be built from this branch's complete, checked
-source/web assets; this branch adds Python 3 to that image. It is not available
-under an existing published release tag.
-
-On the AMD64 Docker host, build the candidate Collector image from the repository
-root (the checked `web/dist` assets are already included in this branch):
-
-```sh
-docker build --platform linux/amd64 -t junk-collector-email:candidate .
-```
-
-Set `COLLECTOR_IMAGE=junk-collector-email:candidate` for the isolated stack. Build
-the Bridge image from `deploy/proton-bridge`:
-
+Use a disposable installation for initial qualification, following the
+[container instructions](../container/README.md). Select a published Collector image
+and keep its config, state and archive isolated from an existing installation.
+From the bundle's `proton-bridge` directory (or `deploy/proton-bridge` in source):
 
 ```sh
 docker build --platform linux/amd64 -t junk-collector-proton-bridge:3.18.0 .
 ```
 
-Create an encrypted/private NAS directory for `bridge-home` and a private mail
-profile file. Give directories UID:GID 10001:10001 and mode 0700; restrict DSM ACLs
-as well as Unix modes. Bridge can cache the entire mailbox, so size storage for the
+Create private local directories for `bridge-home`, status and the profile file.
+Give directories UID:GID 10001:10001 and mode 0700; apply the host's ACLs as well as
+Unix modes. For web-managed setup, create a fresh profile file containing `[]`,
+owned by 10001:10001 with mode 0600. For operator-file provisioning, let the
+provisioning command below create the file instead; it refuses an existing file.
+The configured file must exist before starting Collector because Compose refuses
+a missing bind source. Bridge can cache the entire mailbox, so size storage for the
 account, not just purchase emails. Protect Bridge logs too; never enable IMAP/SMTP
 protocol logging or attach logs containing credentials/mail to chat.
 
-Use base `deploy/container/compose.yaml` plus `compose.mail.yaml`. Set the existing
+Use `compose.yaml` plus `compose.mail.yaml` from the installation bundle
+(or both files under `deploy/container` in a source checkout). Set the existing
 Collector environment variables to the isolated installation, and additionally:
 
 ```text
 PROTON_BRIDGE_IMAGE=junk-collector-proton-bridge:3.18.0
-PROTON_BRIDGE_HOME=/volume1/private-collector-mail/bridge-home
-COLLECTOR_MAIL_PROFILES=/volume1/private-collector-mail/profiles.json
-PROTON_BRIDGE_STATUS=/volume1/private-collector-mail/status
+PROTON_BRIDGE_HOME=/srv/private-collector-mail/bridge-home
+COLLECTOR_MAIL_PROFILES=/srv/private-collector-mail/profiles.json
+PROTON_BRIDGE_STATUS=/srv/private-collector-mail/status
 ```
 
 Create the status directory as UID:GID 10001:10001 with mode 0700 too. The mail
@@ -188,15 +108,18 @@ unattended. Protection at rest therefore comes from NAS encryption, file/ACL
 permissions and encrypted backups; possession of the complete home grants access.
 Do not describe a co-located key and encrypted store as independent disk protection.
 
-## Provision the connector without chat credentials
+## Optional operator-file provisioning
 
-Get your Collector `user_id` from its authenticated `/api/v1/me` response. Run on
+Skip this section when using **Connect your email**. For an operator-managed
+profile, create a fresh output file before starting Collector, or choose a new
+file and update the bind path during a stopped update. Never overwrite a retained
+profile file. Get your Collector `user_id` from its authenticated `/api/v1/me` response. Run on
 the NAS (Python 3 required):
 
 ```sh
 python3 scripts/configure_proton_mail.py \
-  --output /volume1/private-collector-mail/profiles.json \
-  --certificate /volume1/private-collector-mail/bridge-home/export/cert.pem \
+  --output /srv/private-collector-mail/profiles.json \
+  --certificate /srv/private-collector-mail/bridge-home/export/cert.pem \
   --owner YOUR_COLLECTOR_USER_ID --id proton-owner --folder INBOX
 ```
 
@@ -218,15 +141,24 @@ mount path before restarting. Do not use your Proton account password here.
 For Portainer, merge the base and override with `docker compose ... config` after
 setting the non-secret path variables, then paste/upload the rendered stack in an
 isolated stack. Inspect paths and networking before deploying. Compose resolves
-files on the Docker host, not on your Mac. Avoid Portainer environment variables
+files on the Docker host, not on your workstation. Avoid Portainer environment variables
 for passwords; only private bind-mounted files contain them. Images must already
 exist on the selected Docker engine; Portainer stack deployment does not build
 the local Dockerfile. Do not redeploy production with this candidate.
 
-Start Bridge and Collector, then open Collector's private management address,
-choose **Purchase inbox**, select Games, and enable **My Proton Mail**. The first
-poll begins a resumable history import. Review a few messages from each retailer
-locally, especially cancellations, collector editions and multi-item orders.
+Start Bridge and Collector. In **Purchase inbox**, the **Connect your email** card
+shows sanitized Bridge status and last-reported progress. Submit local IMAP
+credentials and exact folder names, then choose **Connect Bridge**. Certificate
+pinning and read-only folder checks must succeed before a web-managed profile is
+saved. This flow does not need a manually copied certificate or user ID; the
+operator-file provisioning above is an alternative. Successful connections remain
+paused until a collection is selected and receipt scanning is enabled.
+
+Connected profiles offer **Edit scanned folders**, **Rescan configured folders** and
+**Revalidate Bridge connection**. INBOX alone does not include archived receipts.
+Unknown/stale progress remains visible; it is not proof that all receipts were read.
+Back up Bridge home and any external profile files separately from Collector's
+normal roots. See [review and recovery behavior](../../docs/email-purchases.md).
 
 ## Isolated acceptance before production
 

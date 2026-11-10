@@ -1,6 +1,8 @@
 # Inbox audio compatibility — 2026-11-01
 
-User-requested source delivery, published in beta.17 and installed on Fi.
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+User-requested source delivery, published in beta.17 and installed on application-host.
 All selected local and exact-source release checks pass. See
 [publication and deployment](container-beta17-publication-2026-11-01.md).
 
@@ -119,7 +121,7 @@ Collector pins shared audio/music commit
 `codex/audio-compatibility` and in Cargo's local Git cache. Other existing shared
 pins and unrelated dependency versions are unchanged. The initial publication was
 blocked by automatic review; the user then explicitly authorized merge, GitHub
-publication, a beta update and Fi deployment. The shared branch is fast-forward
+publication, a beta update and application-host deployment. The shared branch is fast-forward
 merged to main and both refs are published at that exact commit. No production
 Imports are automatically retried.
 

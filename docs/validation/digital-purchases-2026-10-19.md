@@ -1,7 +1,7 @@
 # HL-02 qualification — 2026-10-19
 
 Implementation: [supported matrix and ownership](../digital-purchases.md).
-Queue: [HL-02](../remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support).
+Queue: [HL-02](../remaining-work.md).
 All installations, accounts, certificates, audio and output profiles below are
 temporary test fixtures. No live archive, server, grant, credential or listening
 profile was changed. Pre-existing release work in Trash Amp was retained.
@@ -126,7 +126,6 @@ The initial qualification used local sibling Cargo patches. The user subsequentl
 authorized coordinated commits/pushes and exact revision pins. The publication
 follow-up below records those checks; live installations remain unchanged. No new codec beyond initial FLAC/MP3, DRM support, image splitting,
 live storefront acquisition or MusicBrainz/CAA network qualification is claimed.
-
 
 ## Pinned-revision publication — 2026-10-19
 

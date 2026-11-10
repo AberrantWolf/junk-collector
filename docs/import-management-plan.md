@@ -1,12 +1,8 @@
 # Import history and cleanup — P04 completion follow-up
 
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
+> Delivery/reference record. Contract and acceptance details remain useful; checkpoint
+> ordering and old gap statements are historical. Use [current status](implementation-status.md)
+> and the sole [open-work queue](remaining-work.md).
 
 **Current status 2026-09-27:** P04.4–P04.6 passed local acceptance through
 FX-03–FX-07. The [FX-07 audit](fx07-interface-audit.md) and

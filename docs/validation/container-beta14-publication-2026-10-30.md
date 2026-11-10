@@ -1,9 +1,11 @@
 # Beta.14 publication and NAS update — 2026-10-30 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 [Beta.14](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.14)
-is published on `preview` and installed on FatChocobo. It delivers reviewed digital
+is published on `preview` and installed on archive-host. It delivers reviewed digital
 album matching and archive admission/interruption safeguards. The NAS retains its
-existing local Btrfs archive/private-state layout. This is not Fi migration approval.
+existing local Btrfs archive/private-state layout. This is not application-host migration approval.
 See [release notes](../releases/v0.1.0-beta.14.md).
 
 ## Exact-source release evidence
@@ -99,7 +101,7 @@ writers stopped and current later writes preserved separately before selecting a
 rollback cutoff. Do not merely downgrade the image against newer data. The
 [snapshot runbook](../../deploy/container/snapshot-recovery.md) applies to this
 single-NAS layout. The [paired procedure](../../deploy/container/remote-archive.md)
-is mandatory after the split; restoring a NAS archive without matching Fi state
+is mandatory after the split; restoring a NAS archive without matching application-host state
 would not recover the installation.
 
 ## Current-NAS acceptance and limits
@@ -112,7 +114,7 @@ would not recover the installation.
   isolated network namespace and no private state/config/inbox access.
 - All **18 other containers**, including Caddy/tunnels, retain IDs, images and
   start times. NAS exports/permissions, router and tunnels were not changed.
-  Local playback retains `192.168.1.106:9845`; public hostnames remain stable.
+  Local playback retains `192.168.1.20:9845`; public hostnames remain stable.
 - Public HTTPS uses normal system trust. HTML and **12 assets** pass; their bytes
   match the newly running core. Protected control returns 401, media control 404
   and grantless media reads 401. Public media identity traverses the authority
@@ -126,9 +128,9 @@ would not recover the installation.
   production browser/playback session was exercised in this update; browser and
   media functional acceptance ran against isolated qualified source/images.
 
-Fi migration still requires the exact approval criteria in the remote runbook:
+application-host migration still requires the exact approval criteria in the remote runbook:
 actual supported NFS write/durability/outage and reconnect qualification, measured
 local SSD capacity including all imports/scratch/recovery needs, effective
-single-writer and boot fences, correct Fi listener addresses and a demonstrated
+single-writer and boot fences, correct application-host listener addresses and a demonstrated
 complete paired restore/rollback with pending work. Read-only NFSv3 access probes
 from the migration assessment do not qualify the required NFSv4.1/4.2 contract.

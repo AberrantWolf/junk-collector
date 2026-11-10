@@ -1,5 +1,9 @@
 # Bounded retention audit — 2026-10-17
 
+Architectural rules: [ADR 0008](decisions/0008-meaningful-provenance-and-bounded-lookup-history.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 HL-01 delivery: audit the current consumers, retire blanket permanent lookup-history
 requirements and extend the existing response policy to Cover Art Archive (CAA).
 This is an owned provider policy, not a generic garbage collector. No live archive

@@ -1,7 +1,9 @@
-# Beta.16 publication and Fi update — 2026-11-01 JST
+# Beta.16 publication and application-host update — 2026-11-01 JST
+
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
 
 [Beta.16](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.16)
-is published on `preview` and installed on Fi. It delivers parent album naming and
+is published on `preview` and installed on application-host. It delivers parent album naming and
 companion retention for exact case-insensitive FLAC/MP3/WAV format folders, both
 disc/wrapper orders and disjoint albums/sections/alternate encodings. Shared parent
 companions have one deterministic owner. Existing archived imports are unchanged.
@@ -52,7 +54,7 @@ linux/amd64: sha256:5b10648cab9c255ee8efeae2efed3f51775caedc227c77926a00db91734d
 linux/arm64: sha256:3d86bf6653dbd3c4f0ba687460a7607822a1f3f7c9c73961b1894613c8914fe0
 ```
 
-Fi pulled anonymously by immutable index before downtime. Docker's image ID on
+application-host pulled anonymously by immutable index before downtime. Docker's image ID on
 this containerd-backed host is that index digest. Architecture/version/source
 labels and RepoDigest match the release record. Existing core/media environment
 references now pin that immutable image. No local deployment build occurred.
@@ -63,11 +65,11 @@ No Collector Jobs were unfinished. The guarded service stopped all five stack
 services; actual PIDs reached zero and clean exit policy passed. After writeback
 completed, both read-only snapshots succeeded with no excluded nested subvolumes:
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta16-20261101-a6bc202/fi-data`.
+- application-host: `/var/backups/collector-recovery-pairs/before-beta16-20261101-a6bc202/application-data`.
 - NAS: `/volume1/collector-recovery/before-beta16-20261101-a6bc202`.
 - NAS snapshot UUID: `297873f8-6180-e34c-9793-d42d0e24c2d5`.
 
-The pair was sealed before activation. Fi covers all local state/WAL, imports,
+The pair was sealed before activation. application-host covers all local state/WAL, imports,
 uploads/scratch, configuration/TLS, Bridge home/cache and profiles. The NAS point
 covers the full archive parent subvolume. Snapshot database quick checks pass.
 The private pair directory also retains Compose/environment/systemd/fstab/helper
@@ -102,4 +104,4 @@ The existing exposure/media-access policy remains unchanged. Production acceptan
 used read-only runtime/state/asset checks; no synthetic production Items/accounts
 or mail were created. Functional authenticated browser/audio and upgrade/recovery
 acceptance ran against disposable fixtures. Private operation evidence remains in
-`/home/link/collector-beta16-a6bc202` on Fi and `/tmp/collector-beta16` locally.
+`/home/operator/collector-beta16-a6bc202` on application-host and `/tmp/collector-beta16` locally.

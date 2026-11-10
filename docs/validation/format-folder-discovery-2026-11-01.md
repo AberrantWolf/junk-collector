@@ -1,5 +1,7 @@
 # Digital format-folder discovery — 2026-11-01
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 User-requested source delivery for Steam soundtrack layouts. Music owns path-only
 intake policy; the existing browser/guided/bulk plans, review, source visibility,
 exact-original publication and enrichment remain the consumers. There are no new
@@ -54,5 +56,5 @@ browser fixtures as infrastructure. Manual selection uses the full Rust workspac
 and affected purchase/intake browser journeys above. Unrelated broad browser
 journeys, container/tooling qualification and native sibling tests are omitted:
 there are no packaging, toolchain, shared wire-contract or native client changes.
-Subsequent publication and Fi deployment were explicitly authorized and completed
+Subsequent publication and application-host deployment were explicitly authorized and completed
 as beta.16; see [release/deployment evidence](container-beta16-publication-2026-11-01.md).

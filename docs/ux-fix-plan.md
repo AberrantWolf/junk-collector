@@ -1,12 +1,8 @@
 # Usability and lifecycle fixes
 
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
+> Delivery/reference record. Contract and acceptance details remain useful; checkpoint
+> ordering and old gap statements are historical. Use [current status](implementation-status.md)
+> and the sole [open-work queue](remaining-work.md).
 
 Prepared 2026-09-21 at the user's request, combining the [18 UX findings](reviews/ux-2026-09-20/review.md) with related unfinished milestone work. **FX-01–FX-03 are implemented and locally accepted (2026-09-21). FX-04 local acceptance passed 2026-09-25. FX-05 Remove/Restore and clean reimport are implemented and locally accepted (2026-09-26). FX-06 is locally accepted (2026-09-26), and FX-07 local acceptance passed 2026-09-27.** This document defines a coherent fix set; it does not declare LA3 accepted or silently replace its outstanding second-device qualification.
 

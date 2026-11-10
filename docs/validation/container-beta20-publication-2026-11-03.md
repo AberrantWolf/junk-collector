@@ -1,8 +1,11 @@
-# Beta.20 release and Fi update — 2026-11-03 JST
+# Beta.20 release and application-host update — 2026-11-03 JST
 
-Beta.20 is published and installed on Fi. The user authorized qualification failure
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+
+Beta.20 is published and installed on application-host. The user authorized qualification failure
 repair, publication and installation after the required gates passed. This record
-retains the unsuccessful attempts and the pre-existing Fi recovery incident; final
+retains the unsuccessful attempts and the pre-existing application-host recovery incident; final
 qualification, publication and live acceptance are recorded below.
 
 ## Candidate scope
@@ -21,8 +24,8 @@ anonymous pull checks and preview promotion. Publication must reuse those exact
 validated bytes. Stable `latest` must remain unchanged. No extra standalone release
 build is required for this container-only delivery.
 
-Fi installation will first inspect the live installation and pending work, then
-retain a matched stopped-writer Fi/private-state and NAS/archive recovery pair.
+application-host installation will first inspect the live installation and pending work, then
+retain a matched stopped-writer application-host/private-state and NAS/archive recovery pair.
 Only the qualified core/media image may be updated. Existing identity, configuration,
 credentials, Bridge/Caddy/tunnel topology, unrelated services and meaningful history
 remain protected. Actual-host acceptance and recovery paths will be recorded after
@@ -105,15 +108,15 @@ linux/amd64: sha256:5edec03ab193d7d3fe8873f88e9418b659ae9f5c8433a81fe9ab4f4e5b14
 linux/arm64: sha256:5bbf513cdcc1016e29262fcff67102b519ea754cd04d796db3e834c56a63a928
 ```
 
-Fi anonymously pulled the immutable index and verified AMD64/source/version before
-downtime. Frozen source archive SHA-256 matched on Mac and Fi:
+application-host anonymously pulled the immutable index and verified AMD64/source/version before
+downtime. Frozen source archive SHA-256 matched on Mac and application-host:
 `59a7787376782ac9cd6e7b268407054b0cbfd486d005f41edfa59f3203dda54c`.
 No local release executable or deployment image was rebuilt.
 
-## Fi startup incident and lossless recovery
+## application-host startup incident and lossless recovery
 
 With zero unfinished Jobs, all five stack services stopped and actual PIDs reached
-zero. Fi/private-state and whole NAS-parent read-only snapshots were sealed before
+zero. application-host/private-state and whole NAS-parent read-only snapshots were sealed before
 activation. The first beta.20 start refused a publication-artifact digest mismatch.
 It correctly failed closed, before opening the catalog/private databases.
 
@@ -143,7 +146,7 @@ claimed. The integrity guard remains intact.
 
 A fresh stopped-writer pair was sealed **after** the repair and before restart:
 
-- Fi: `/var/backups/collector-fi-pairs/repaired-beta20-20261103-253e37e/fi-data`.
+- application-host: `/var/backups/collector-recovery-pairs/repaired-beta20-20261103-253e37e/application-data`.
 - NAS: `/volume1/collector-recovery/repaired-beta20-20261103-253e37e`.
 - NAS snapshot UUID: `681a8840-5b3a-674f-aecc-8a269965e8de`.
 
@@ -176,5 +179,5 @@ container identities and all seven unrelated services are retained.
 No production matching retry, mailbox login, credential replacement or mutation
 acceptance fixture was issued. Functional playback/import acceptance used isolated
 fixtures. Installed Trash Amp remains unchanged. Hardware/phone/cellular acceptance
-is outside this release's claims. Private operation evidence is retained on Fi in
-`/home/link/collector-beta20-253e37e` and locally in `/tmp/collector-beta20`.
+is outside this release's claims. Private operation evidence is retained on application-host in
+`/home/operator/collector-beta20-253e37e` and locally in `/tmp/collector-beta20`.

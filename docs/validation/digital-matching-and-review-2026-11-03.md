@@ -1,5 +1,7 @@
 # Incremental digital matching and independent review choices — 2026-11-03
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Metadata review supports a manual storefront/distribution source for digital-only
 file albums, such as Steam, Bandcamp or GOG. This is a collection fact independent
 of a MusicBrainz disambiguation note: it neither selects nor fabricates an edition.
@@ -123,7 +125,7 @@ IDs, one-to-one complete layouts and known equal durations. Median of five runs:
 | 32 | 95.94 ms | 24,672 |
 
 These are in-memory algorithm measurements, excluding storage guards, fingerprints,
-providers and network latency; they are not Fi or deployment timings. The previous
+providers and network latency; they are not application-host or deployment timings. The previous
 application callback performed full album/source validation at each checkpoint.
 The new callback uses bounded cancellation polling and retains full boundary
 validation. The real-audio provider request-count fixtures are two-track albums;

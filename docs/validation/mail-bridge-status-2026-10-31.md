@@ -1,8 +1,10 @@
 # Bridge status and web setup — 2026-10-31 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Requested delivery: a status query that does not interrupt Bridge, visible sync
 progress in Junk Collector, and a connection flow before a mail profile exists.
-This extends the [Fi installation](fi-email-deployment-2026-10-31.md); it does not
+This extends the [application-host installation](email-deployment-2026-10-31.md); it does not
 change Bridge's account-wide cache or automatically enable receipt scanning.
 
 ## Implemented boundaries
@@ -21,12 +23,12 @@ change Bridge's account-wide cache or automatically enable receipt scanning.
   operator profiles remain supported; successful web creation loads immediately.
   Receipt scanning still needs a separate explicit authorized collection action.
 - `collector-mail status` reads the sanitized snapshot without stopping Bridge.
-  The [Fi helper source](../../deploy/proton-bridge/fi-mail.py) is retained in the
+  The [application-host helper source](../../deploy/proton-bridge/) is retained in the
   repository; Proton login/2FA remains a private terminal operation.
 
 See [architecture](../architecture.md#bridge-setup-and-sync-status--2026-10-31),
 [behavior/API](../email-purchases.md#bridge-status-and-web-connection) and
-[operator setup](../../deploy/proton-bridge/README.md#current-fi-installation--2026-10-31).
+[operator setup](../../deploy/proton-bridge/README.md#authenticate-locally-once).
 
 ## Review passes
 
@@ -91,12 +93,12 @@ network disabled. Review fixes require final committed-source image builds and
 artifact acceptance before live deployment; earlier candidate digests are not
 the final deployment identity.
 
-## Publication and Fi installation
+## Publication and application-host installation
 
 Signed commit `18ae94b0f64c2bb0df30f2a43002d2d4dc455bd7` was pushed to main.
 Its git archive SHA-256 is
 `1760967505f710ba5e627a7be07fe273b894d28b1714d2e3fa763016619330fd`.
-Fi built each final deployment target once from that archive, with the source
+application-host built each final deployment target once from that archive, with the source
 revision label; those exact tested bytes are installed:
 
 - Collector/core and media: `sha256:6647dc5edae589b72180091fa09cc5978c5e21cee4be19d0af4fd0e0304a4c29`.
@@ -118,10 +120,10 @@ left running; the new supervisor's zero-exit stop was separately qualified.
 Complete read-only recovery points retain local databases/WAL, Bridge vault/cache,
 configuration and the matching archive:
 
-- Fi: `/var/backups/collector-fi-pairs/before-mail-status-20261031/fi-data`.
-- FatChocobo: `/volume1/collector-recovery/before-mail-status-20261031`.
+- application-host: `/var/backups/collector-recovery-pairs/before-mail-status-20261031/application-data`.
+- archive-host: `/volume1/collector-recovery/before-mail-status-20261031`.
 
-Snapshot database quick checks pass. The private Fi recovery directory additionally
+Snapshot database quick checks pass. The private application-host recovery directory additionally
 retains paired-point metadata, old deployment/environment/unit, authority key,
 image references, cutoff/after facts and final build/qualification logs.
 
@@ -130,9 +132,9 @@ configuration/TLS files, 79 catalog items, user/grant counts, existing mount sou
 container isolation and all seven unrelated container start times are retained.
 The existing proxy and tunnel container identities remain unchanged. Public HTTPS
 health and served application asset equality pass; IMAP/SMTP remain refused over
-Fi's LAN address. The fresh reporter certificate matches the original Bridge
+application-host's LAN address. The fresh reporter certificate matches the original Bridge
 certificate without a mailbox LOGIN. Bridge resumed its existing account sync and
-reported **27.9%** at acceptance. `ssh fi-home /home/link/bin/collector-mail status`
+reported **27.9%** at acceptance. `ssh application-host.example.com /home/operator/bin/collector-mail status`
 works noninteractively and does not stop Bridge.
 
 The operator can now enter local IMAP credentials in Purchase inbox and explicitly

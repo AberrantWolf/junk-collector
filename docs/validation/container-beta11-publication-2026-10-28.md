@@ -1,8 +1,10 @@
 # Beta.11 publication and NAS update — 2026-10-28 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user authorized releasing all current changes, updating the NAS and checking
 unfinished AccurateRip jobs and Library loading. [Beta.11](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.11)
-is published on `preview` and installed on `fatchocobo`. It includes the shared
+is published on `preview` and installed on `archive-host`. It includes the shared
 one-second processing cancellation poll, manual metadata cover uploads and focused
 AccurateRip batch results. See [release notes](../releases/v0.1.0-beta.11.md).
 Durable job recovery and authenticated production Library loading are verified.

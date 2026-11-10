@@ -1,4 +1,15 @@
-# Fi local state with a remote FatChocobo archive
+# Local private state with a remote NFS archive
+
+Architectural rules: [ADR 0003](../../docs/decisions/0003-portable-and-private-authority.md), [ADR 0004](../../docs/decisions/0004-single-writer-publication-and-recovery.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
+Use this layout for a Linux application host with local private state and a separate
+NFS archive host. Substitute the paths, mount sources and listener addresses for
+the intended installation. Existing-installation enrollment and matched recovery
+are required; examples do not authorize a migration.
+
+The dated 2026-10-30 assessment below explains the original safety requirements.
 
 The [routine Fi beta update procedure](fi-beta-update.md) applies to the
 installed split stack. The migration assessment below was prepared 2026-10-30.
@@ -17,24 +28,23 @@ for this split.
 | `COLLECTOR_INBOX` | `/srv/junk-collector/inbox` | `/inbox` | Separate NFS mount; read-only by default |
 | `COLLECTOR_BACKUPS` | `/var/lib/junk-collector/backups` | CLI `/data/backups` | Local recovery records/explicit backups; not automatic full media copies |
 
-Caddy runs on Fi. Its certificate/config directories remain under local
+In this example, the HTTPS frontend runs on the application host. Its certificate/config directories remain under local
 `COLLECTOR_DATA`; named authority/HTTP socket volumes remain private to core/media.
 Media receives no SQLite, account state, configuration directory or inbox. Keep
 its network namespace, authority socket, read-only archive and existing read-only
 mount enforcement. A directory capability anchors media reads. The remote profile
 also requires its expected archive UUID before cached file admission.
 
-The assessment reports pinned beta.13 core/media, about 105 GB of archive and 76 GB
-of private state (mostly `state/imports`). **Copy all private state.** Imports retain
+**Copy all private state.** Imports retain
 accepted inventories, frozen requests, source/staging bytes and recovery bookkeeping;
-this delivery establishes no deletion/exclusion policy for those 76 GB. Reserve
+this delivery establishes no deletion/exclusion policy for retained imports. Reserve
 local capacity for them, databases, active uploads, simultaneous encoder scratch,
 publication copies, recovery points and normal SSD free space. Size this from the
 actual pending workload before approving migration.
 
 Keep existing public control/media hostnames, authentication origin, keys and
-endpoint identity. Review the old `192.168.1.106:9845` local playback bind and other
-NAS listener addresses for Fi during the later migration. This preparation does
+endpoint identity. Review the old `192.168.1.20:9845` local playback bind and other
+NAS listener addresses for the application host during the later migration. This preparation does
 not change DNS, ingress, router, tunnels, export configuration or permissions.
 
 ## Existing mechanisms and new admission rules
@@ -86,7 +96,7 @@ mount, mismatched binding or incomplete restore is a refusal. Never remove the
 binding to bypass a refusal. The initial preparation ran no production enrollment.
 The later [beta.14 update](../../docs/validation/container-beta14-publication-2026-10-30.md)
 enrolled the retained local NAS installation after a complete stopped-server snapshot;
-that is separate from Fi/NFS qualification and migration approval.
+that is separate from application-host/NFS qualification and migration approval.
 
 ## Filesystem contract and interruption behavior
 
@@ -121,7 +131,7 @@ commits even if the client lost their acknowledgement.
 | Explicit inbox cleanup | Archive validation and claim/permission checkpoints still apply; remaining sources are retained on errors. Keep cleanup disabled/read-only during migration acceptance |
 
 One writer is an **operations fence**: stop/disable the old NAS core, scheduled
-CLI jobs and any other writer before Fi is admitted. Do not run both hosts on the
+CLI jobs and any other writer before application-host is admitted. Do not run both hosts on the
 same export even with separate local state. Private/archive filesystem locks
 remain useful same-host checks. Neither an NFS lock nor a matching UUID is tested
 or accepted as cross-host leader election. NFS client identity must remain unique
@@ -153,10 +163,10 @@ archive = "/data/archive"
 state = "/data/state"
 
 [archive_mount]
-nfs_source = "FatChocobo:/REPLACE/archive-export"
+nfs_source = "archive-host:/REPLACE/archive-export"
 ```
 
-Use the exact source spelling observed in Fi's mount table (a hostname may be
+Use the exact source spelling observed in application-host's mount table (a hostname may be
 resolved/normalized). The host preflight compares both NFS source/target pairs,
 UUID/binding, non-overlapping roots, local ext4/Btrfs/XFS state/config/backups,
 Caddy certificate/proxy-config directories and
@@ -164,7 +174,7 @@ the container path/mount policy. It is read-only and never mounts or repairs.
 The [systemd unit template](junk-collector-remote.service) requires the two mount
 units, binds service lifetime to them and runs that preflight before Compose.
 Review path-derived unit names using `systemd-escape --path --suffix=mount PATH`.
-Review with `systemd-analyze verify` on Fi. Mount configuration must wait for the
+Review with `systemd-analyze verify` on application-host. Mount configuration must wait for the
 network and use the intended source; this repository does not install fstab or
 change exports. See [systemd mount dependencies](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html).
 
@@ -173,7 +183,7 @@ systemd service that bypasses this owner. During later adoption, inspect the
 **effective** Compose model and existing containers' restart policies, then
 recreate them under this unit; editing YAML does not alter existing containers.
 Before acceptance, confirm Docker's actual data root and named authority/socket
-volumes also reside on Fi's local SSD; the preflight does not query or relocate
+volumes also reside on application-host's local SSD; the preflight does not query or relocate
 Docker's storage driver. A Docker daemon restart must not autonomously start these containers. A host reboot
 must either mount both intended sources and pass preflight or leave services down.
 If the host loses a mount unit, systemd stops the stack; a mere network stall does
@@ -223,7 +233,7 @@ media copy/hash is required for a routine point:
    the archive mount and local state/config filesystems on the fixture/approved
    deployment host; abort the checkpoint on any error or blocked call. This reads
    no media for hashing. While all writers stay stopped, take a read-only NAS snapshot covering the
-   **entire archive** and a read-only Fi snapshot covering **all** local state/config.
+   **entire archive** and a read-only application-host snapshot covering **all** local state/config.
    They need not be simultaneous when the writer remains stopped between them.
    Include `state/imports`, uploads, scratch, WAL/database files as one stopped
    tree, TLS keys, Caddy data/config, Compose/env and host lifecycle/mount settings.
@@ -233,7 +243,7 @@ media copy/hash is required for a routine point:
    numeric ownership and mode, and sync that copy before sealing the pair. Keep these
    private. An inbox is separate; retain unfinished source packages under its own
    snapshot/retention policy.
-3. On Fi Btrfs, verify the actual local data subvolume and absence of excluded
+3. On application-host Btrfs, verify the actual local data subvolume and absence of excluded
    nested subvolumes/mounts, then use a read-only snapshot outside it. Enumerate
    every resolved host bind: overriding `COLLECTOR_STATE`, `COLLECTOR_CONFIG` or
    Caddy paths can place private data outside `COLLECTOR_DATA`. Capture each such
@@ -262,7 +272,7 @@ UUID identifies an archive lineage; it does not prove matching checkpoint times.
 Check the pair record, not just the UUID. Only one writable copy of a ServerId may
 serve. Use the point's image and never restore only SQLite beside a later archive.
 
-**After new Fi writes**, restarting beta.13 on the old NAS private state against
+**After new application-host writes**, restarting beta.13 on the old NAS private state against
 the now-newer shared archive is unsafe: Jobs, grants, uploads and command outcomes
 may disagree. Either roll forward with the new complete state, or stop all writers,
 retain a new current pair and restore **both** old members plus old config/images.
@@ -285,12 +295,12 @@ alone is not a restoration drill.
 
 ## Isolated qualification and approval gate
 
-Use two disposable Linux VMs (one NFS server, one Fi-like client), a dedicated
+Use two disposable Linux VMs (one NFS server, one application-host-like client), a dedicated
 throwaway export and a new local SSD fixture tree. Never use production archive or
 inbox paths, production exports, credentials or routes for interruption tests.
 The fixture export must offer the same supported NFS version, numeric UID/GID and
 stable-write behavior intended for deployment. Repeat acceptance on the actual
-Fi/NAS stack only in a separately approved disposable test area.
+application-host/NAS stack only in a separately approved disposable test area.
 
 1. Run `cargo test --workspace --locked` on Linux, including `storage_guard`'s
    anchored-root and mount-table tests. Run the isolated filesystem probe below
@@ -326,7 +336,7 @@ Fi/NAS stack only in a separately approved disposable test area.
 For a repeatable fixture filesystem setup, first install the distribution's NFS
 server/client tools in two **disposable Linux VMs**. The following example uses
 server `192.0.2.11` and client `192.0.2.12` on an isolated test network; replace both
-with the fixture addresses. These commands are **never for FatChocobo or any
+with the fixture addresses. These commands are **never for archive-host or any
 production host**. On the fixture server only:
 
 ```sh
@@ -377,10 +387,10 @@ not qualify server power-loss durability, outages or application recovery by its
 
 **Approve a later migration only when:** exact-source checks pass; Linux/container
 and actual-stack isolated NFS restart/atomicity/durability tests have recorded
-results; Fi has measured SSD headroom and numeric access (including local Docker volume storage);
+results; application-host has measured SSD headroom and numeric access (including local Docker volume storage);
 effective boot/restart
 fences pass absent/wrong-mount tests; old-host writer/CLI owners are fenced; a complete
 paired recovery point and demonstrated restore/rollback exist; and the reviewed
-Fi listener addresses, retained hostnames/identity and real login/import/playback
-acceptance plan are ready. Docker/NFS/Fi execution unqualified in the current session
+application-host listener addresses, retained hostnames/identity and real login/import/playback
+acceptance plan are ready. Docker/NFS/application-host execution unqualified in the current session
 is an open gate, not permission to migrate.

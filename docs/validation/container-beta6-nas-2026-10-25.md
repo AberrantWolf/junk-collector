@@ -1,6 +1,8 @@
 # Beta.6 NAS update — 2026-10-25 JST
 
-The user explicitly requested updating Junk Collector on `fatchocobo`. Core and
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+The user explicitly requested updating Junk Collector on `archive-host`. Core and
 the separate media service now run the published beta.6 image. This is a retained
 installation update, separate from the [publication acceptance](container-beta6-publication-2026-10-24.md).
 

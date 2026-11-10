@@ -36,10 +36,10 @@ not; a playing label alone is not proof of advancing or audible playback.
 
 ## Boundaries
 
-- HTTPS page/control: `192.168.1.106:19978`, using the existing certificate for
-  `collector-lan.awkwardexplorer.com`. Its private key is mounted read-only from
+- HTTPS page/control: `192.168.1.20:19978`, using the existing certificate for
+  `lan.collector.example.com`. Its private key is mounted read-only from
   the existing NAS certificate directory, never copied into the image/repository.
-- WebTransport media: UDP `192.168.1.106:19979`, generated seven-day P-256 identity.
+- WebTransport media: UDP `192.168.1.20:19979`, generated seven-day P-256 identity.
   The browser obtains its hash over trusted test HTTPS; incorrect hashes fail.
 - Separate Collector: public `127.0.0.1:19981`, private `127.0.0.1:19982`, native
   TLS `127.0.0.1:19983`, separate archive/state/config and synthetic audio.
@@ -85,10 +85,10 @@ state = "/fixture/state"
 public_bind = "127.0.0.1:19981"
 private_bind = "127.0.0.1:19982"
 lan_bind = "127.0.0.1:19983"
-authentication_origin = "https://collector-lan.awkwardexplorer.com:19978"
-allowed_origins = ["https://collector-lan.awkwardexplorer.com:19978", "http://localhost:19982"]
+authentication_origin = "https://lan.collector.example.com:19978"
+allowed_origins = ["https://lan.collector.example.com:19978", "http://localhost:19982"]
 tls_names = ["localhost", "127.0.0.1"]
-endpoints = ["https://collector-lan.awkwardexplorer.com:19978"]
+endpoints = ["https://lan.collector.example.com:19978"]
 [exposure]
 public_curation = false
 public_administration = false

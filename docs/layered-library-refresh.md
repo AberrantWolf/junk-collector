@@ -1,5 +1,9 @@
 # Layered library refresh and demand-driven playback
 
+Architectural rules: [ADR 0013](decisions/0013-bounded-projections-and-client-refresh-state.md), [ADR 0014](decisions/0014-playback-delivery-separate-from-integrity.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Contract and source implementation, 2026-11-02, for the Collector web interface
 and remote players such as Trash Amp. [Delivery evidence](validation/layered-library-refresh-2026-11-02.md)
 records validation and limits. Merge/deployment follow the single assignment in
@@ -95,8 +99,9 @@ Relevant owners: `collector-app/src/library.rs`, `disc_audio.rs`, `music_search.
 `collector-client/src/library.rs`, `media.rs`; `web/src/app.tsx`.
 Sibling changes belong in Trash Amp's `amp-collector` adapter, `amp-app` catalog
 model/source notifications and `amp-ui` album/track loading and playback handling.
-The native implementation is isolated in `/private/tmp/trash-amp-layered-refresh`;
-its source and local dependency override are recorded in the delivery evidence.
+Native source and dependency qualification are recorded in the linked delivery
+evidence; use the client repository's current dependency pin rather than a temporary
+implementation checkout.
 
 ## Boundaries and projections
 

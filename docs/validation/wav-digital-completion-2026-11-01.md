@@ -1,6 +1,8 @@
 # WAV digital-release completion — 2026-11-01
 
-The four support-review remedies are now published in beta.15 and installed on Fi;
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
+The four support-review remedies are now published in beta.15 and installed on application-host;
 see [release/deployment evidence](container-beta15-publication-2026-11-01.md).
 The implementation validation below records its initial source-only scope.
 The [initial delivery](wav-digital-originals-2026-10-31.md)

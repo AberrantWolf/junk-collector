@@ -2679,6 +2679,14 @@ wait
         .await
         .unwrap();
     assert_eq!(passthrough.status(), StatusCode::PARTIAL_CONTENT);
+    let selected_representation = available[0]["state"]["representation_id"].as_str().unwrap();
+    assert_eq!(
+        passthrough.headers()["x-collector-playback-check"],
+        format!(
+            "/api/v1/items/{}/representations/{selected_representation}/0",
+            item.id
+        )
+    );
     assert_eq!(
         axum::body::to_bytes(passthrough.into_body(), 16)
             .await

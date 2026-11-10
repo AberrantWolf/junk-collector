@@ -56,7 +56,7 @@ socket creation. The four focused repair tests passed both in that run and again
 after adding explicit archive-reindex assertions.
 Actual NAS update, the failed Octopath import's retry, final grouping, metadata,
 playback and new-installation backup/restore acceptance remain pending under
-[HL-05](../remaining-work.md#hl-05--linux-nas-and-optional-public-internet-deployment).
+[HL-05](../remaining-work.md).
 
 ## Operator build continuation — 23:02–23:06 JST
 

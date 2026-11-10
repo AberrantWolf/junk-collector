@@ -1,12 +1,8 @@
 # Account, recovery and server connection usability review
 
-**Current direction (2026-10-09):** [remaining work](remaining-work.md)
-is the only remaining-work queue. Older assignment/order and gap statements below
-are historical. Proposed contracts require reassessment under
-[the home-lab scope/retention policy](decisions/home-lab-scope.md); their presence
-does not require implementing speculative machinery or permanent lookup history.
-Phono Junk is no longer a target. Implemented contracts describe current behavior,
-not a claim that cleanup or redesign has already happened.
+> Delivery/reference record. Contract and acceptance details remain useful; checkpoint
+> ordering and old gap statements are historical. Use [current status](implementation-status.md)
+> and the sole [open-work queue](remaining-work.md).
 
 2026-10-07. Source review of Collector and sibling Phono; this is not a completed
 native/browser usability qualification. The user requested this reassessment and
@@ -114,7 +110,6 @@ Validation: required Collector gates and full browser smoke passed. Final focuse
 browser approval (including prefill and wrong-code retry), Phono build/check/lint
 and facade regressions passed. Actual native system-root HTTPS and second-Mac
 qualification remain open; see [the dated record](validation/phono-integration.md).
-
 
 ## Implemented complete repair — 2026-10-07
 

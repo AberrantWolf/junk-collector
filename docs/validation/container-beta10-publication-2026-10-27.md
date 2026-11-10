@@ -1,8 +1,10 @@
 # Beta.10 publication and NAS update — 2026-10-27 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user authorized releasing all current changes and deploying them to the NAS.
 [Beta.10](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.10)
-is published on `preview` and installed on `fatchocobo`. It includes one-click and
+is published on `preview` and installed on `archive-host`. It includes one-click and
 automatic-ingest AccurateRip checks, collection CD defaults, live worker settings,
 original provider artwork, Library import progress and the standalone capture/
 naming helper follow-ups. See [release notes](../releases/v0.1.0-beta.10.md).

@@ -1,6 +1,6 @@
 # Container installation and updates
 
-For a local-state/NFS-archive split, use the [Fi remote archive runbook](remote-archive.md).
+For a local-state/NFS-archive split, use the [remote archive runbook](remote-archive.md).
 Its paired recovery point replaces the single-root snapshot assumption.
 
 **For Linux Docker hosts and compatible Synology NAS devices.** Requires Compose v2.
@@ -11,14 +11,13 @@ FLAC and Opus tools are included. The server runs as UID/GID 10001; data stays o
 
 ## 1. Select an image and storage
 
-Use an explicit image version or digest supplied by a release. On Synology DS1522+,
-automatic platform selection uses linux/amd64.
+Use an explicit image version or digest supplied by a release. Docker selects the supported platform for the host automatically.
 
 <!-- release-image:start -->
-- **Image:** `ghcr.io/aberrantwolf/junk-collector:v0.1.0-beta.17` (AMD64 and ARM64).
-- **Download:** [GitHub release](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.17). The installation bundle pins the verified digest.
+- **Image:** select a versioned AMD64/ARM64 image from [published releases](https://github.com/AberrantWolf/junk-collector/releases).
+- **Pinned install:** use that release's installation bundle and image digest.
 - **Channels:** `preview` follows prereleases; `latest` is reserved for stable releases.
-- **Before updating:** read the [beta notes](../../docs/releases/v0.1.0-beta.17.md).
+- **Before updating:** read the selected release's upgrade and recovery notes.
 
 <!-- release-image:end -->
 
@@ -374,6 +373,5 @@ only the optional Bridge image needs a local build. Bridge packaging currently
 supports Linux AMD64. Follow the [Bridge setup and privacy instructions](../proton-bridge/README.md)
 for local login, persistent private storage, certificate pinning and read-only
 receipt scanning. In a source checkout the same build context is under
-`deploy/proton-bridge`; in the extracted bundle it is `proton-bridge`. The setup
-record also describes Fi's existing installation; do not replace its retained
-configuration or credentials with the fresh-install examples.
+`deploy/proton-bridge`; in the extracted bundle it is `proton-bridge`. Retain existing configuration and credentials during updates; fresh-install
+examples do not describe an upgrade.

@@ -1,5 +1,9 @@
 # First-release requirements
 
+Architectural rules: [ADR 0003](decisions/0003-portable-and-private-authority.md), [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md), [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0016](decisions/0016-coordinated-pre-release-evolution.md), [ADR 0017](decisions/0017-publish-qualified-artifact-bytes.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
 
 Beta.22 is the oldest supported direct upgrade source. Qualify durable changes
@@ -74,7 +78,7 @@ legacy adoption remain conditional; full operational backup/restore is separate.
 
 ## Digital purchases — requested 2026-10-19
 
-[HL-02](remaining-work.md#hl-02--complete-flac-and-mp3-digital-purchase-support)
+[HL-02](remaining-work.md)
 owns complete DRM-free FLAC/MP3 purchase support: preserve exact originals,
 record digital acquisition without a physical copy, review tags/artwork and use
 normal library/search, playback, playlists and Trash Amp online/offline listening.

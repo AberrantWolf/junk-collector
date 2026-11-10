@@ -1,5 +1,7 @@
 # Direct HTTPS media NAS deployment — 2026-10-23
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user authorized deployment after the [source acceptance](direct-https-media-2026-10-23.md).
 The permanent Synology installation now runs the separate media service and a
 dedicated DNS-only HTTPS frontend. **Basic iPhone Safari cellular playback is

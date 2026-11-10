@@ -1,7 +1,9 @@
 # Responsive Metadata and digital matching — 2026-11-02 JST
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 The user requested a separate worktree implementation, repeated self-review and
-repairs, then combined-main publication, a new beta and Fi installation. The
+repairs, then combined-main publication, a new beta and application-host installation. The
 candidate includes the separate declared-WAV/trailing-original delivery from main.
 
 ## Ownership and behavior
@@ -57,9 +59,8 @@ The implementation uses shared-library revision
 prefix/complete-decode fingerprint equality and actual 120-second coverage;
 existing independent native Chromaprint vectors remain passing. `fpcalc` is not
 installed locally, so no same-machine Picard/fpcalc timing equivalence is claimed.
-Actual Fi album recognition/provider latency and phone/hardware acceptance are
+Actual application-host album recognition/provider latency and phone/hardware acceptance are
 separate from offline fixture recognition and source qualification.
-
 
 ## Final review and combined local qualification — 2026-11-03 JST
 
@@ -78,7 +79,7 @@ remainder. The focused
 actual Chrome digital-matching journey passes, including partial/manual mapping,
 artwork, stale-source protection and three queued albums after leaving the first
 panel before its POST acknowledgement. Its compact Metadata requests measured
-**15 ms and 2 ms locally**; these fixture timings are not a Fi album benchmark.
+**15 ms and 2 ms locally**; these fixture timings are not a application-host album benchmark.
 Mobile rendering was inspected for wrapping and overflow.
 
 Shared music tests pass **20 tests**, including the long prefix/full fingerprint
@@ -89,8 +90,7 @@ and pushed to its main; that repository has no GitHub Actions runs configured.
 
 The full local report is `/private/tmp/collector-perf-full-checks.json`; logs and
 release/deployment operation evidence are retained in `/private/tmp/collector-beta19`
-and `/private/tmp/collector-perf-*.log`. Publication and Fi acceptance follow below.
-
+and `/private/tmp/collector-perf-*.log`. Publication and application-host acceptance follow below.
 
 The initial full run stopped in `fx04-review`: its synthetic full-review response
 changed without the corresponding lightweight revision token. The fixture now
@@ -103,10 +103,9 @@ cleanup passed web types/build and the affected browser journeys on rebuilt asse
 No selected local gate remains failed or omitted. Exact committed-source GitHub
 qualification is still required before release.
 
-Fi preflight is healthy on beta.18 with zero unfinished Jobs and saved worker
+application-host preflight is healthy on beta.18 with zero unfinished Jobs and saved worker
 settings of eight processing/two copy workers. The new per-track pipeline uses
 that existing budget; no production setting or Job was changed for benchmarking.
-
 
 ## Exact-source CI repair
 
@@ -135,7 +134,6 @@ strict workspace/all-target Clippy, architecture/format and focused actual Chrom
 compact Metadata page timings are 4 ms and 2 ms locally. Self-review of retry
 bounds, account/cancellation fences and cursor recovery found no further issue.
 
-
 The replacement [Checks run 41475307033](https://github.com/AberrantWolf/junk-collector/actions/runs/41475307033)
 passes the earlier integration failure but reaches a second race while opening
 later albums during the three-album queue test: metadata's before/after read epoch
@@ -155,8 +153,7 @@ changes while opening all later albums recover and all three requests complete.
 Metadata page requests measured 12 ms and 2 ms locally. Self-review confirms only
 read consistency outcomes changed; mutation and stale-scope fences remain intact.
 
-
-## Publication and Fi acceptance — 2026-11-03 JST
+## Publication and application-host acceptance — 2026-11-03 JST
 
 Signed source/tag `ad3ac981f8bfce29a01210748a83d527a4b3febe` is published as
 [beta.19](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.19).
@@ -188,14 +185,14 @@ linux/amd64: sha256:31370286bc79e4a3f91ddafd05e59702a84891ce4d40f9ac602e6e00abea
 linux/arm64: sha256:5e18d00330a6f48d12ae130c5f29f195cfc86c955b5bce5976000eb479156712
 ```
 
-Fi anonymously pulled the immutable index and checked the actual AMD64 source and
+application-host anonymously pulled the immutable index and checked the actual AMD64 source and
 version labels before downtime. Frozen source archive SHA-256 is
 `64464b94d041692fbb1fa7556cc7bd6ba591d65636e36e43f555353391970c9e`, verified on both
-Mac and Fi. With zero unfinished Jobs, all five stack services stopped and their
+Mac and application-host. With zero unfinished Jobs, all five stack services stopped and their
 actual PIDs reached zero. Database quick checks and read-only snapshots passed
 before sealing this matching recovery pair:
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta19-20261103-ad3ac98/fi-data`.
+- application-host: `/var/backups/collector-recovery-pairs/before-beta19-20261103-ad3ac98/application-data`.
 - NAS: `/volume1/collector-recovery/before-beta19-20261103-ad3ac98`.
 - NAS snapshot UUID: `755d3d96-27a9-ff4c-9483-965af63b0ea7`.
 
@@ -205,7 +202,7 @@ source has excluded nested subvolumes. Private recovery metadata retains the
 previous env/compose/systemd/fstab, image identities and media authority key.
 Rollback requires the matching pair with all writers stopped.
 
-Acceptance completed at **2026-11-03 01:42:19 JST**. Fi reports
+Acceptance completed at **2026-11-03 01:42:19 JST**. application-host reports
 `junk-collector 0.1.0-beta.19`; core/media use the qualified image. All five stack
 containers have zero restarts, and core is healthy. Public and LAN trusted HTTPS
 return 200 with unchanged ServerId `01a15429-856a-7763-b558-3c158b1604a0`; seven
@@ -220,11 +217,11 @@ matching retry, credential replacement or production mutation test was issued.
 
 Temporary implementation/repair/shared-library/consumer worktrees and merged
 branches are removed, as is the integration stash. The pre-existing unrelated
-worktree is retained. Verified superseded Fi source staging and the one-use NAS
+worktree is retained. Verified superseded application-host source staging and the one-use NAS
 snapshot helper were removed; the accepted deployment, logs and all recovery
 points remain. No general image/volume prune or collection-history deletion ran.
 
-Actual authenticated Metadata/whole-album timing on Fi was not benchmarked. Local
+Actual authenticated Metadata/whole-album timing on application-host was not benchmarked. Local
 fixture reads, real-browser concurrency and bounded shared-audio vectors establish
 the delivered mechanics; external provider and actual album latency remain
 workload dependent. Hardware/phone/cellular qualification is unchanged. Refresh

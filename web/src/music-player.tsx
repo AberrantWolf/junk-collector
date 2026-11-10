@@ -15,7 +15,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  const [expanded,setExpanded]=useState(false);const [error,setError]=useState('');const [state,setState]=useState('Ready');const [position,setPosition]=useState(0);const [duration,setDuration]=useState(0);
  const audio=useRef<HTMLAudioElement|null>(null);const dock=useRef<HTMLElement>(null);const queueButton=useRef<HTMLButtonElement>(null);const generation=useRef(0);const active=useRef<string|null>(null);const loaded=useRef('');const request=useRef<AbortController|undefined>(undefined);const diagnosis=useRef<AbortController|undefined>(undefined);
  const recoveredGrant=useRef(false);
- const streamCheck=useRef<{track:string;path:string}|undefined>(undefined);
+ const streamCheck=useRef<{track:string;path?:string}|undefined>(undefined);
  const pendingSeek=useRef<{element:HTMLAudioElement;position:number}|undefined>(undefined);
  const expired=useRef(onSessionExpired);expired.current=onSessionExpired;
  const bindAudio=React.useCallback((element:HTMLAudioElement|null)=>{if(audio.current!==element){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();const previous=audio.current;if(previous){clearMusicMediaSession();previous.pause();previous.removeAttribute('src');previous.load();}audio.current=element;loaded.current='';active.current=null;}},[]);
@@ -75,6 +75,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
    const preferred=requested==='flac'?'audio/flac':'audio/ogg; codecs=opus';
    let url:string, liveOffset:number|undefined, checkPath:string|undefined;
    if(requested!=='saved'&&normalPlaybackAvailable()){
+    streamCheck.current={track:track.id};
     if(!element.canPlayType(preferred))throw new Error('This browser cannot play the selected format. Choose another playback format.');
     url=streamTrackUrl(track,requested,preference.bitrate);
     const head=await fetch(url,{method:'HEAD',credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});

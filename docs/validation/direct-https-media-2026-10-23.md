@@ -1,5 +1,7 @@
 # Direct HTTPS media source acceptance — 2026-10-23
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 Scope: `codex/direct-https-media`, following the user's separate-executable,
 read-only archive and no-lateral-network preference. This record distinguishes
 source acceptance from activation on the home server. The earlier plan checkpoint

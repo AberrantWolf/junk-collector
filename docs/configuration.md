@@ -1,5 +1,9 @@
 # Configuration and access
 
+Architectural rules: [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0010](decisions/0010-trust-before-credentials-and-native-enrollment.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 [← README](../README.md) · [First setup](getting-started.md) · [Operations](server-operations.md)
 
 ## Configuration reference
@@ -156,8 +160,8 @@ copy_workers = 1
 `processing_workers` accepts 1–8 and includes inbox copying, analysis, original
 publication and audio preparation. `copy_workers` independently caps concurrent
 inbox staging (including the older combined inbox import command); it accepts
-1 through `processing_workers` and defaults to one. Provider downloads always have
-one additional, separate slot. Omitting `[jobs]` uses four processing workers and
+1 through `processing_workers` and defaults to one. Provider acquisitions have
+four additional slots overall, with at most one active Job per provider. Omitting `[jobs]` uses four processing workers and
 one copy. These are startup defaults. **Administration → Server settings →
 Background workers** saves an override that survives restart and reindex. Saved
 limits apply to new claims immediately; reducing them lets current jobs finish.

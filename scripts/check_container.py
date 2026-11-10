@@ -341,7 +341,10 @@ def main():
                 saved_config = read_file("/data/config/collector.toml")
                 certificate = hashlib.sha256(read_file("/data/state/tls/cert.pem")).hexdigest()
             run("run", "--rm", "--entrypoint", "/bin/sh", "cli", "-ec",
-                "flac --version && opusenc --version", capture_output=True)
+                "flac --version && opusenc --version && "
+                "ffmpeg -v error -f s16le -ar 44100 -ac 2 -i /dev/zero -t 0.1 -c:a flac -f flac pipe:1 >/dev/null && "
+                "ffmpeg -v error -f s16le -ar 44100 -ac 2 -i /dev/zero -t 0.1 -c:a libopus -f ogg pipe:1 >/dev/null",
+                capture_output=True)
             up()
             ready()
             cookie = login()

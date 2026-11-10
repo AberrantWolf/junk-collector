@@ -2,7 +2,7 @@
 
 **Source update, 2026-10-22:** [automatic private playback](automatic-private-playback.md)
 is now implemented for web and Trash Amp. See [dated acceptance](validation/automatic-private-playback-2026-10-22.md)
-and the [sole queue](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation)
+and the [sole queue](remaining-work.md)
 for deployment/device limits and deferred public relay work. The manual LAN URL
 remains the deployed stopgap. The older planning/feasibility statements below
 are retained as dated history, not current implementation status.
@@ -12,7 +12,7 @@ are retained as dated history, not current implementation status.
 **Accepted stopgap, not the real solution.** The intended outcome remains
 automatic detection of and connection to the trusted local server in **both the
 browser and Trash Amp**, with remote access when LAN is unavailable. It remains
-open under [HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation).
+open under [HL-12](remaining-work.md).
 Manual URL selection and Trash Amp re-enrollment do not satisfy that outcome.
 
 The [expanded route policy and browser plan](https-relay-and-lan-switching.md#route-policy-trust-reachability-and-transfer-cost)
@@ -46,13 +46,13 @@ unimplemented.
 
 After trusted direct NAS HTTPS succeeded on the work Mac with GlobalProtect
 connected, normal hostname resolution still reached Cloudflare. The user chose
-manual home access at **https://collector-lan.awkwardexplorer.com/** for browser
+manual home access at **https://lan.collector.example.com/** for browser
 and Trash Amp, without installing a Mac helper. This is the current temporary
 deployment; automatic home/away selection for both clients remains the real
 solution to implement.
 
 The dedicated name has a DNS-only public A record for the reserved NAS address,
-`192.168.1.106`, so a VPN resolver can look it up without using home DNS. No WAN
+`192.168.1.20`, so a VPN resolver can look it up without using home DNS. No WAN
 forwarding is added; the private address is useful only where the NAS is reachable.
 Home DNS also serves this name explicitly, avoiding upstream private-address
 filtering without disabling rebinding protection. The operator confirmed both
@@ -73,7 +73,7 @@ independent second connection for the same account. Returning to remote access
 requires reconnecting at the remote URL. Existing offline data is keyed to the
 same server/account, not to a second LAN catalog.
 
-Ordinary DNS-based HTTPS now reaches `192.168.1.106` with normal CA/hostname
+Ordinary DNS-based HTTPS now reaches `192.168.1.20` with normal CA/hostname
 validation, the exact issued certificate and expected ServerId. Firefox renders
 the login page with Let's Encrypt trust. The operator confirmed work-Mac browser
 password login, playback and scrubbing, and confirmed the requested Trash Amp
@@ -85,7 +85,7 @@ automatically. See [deployment evidence](validation/lan-https-2026-10-22.md).
 
 ### Use the LAN address
 
-1. On the home LAN, open **https://collector-lan.awkwardexplorer.com/** and sign in
+1. On the home LAN, open **https://lan.collector.example.com/** and sign in
    with the existing Collector password. Do not use the passkey button on this
    alternate origin; passkeys retain the configured original hostname.
 2. In Trash Amp, open **Settings → Servers**, enter that URL, leave the
@@ -102,7 +102,7 @@ automatically. See [deployment evidence](validation/lan-https-2026-10-22.md).
 Planning record, 2026-10-22. **Live setup started; not yet qualified.** The user can configure
 local DNS and wants browser and Trash Amp listening at home while remote transport
 is investigated. This selects an earlier, independently useful delivery within
-[HL-12](remaining-work.md#hl-12--https-relay-lan-switching-and-deferred-certificate-rotation),
+[HL-12](remaining-work.md),
 with installation acceptance under HL-04/05. It is not a second work queue.
 The initial request authorized planning only. Later explicit assignments authorized
 router SSH-key setup, NAS HTTPS and the router reservation/DNS override; see the
@@ -180,15 +180,15 @@ and [GlobalProtect local-network enforcement](https://docs.paloaltonetworks.com/
 Record the GlobalProtect version on each work OS, inspect effective hostname
 resolution with the VPN connected, and test connectivity to the known NAS
 address/HTTPS port separately. On macOS, use the system resolver via
-`dscacheutil -q host -a name collector.awkwardexplorer.com`; on Windows use
-`Resolve-DnsName collector.awkwardexplorer.com`. The home override is now installed:
-clients using it should receive only `192.168.1.106`, with no public AAAA or HTTPS
+`dscacheutil -q host -a name collector.example.com`; on Windows use
+`Resolve-DnsName collector.example.com`. The home override is now installed:
+clients using it should receive only `192.168.1.20`, with no public AAAA or HTTPS
 address hints. Cloudflare answers on a client require checking effective resolver
 selection and caches. The current personal Mac still reaches Cloudflare with
 Tailscale DNS active; this is not evidence about the work machine's GlobalProtect.
 
 For an initial HTTPS data-path check, use `curl -I --connect-timeout 5 --max-time 10
-https://192.168.1.106/` (Windows: `curl.exe`). This unauthenticated check makes no
+https://192.168.1.20/` (Windows: `curl.exe`). This unauthenticated check makes no
 configuration changes. A direct-IP request still does not test Collector's hostname
 certificate. The operator reported a certificate error from this preliminary test
 before Collector HTTPS was installed; it only establishes that a TLS endpoint

@@ -149,6 +149,9 @@ jobs:
           npm --prefix web exec -- playwright install --with-deps "${browsers[@]}"
       - name: Execute selected checks
         if: steps.scope.outputs.reused != 'true'
+        env:
+          COLLECTOR_TEST_FLAC: '1'
+          COLLECTOR_TEST_FFMPEG: '1'
         run: |
           python3 - <<'PYTHON'
           import json, subprocess

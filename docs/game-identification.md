@@ -1,5 +1,9 @@
 # Automatic standard-game identification — 2026-10-10
 
+Architectural rules: [ADR 0005](decisions/0005-lossless-module-data-and-write-eligibility.md), [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Upload standard DAT files or ZIPs in Administration → Game catalogs, review the
 detected documents, import them and activate the saved catalogs. Activation queues
 existing preserved games. New guided imports use the same identification service;
@@ -90,7 +94,7 @@ fixtures, restart/ownership/publication tests and real browser acceptance. New
 normalization/format algorithms, arbitrary systems/conventions, game artwork
 providers and provenance compaction remain outside this delivery.
 
-Collector pins the published `junk-libs` Git revision
-`83177af57ca36a5b284298020fea9d5e8fb0c415`; no local Cargo patches are required.
+The workspace manifest and lockfile record the exact published `junk-libs` revisions;
+no sibling checkout or local Cargo patches are required.
 Retro Junk's affected DAT constructors and facade were updated and checked against
 these shared changes. The shared revision is pushed to the `junk-libs` repository.

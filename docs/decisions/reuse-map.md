@@ -1,5 +1,13 @@
 # Reuse, extraction, and fixture map (D01)
 
+Architectural rules: [ADR 0001](0001-application-policy-and-mechanism-boundaries.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
+> Dated dependency assessment. Inspected revisions, qualification gaps and checkpoint
+> assignments describe their recorded dates. Use current manifests for dependencies,
+> architecture for contracts and remaining work for assignments.
+
 **Scope update (2026-10-09):** use [remaining work](../remaining-work.md)
 and [home-lab policy](home-lab-scope.md). Older future contracts/order and blanket
 history requirements below need reassessment. Preserve actual data/recovery and

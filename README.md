@@ -18,22 +18,20 @@ Each collection contains either games or music.
 | Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
 
-## Beta.23
+## Releases
 
-[`v0.1.0-beta.23`](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.23)
-starts Library audio batches immediately and plans albums in the background.
-Proton Bridge setup and saved receipt connections now offer a mail folder
-picker. Docker images support **linux/amd64** and **linux/arm64**. See the
-[qualification and Fi deployment record](docs/validation/container-beta23-publication-2026-11-07.md).
+Use a versioned image or digest from the [published releases](https://github.com/AberrantWolf/junk-collector/releases).
+The installation bundle pins its validated image. `preview` follows prereleases;
+`latest` is reserved for stable releases. Source candidates are not publication evidence.
+See [current capabilities and release evidence](docs/implementation-status.md).
 
-**Back up before updating.** This beta targets personal home-lab use. Storage and
-interfaces may change. Read the [release notes](docs/releases/v0.1.0-beta.23.md)
-for update requirements.
+Keep a complete consistent recovery point before updating. Prerelease interfaces
+and storage can change; follow the selected release's upgrade and recovery notes.
 
 ## What it supports
 
 - Keep original files alongside metadata, artwork and recorded evidence.
-- Import complete dump packages or supported FLAC/MP3 purchases.
+- Import complete dump packages or supported FLAC/MP3 and integer PCM WAV originals.
 - Prepare supported CD audio for browser playback and Trash Amp.
 - Share collections with Viewer, Curator and Owner roles.
 - Check supported game catalogs and AccurateRip results with explicit coverage.
@@ -44,6 +42,7 @@ Hashing, structural checks and descriptive metadata are separate from catalog ve
 
 ## Development
 
+Use the [documentation index](docs/index.md) to find current guidance and evidence.
 Read the [architecture](docs/architecture.md) before changing a subsystem.
 [AGENTS.md](AGENTS.md) lists required checks.
 
@@ -55,7 +54,7 @@ npm --prefix web run build
 cargo build -p collector-server
 ```
 
-The [browser smoke test](web/tests/smoke.mjs) uses a temporary installation.
+The [short browser smoke test](web/tests/quick-smoke.mjs) uses a temporary installation.
 Set `CHROME_PATH` if Chrome is outside the default macOS location.
 
 ## License

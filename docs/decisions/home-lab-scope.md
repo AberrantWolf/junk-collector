@@ -1,5 +1,9 @@
 # Home-lab scope and meaningful provenance
 
+Architectural rules: [ADR 0008](0008-meaningful-provenance-and-bounded-lookup-history.md), [ADR 0016](0016-coordinated-pre-release-evolution.md).
+This document retains detailed requirements, rationale and evidence; the ADRs do
+not replace its supported-scope and recovery limits.
+
 Accepted user direction, 2026-10-09. This revises scope, prioritization and future
 contract/retention expectations. It does not claim implementation or authorize
 pruning current user data. [The consolidated backlog](../remaining-work.md) is
@@ -112,8 +116,8 @@ inventory/manual metadata/evidence and relevant assets plus complete required pr
 state/config, not just a copy of SQLite files. Do not label a rebuildable index or
 private database alone as a restorable catalog.
 
-A backup-age reminder is a reasonable optional follow-up, not implemented or a
-release gate. Base any future reminder on known successful, validated recovery
-points; an attempted/failed backup must not reset it, and externally managed backups
-must not be presented as observed. This clarification changes operating scope, not
+The optional [backup-age reminder](../local-alpha-installation.md#optional-backup-age-reminder)
+is implemented and is not a release gate. It uses recorded successful completion
+or explicitly labeled external reports; failed attempts do not reset the successful
+date. It does not schedule backups or establish that a recovery point still exists. This clarification changes operating scope, not
 stored data, the accepted full-backup format or dated qualification results.

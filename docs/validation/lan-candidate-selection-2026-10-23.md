@@ -1,5 +1,7 @@
 # LAN candidate selection repair — 2026-10-23
 
+> Deployment identifiers are anonymized; dates, source identities, outcomes and qualification limits are unchanged. Example addresses are not deployment instructions.
+
 State: source repair accepted; new-image publication/live NAS qualification pending.
 Branch: `codex/prioritize-lan-playback-addresses`, based on main after the pipeline
 merge. No new release or NAS deployment is part of this source validation.
@@ -10,7 +12,7 @@ After updating the server, the published Trash Amp beta advanced past its former
 missing-route API error but reported no trusted reachable route. The NAS private
 TCP 9845 listener was reachable from the development machine. Its diagnostic
 certificate contained only `172.17.0.1` through `172.24.0.1`, omitting the NAS LAN
-address `192.168.1.106`. Both public and media listeners reported the same ServerId.
+address `192.168.1.20`. Both public and media listeners reported the same ServerId.
 Only unauthenticated public identity/certificate metadata was read during this
 diagnosis; no credentials were sent to an unverified endpoint or trust installed.
 
@@ -88,5 +90,5 @@ An isolated container network still needs host-reachable addresses/networking.
 New-image publication and the user's eventual removal of the explicit NAS bind
 require separate deployment acceptance. The working NAS, Tailscale and disabled
 public media fallback are left untouched. Keep
-`local_playback_bind = "192.168.1.106:9845"` until an updated image is deployed;
+`local_playback_bind = "192.168.1.20:9845"` until an updated image is deployed;
 then restore the default wildcard bind and verify playback/seeking in both apps.
