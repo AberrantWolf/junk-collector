@@ -1,6 +1,6 @@
 # Routine beta updates on Fi
 
-Use this procedure on the installed Fi/FatChocobo stack when only the Collector
+Use this procedure on a split-host installation when only the Collector
 and media image pins change. The direct upgrade floor is beta.22, catalog v15
 and private schema v23. Use the extended qualification and
 [paired recovery procedure](remote-archive.md#coordinated-recovery-points-and-rollback)

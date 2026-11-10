@@ -43,7 +43,7 @@ publication copies, recovery points and normal SSD free space. Size this from th
 actual pending workload before approving migration.
 
 Keep existing public control/media hostnames, authentication origin, keys and
-endpoint identity. Review the old `192.168.1.20:9845` local playback bind and other
+endpoint identity. Review the old `192.0.2.20:9845` local playback bind and other
 NAS listener addresses for the application host during the later migration. This preparation does
 not change DNS, ingress, router, tunnels, export configuration or permissions.
 

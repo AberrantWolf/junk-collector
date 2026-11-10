@@ -4,11 +4,13 @@ import asyncio
 import hashlib
 import http.cookiejar
 import json
+import os
 import ipaddress
 from pathlib import Path
 import socket
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 from aioquic.asyncio import QuicConnectionProtocol, connect
 from aioquic.h3.connection import H3Connection, H3_ALPN
@@ -18,9 +20,10 @@ from aioquic.quic.events import ProtocolNegotiated, StreamDataReceived
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 
-ORIGIN = 'https://collector-lan.awkwardexplorer.com:19978'
-PUBLIC_ORIGIN = 'https://collector.awkwardexplorer.com'
-PUBLIC_PREFIX = '/__collector_lan_test_20261022'
+ORIGIN = os.environ['EXPERIMENT_LAN_ORIGIN']
+PUBLIC_ORIGIN = os.environ['EXPERIMENT_PUBLIC_ORIGIN']
+PUBLIC_PREFIX = '/__collector_lan_test'
+MEDIA_IP = str(ipaddress.IPv4Address(os.environ['EXPERIMENT_BIND_IP']))
 
 
 class Client(QuicConnectionProtocol):
@@ -63,7 +66,7 @@ class Client(QuicConnectionProtocol):
         future = asyncio.get_running_loop().create_future()
         self.header_waiters[stream] = future
         self.http.send_headers(stream, [(b':method', b'CONNECT'), (b':scheme', b'https'),
-            (b':authority', b'192.168.1.106:19979'), (b':path', b'/media'),
+            (b':authority', f'{MEDIA_IP}:19979'.encode()), (b':path', b'/media'),
             (b':protocol', b'webtransport'), (b'origin', origin.encode())])
         self.transmit()
         headers = await asyncio.wait_for(future, 10)
@@ -96,8 +99,9 @@ async def main():
         if not ipaddress.ip_address(args.public_ip).is_global:
             raise ValueError('public-origin probe requires a public IP')
         original_lookup = socket.getaddrinfo
+        public_host = urlsplit(PUBLIC_ORIGIN).hostname
         def public_lookup(host, port, *rest, **options):
-            return original_lookup(args.public_ip if host == 'collector.awkwardexplorer.com' else host,
+            return original_lookup(args.public_ip if host == public_host else host,
                                    port, *rest, **options)
         socket.getaddrinfo = public_lookup
     jar = http.cookiejar.CookieJar()
@@ -128,7 +132,7 @@ async def main():
     assert grant['descriptor']['server_id'] == fixture['server_id']
     assert grant['descriptor']['hash'] == fixture['hash']
     results = {}
-    async with connect('192.168.1.106', 19979, configuration=config, create_protocol=Client) as protocol:
+    async with connect(MEDIA_IP, 19979, configuration=config, create_protocol=Client) as protocol:
         session, code = await protocol.session(origin)
         assert code == 200
         async def read(method='HEAD', path=fixture['path'], token=grant['token'], byte_range=''):
@@ -165,7 +169,7 @@ async def main():
         assert other_response['status'] == 401
         results['cross_origin_grant_denial'] = 401
         await asyncio.sleep(0)
-    async with connect('192.168.1.106', 19979, configuration=config, create_protocol=Client) as protocol:
+    async with connect(MEDIA_IP, 19979, configuration=config, create_protocol=Client) as protocol:
         _, code = await protocol.session('https://unrelated.invalid')
         assert code == 403
         results['wrong_origin'] = 403

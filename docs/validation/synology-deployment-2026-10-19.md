@@ -20,7 +20,7 @@ not completed failure/recovery, power-loss, scale or public-ingress qualificatio
   Public curation/administration disabled. Encoders and MusicBrainz contact
   unconfigured. No encoder/playback or live metadata acceptance is claimed.
 - Browser access uses SSH local forwarding from Mac localhost:9842 to NAS
-  127.0.0.1:9842. DSM initially prohibited forwarding; a `Match User rynban`
+  127.0.0.1:9842. DSM initially prohibited forwarding; a `archive host`
   rule allows local forwarding with `PermitOpen 127.0.0.1:9842`.
   The `.local` hostname became unavailable; numeric LAN IP restored connectivity.
   This is private tunneled HTTP, not remote trusted-HTTPS/passkey qualification.

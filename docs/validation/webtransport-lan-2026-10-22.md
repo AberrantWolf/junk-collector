@@ -14,7 +14,7 @@ not changed by this experiment.
 ## Actual topology and scope
 
 - Personal macOS 26.6.2 arm64, ordinary Chrome 155 and Firefox 157 UI. NAS
-  `192.168.1.20`, browser peer `192.168.1.226`. The generic OS route to the NAS
+  `192.0.2.20`, browser peer `192.0.2.226`. The generic OS route to the NAS
   was direct link-layer on `en9` (`HOST,LLINFO`, no gateway). The sidecar bound
   that NAS address, not a public or wildcard interface.
 - A separate Collector container used the installed image
@@ -26,8 +26,8 @@ not changed by this experiment.
   through Collector's private HTTP API. Providers/encoding were not prerequisites.
 - Test page/control `https://lan.collector.example.com:19978/` used the
   already installed NAS certificate with normal CA and hostname validation.
-  Independent curl: HTTP 200, remote IP `192.168.1.20`, TLS verification 0.
-- Media used HTTP/3 WebTransport at `https://192.168.1.20:19979/media`, with a
+  Independent curl: HTTP 200, remote IP `192.0.2.20`, TLS verification 0.
+- Media used HTTP/3 WebTransport at `https://192.0.2.20:19979/media`, with a
   newly generated seven-day P-256 self-signed certificate and its SHA-256 hash
   delivered by the trusted HTTPS test origin. No trust import, browser flags or
   security-warning exception. The page's ordinary HTTPS certificate and the
@@ -62,7 +62,7 @@ fixture must not overwrite or forward the production `collector_session` cookie.
 
 | Check | Observation |
 | --- | --- |
-| Pinned WebTransport across physical LAN | Connected in Chrome and Firefox; NAS reports peer `192.168.1.226` |
+| Pinned WebTransport across physical LAN | Connected in Chrome and Firefox; NAS reports peer `192.0.2.226` |
 | Actual player media path | Real HEAD and ranged GET requests reached Collector over WebTransport; metadata duration 180 seconds decoded in both browsers |
 | Wrong certificate pin, Chrome | Rejected; valid session continued independently |
 | Missing media grant | 401 |
@@ -142,7 +142,7 @@ and explicit eight-hour timers at 19:20:48 JST, expiring at approximately
 **03:20 JST on 2026-10-23**. The bridge regenerated its pinned identity and
 serves the new hash through the trusted descriptor; reload the page and sign in
 again. Normal DNS-based HTTPS now returns HTTP 200 for the page and JavaScript,
-remote IP `192.168.1.20`, TLS verification 0. The independent exact-byte,
+remote IP `192.0.2.20`, TLS verification 0. The independent exact-byte,
 range-bound, session revocation, collection denial and Origin checks passed again.
 Production and Tailscale remain unchanged. Restoring availability alone did not
 count as playback/seek acceptance; the subsequent operator test supplies that result.

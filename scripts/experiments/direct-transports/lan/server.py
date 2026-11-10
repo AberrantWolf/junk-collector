@@ -24,10 +24,11 @@ from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).parent
 STATE = Path('/fixture/bridge')
-ORIGIN = 'https://collector-lan.awkwardexplorer.com:19978'
-PUBLIC_ORIGIN = 'https://collector.awkwardexplorer.com'
-PUBLIC_PREFIX = '/__collector_lan_test_20261022'
-BIND = '192.168.1.106'
+ORIGIN = os.environ['EXPERIMENT_LAN_ORIGIN']
+PUBLIC_ORIGIN = os.environ['EXPERIMENT_PUBLIC_ORIGIN']
+PUBLIC_PREFIX = '/__collector_lan_test'
+BIND = str(ipaddress.IPv4Address(os.environ['EXPERIMENT_BIND_IP']))
+MEDIA_ENDPOINT = f'https://{BIND}:19979/media'
 BACKEND = 'http://127.0.0.1:19981'
 MEDIA = re.compile(r'/api/v1/items/[0-9a-f-]{36}/representations/[0-9a-f-]{36}/[0-9]+\Z')
 BLOCK = 262144
@@ -171,7 +172,7 @@ async def handler(request, origin=ORIGIN, prefix=''):
         response = web.Response(body=(ROOT / filename).read_bytes(), content_type={
             '/': 'text/html', '/app.js': 'application/javascript', '/sw.js': 'application/javascript'}[path])
         response.headers['Cache-Control'] = 'no-store'
-        endpoint_policy = '' if request.query.get('block-wt') == '1' else ' https://192.168.1.106:19979'
+        endpoint_policy = '' if request.query.get('block-wt') == '1' else f' https://{BIND}:19979'
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "connect-src 'self'" + endpoint_policy + "; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
@@ -180,7 +181,7 @@ async def handler(request, origin=ORIGIN, prefix=''):
         return response
     if path == '/fixture' and request.method == 'GET':
         return web.json_response({**FIXTURE, 'hash': list(CERT.fingerprint(hashes.SHA256())),
-                                  'endpoint': 'https://192.168.1.106:19979/media', 'block': BLOCK,
+                                  'endpoint': MEDIA_ENDPOINT, 'block': BLOCK,
                                   'origin': origin, 'control_prefix': prefix,
                                   'via_cloudflare': bool(request.headers.get('CF-Ray'))})
     if path == '/stats' and request.method == 'GET':
@@ -200,7 +201,7 @@ async def handler(request, origin=ORIGIN, prefix=''):
         token = secrets.token_urlsafe(32)
         GRANTS[token] = (current, time.monotonic() + 120, origin)
         descriptor = {'server_id': FIXTURE['server_id'], 'origin': origin,
-                      'endpoint': 'https://192.168.1.106:19979/media',
+                      'endpoint': MEDIA_ENDPOINT,
                       'hash': list(CERT.fingerprint(hashes.SHA256())), 'path': FIXTURE['path']}
         return web.json_response({'token': token, 'expires_seconds': 120, 'principal': who, 'descriptor': descriptor})
     if path == '/result' and request.method == 'POST' and request.headers.get('Origin') == origin:

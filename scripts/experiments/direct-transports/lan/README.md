@@ -12,7 +12,7 @@ custom audio decoder or HTTP media fallback is used. The fixture adds CORS mode
 to the mounted audio element, following the browser's service-worker media guidance.
 
 The public-origin follow-up also listens on **loopback only** TCP 19980, accepting
-only `/__collector_lan_test_20261022/` and descendants at the exact public origin.
+only `/__collector_lan_test/` and descendants at the exact public origin.
 It needs an explicitly approved, path-limited tunnel rule before the existing
 catch-all. Assets/control URLs and worker scope follow the path automatically;
 the separate public test cookie is restricted to it. Do not expand the worker to
@@ -29,17 +29,17 @@ rejects that Python client with error 1010; leave browser-integrity protection
 enabled and qualify actual browser behavior instead. See
 [public-origin evidence](../../../../docs/validation/public-origin-webtransport-2026-10-22.md).
 
-The source deliberately names the owner's existing NAS/test origin. Do not point
+Supply the disposable fixture's addresses and origins through environment variables. Do not point
 the fixed loopback backend at production. No Tailscale tool, discovery, setting or
 integration is used. See the dated validation record for what passed and what did
 not; a playing label alone is not proof of advancing or audible playback.
 
 ## Boundaries
 
-- HTTPS page/control: `192.168.1.20:19978`, using the existing certificate for
+- HTTPS page/control: TCP 19978 on the configured fixture IP, using the certificate for
   `lan.collector.example.com`. Its private key is mounted read-only from
   the existing NAS certificate directory, never copied into the image/repository.
-- WebTransport media: UDP `192.168.1.20:19979`, generated seven-day P-256 identity.
+- WebTransport media: UDP 19979 on the same fixture IP, generated seven-day P-256 identity.
   The browser obtains its hash over trusted test HTTPS; incorrect hashes fail.
 - Separate Collector: public `127.0.0.1:19981`, private `127.0.0.1:19982`, native
   TLS `127.0.0.1:19983`, separate archive/state/config and synthetic audio.
@@ -65,6 +65,12 @@ not; a playing label alone is not proof of advancing or audible playback.
 
 Prepare a fresh private fixture directory outside the Docker build context with
 `collector.toml`, a random test-only `password` file (mode 600), and `noise.wav`.
+Set `EXPERIMENT_LAN_ORIGIN` to the fixture HTTPS origin including port 19978
+for the server, seeder and probe. Set `EXPERIMENT_BIND_IP` to the fixture IPv4
+address on the server and probe. Set `EXPERIMENT_PUBLIC_ORIGIN` to the exact
+HTTPS origin for the public-path test on the server and probe. Use the same
+origins in the isolated Collector configuration.
+
 Use a 180-second, low-amplitude stereo PCM WAV, for example:
 
 ```sh
