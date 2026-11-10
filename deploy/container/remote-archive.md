@@ -11,7 +11,7 @@ are required; examples do not authorize a migration.
 
 The dated 2026-10-30 assessment below explains the original safety requirements.
 
-The [routine Fi beta update procedure](fi-beta-update.md) applies to the
+The [routine beta update procedure](beta-update.md) applies to the
 installed split stack. The migration assessment below was prepared 2026-10-30.
 [Delivery/validation](../../docs/validation/remote-archive-safety-2026-10-30.md)
 records what actually ran. The previous [single-NAS snapshot procedure](snapshot-recovery.md)

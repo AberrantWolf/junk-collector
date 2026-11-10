@@ -30,18 +30,20 @@ the published `SHA256SUMS`.
 | Linux AMD64 manifest | `24299fd7c764c3e32a3bfab0d89ad505a7391809e9d29e56e9a3316dcbe2c38a` |
 | Linux ARM64 manifest | `9bb378621d10c3ab400e49813a379d0cc0eeb7cad92d731d1c04cc6a01af09e2` |
 
-## Fi deployment
+## Deployment
 
-Fi upgraded from beta.23 to beta.24 using the verified AMD64 image by index
-digest. The same cutover updated the tunnel connector from 2026.9.1 to
+The application host upgraded from beta.23 to beta.24 using the verified
+AMD64 image by index digest. The same cutover updated the tunnel connector from 2026.9.1 to
 [cloudflared 2026.10.7](https://github.com/cloudflare/cloudflared/releases/tag/2026.10.7),
 pinned to `sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba`.
-The connector's version and tunnel command ran on Fi before cutover, and the
-installed Compose configuration accepted all three candidate image pins.
+The connector's version and tunnel command ran on the application host before
+cutover, and the installed Compose configuration accepted all three candidate
+image pins.
 
-The existing Docker operator route on each host sealed the stopped-writer
-recovery pair `before-beta24-20261110-4204ea3` before activation. The Fi
-snapshot and whole NAS archive snapshot were read-only. Both stopped SQLite
+The operator used the existing Docker route without sudo on both hosts.
+Before activation, the operator stopped all writers and sealed the paired
+recovery point. The full application data snapshot and whole archive-parent
+snapshot were read-only. Both stopped SQLite
 databases passed integrity checks. The private recovery record includes both
 snapshot UUIDs, the old configuration and image identities.
 
@@ -56,4 +58,4 @@ snapshot. A signed-in Firefox session played the album track with FLAC
 selected and then with 128 kbps Opus selected. Receipt scanning and the
 browser's playback preference were restored after acceptance.
 
-See the [installed-stack runbook](../../deploy/container/fi-beta-update.md).
+See the [installed-stack runbook](../../deploy/container/beta-update.md).

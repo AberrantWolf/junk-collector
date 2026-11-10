@@ -9,9 +9,9 @@ No production deployment is authorized by this document.
 ## Release and source state
 
 [Beta.24 qualification and publication](validation/container-beta24-publication-2026-11-10.md)
-are complete. Deployment to the split-host installation requires a privileged
-paired recovery checkpoint followed by the
-[installed-stack procedure](../deploy/container/fi-beta-update.md).
+are complete. The split-host deployment passed acceptance after the operator
+sealed a paired recovery point using the
+[installed-stack procedure](../deploy/container/beta-update.md).
 
 ## Concrete follow-ups
 

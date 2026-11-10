@@ -161,7 +161,7 @@ def bundle(root, expected, record, destination):
     names = ("compose.yaml", "compose.inbox.yaml", "compose.media.yaml", "Caddyfile.media", "media.md", "initialize-media.sh", ".env.example", "collector.proxy.toml.example",
              "README.md", "recovery.md", "snapshot-recovery.md", "freeze-tar-time.py",
              "compose.remote.yaml", "remote.env.example", "remote-preflight.py", "compose.mail.yaml",
-             "junk-collector-remote.service", "remote-archive.md", "fi-beta-update.md")
+             "junk-collector-remote.service", "remote-archive.md", "beta-update.md")
     for name in names:
         shutil.copyfile(root / "deploy/container" / name, destination / name)
     # The optional mail override must ship with its independently built Bridge context
