@@ -8,11 +8,10 @@ No production deployment is authorized by this document.
 
 ## Release and source state
 
-[Beta.23 publication and acceptance](validation/container-beta23-publication-2026-11-07.md)
-are complete. New source work covers [live playback format selection](validation/live-playback-format-2026-11-10.md)
-and [Amazon Japan receipt recovery](email-purchases.md#import-and-parser-coverage).
-Qualify the exact release candidate and deploy the same image bytes using a matched
-recovery point and the [installed-stack procedure](../deploy/container/fi-beta-update.md).
+[Beta.24 qualification and publication](validation/container-beta24-publication-2026-11-10.md)
+are complete. Deployment to the split-host installation requires a privileged
+paired recovery checkpoint followed by the
+[installed-stack procedure](../deploy/container/fi-beta-update.md).
 
 ## Concrete follow-ups
 

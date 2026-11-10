@@ -27,15 +27,12 @@ parsed items. Rescans fill missing fields on the same unaccepted suggestion
 without undoing dismissals or changing accepted history. See
 [parser coverage and validation](email-purchases.md#import-and-parser-coverage).
 
-## Beta.23 published and installed on Fi — 2026-11-07
+## Beta.24 published — 2026-11-10
 
-Signed source `ed65d66` is published as beta.23 and installed on Fi. This release
-includes direct Library audio batch submission, settled cancellation before
-retry, and the Proton Bridge folder picker. The exact-source run passed 641 Rust
-tests, strict Clippy and all 31 browser journeys. Both native image gates and
-AMD64 release-image browser acceptance passed. Fi runs the sealed digest with
-healthy core, synced Bridge and a matched stopped-writer Fi/NAS recovery pair.
-See the [qualification and live acceptance record](validation/container-beta23-publication-2026-11-07.md).
+The signed beta.24 image is available from the preview channel. See its
+[qualification and publication record](validation/container-beta24-publication-2026-11-10.md).
+The split-host installation's last accepted deployment is
+[beta.23](validation/container-beta23-publication-2026-11-07.md).
 
 | Capability | Implemented behavior | Limits / evidence |
 | --- | --- | --- |
