@@ -37,7 +37,12 @@ try{
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Remote audio');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const data=await(await fetch('/api/v1/collection-search?limit=50')).json();return data.items.find(c=>c.name==='Remote audio').id;});
  await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});
- await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','02.mp3','cover.png'].map(name=>path.join(root,'crates/collector-store/tests/fixtures/digital-audio',name)));await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await imports.getByRole('button',{name:'Start import',exact:true}).click();
+ await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','02.mp3','cover.png'].map(name=>path.join(root,'crates/collector-store/tests/fixtures/digital-audio',name)));
+ await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ // These two encodings contain distinct songs. Include both in the test album.
+ await imports.locator('summary').filter({hasText:'Files and album playback'}).click();
+ await imports.getByRole('checkbox',{name:'Use folder for album playback: All files',exact:true}).check();
+ await imports.getByRole('button',{name:'Start import',exact:true}).click();
  await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Album tracks'}).waitFor();
