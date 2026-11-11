@@ -191,8 +191,9 @@ real browser processes. Unrelated Chrome sessions are left alone.
 ## Packaging and release evidence
 
 Source and container release jobs use Ubuntu 24.04 hosted runners on each
-architecture. An Ubuntu 26.04 runner failed to resolve its package mirror during
-beta.26 validation before the browser could start.
+architecture. AMD64 jobs use a reachable HTTPS Ubuntu archive while retaining
+the runner’s configured suites and signing key. The default runner mirror
+failed during beta.26 validation before the browser could start.
 
 The existing Container release workflow remains the only publication pipeline.
 Dispatch validation with `base_ref`, `classification`, optional comma-separated

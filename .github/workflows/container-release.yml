@@ -172,6 +172,7 @@ jobs:
           ARCHITECTURE: ${{ matrix.architecture }}
           RUNTIME_SCOPE: ${{ needs.plan.outputs.runtime_scope }}
         run: |
+          bash scripts/use-ci-ubuntu-archive.sh
           sudo apt-get update && sudo apt-get install -y skopeo
           skopeo copy --override-os linux --override-arch "$ARCHITECTURE" "oci-archive:/tmp/collector-$ARCHITECTURE.oci.tar" docker-daemon:junk-collector:release-smoke
           python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
@@ -250,7 +251,9 @@ jobs:
         with:
           name: source-checks-${{ github.run_attempt }}
           path: /tmp/source-checks
-      - run: sudo apt-get update && sudo apt-get install -y skopeo
+      - run: |
+          bash scripts/use-ci-ubuntu-archive.sh
+          sudo apt-get update && sudo apt-get install -y skopeo
       - name: Check rootless OCI transport before consuming exports
         if: needs.plan.outputs.reuse != 'true'
         env:
