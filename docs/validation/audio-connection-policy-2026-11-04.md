@@ -1,5 +1,7 @@
 # Operator audio connection policy — 2026-11-04
 
+> Deployment identifiers are anonymized. Dates, source and artifact identities, outcomes, and qualification limits are retained.
+
 ## Delivery
 
 Audio now defaults to the normal authenticated website connection, including
@@ -26,22 +28,22 @@ check uses the configured core HTTP listener, which starts after the configured
 authority. Generic core-only installations need no separate service. Storage
 identity, mount, filesystem and writable-root checks remain.
 
-## Fi beta.21 installation — 17:27 JST
+## Application host beta.21 installation — 17:27 JST
 
-Signed source `280b04f` is now published and installed on Fi as beta.21. Normal audio
+Signed source `280b04f` is now published and installed on the application host as beta.21. Normal audio
 remains selected (`remote_media_allowed = true`, `local_playback_enabled = false`);
 the original `[remote_media]` endpoint is restored without changing other parsed
 config values. The installed admin toggle can therefore reenable separate audio
 without editing config. Identity, private state, originals, credentials and the
 existing Bridge/Caddy/tunnel topology are preserved. Full source/image acceptance,
 matched stopped-writer snapshots, anonymous 401 checks and exact public/LAN HTTPS
-asset checks pass. Authenticated live Fi playback was not retested; real playback
+asset checks pass. Authenticated live playback on the application host was not retested; real playback
 is covered by the isolated source/release-image journeys. See [the final operation
 record](container-beta21-publication-2026-11-04.md) for immutable digests and evidence.
 
-## Initial Fi configuration acceptance — beta.20, 14:36 JST
+## Initial application host configuration acceptance — beta.20, 14:36 JST
 
-Fi retains release `0.1.0-beta.20`, source `253e37e`, runtime image
+The application host retains release `0.1.0-beta.20`, source `253e37e`, runtime image
 `sha256:36b95f5a7c731d9cff5d5fb1c1664819d520875c748d5e56ad4206d6c72572d5`.
 No new source/image was deployed. On this older build, enabling normal audio and
 retaining `[remote_media]` is rejected, so the active config now sets
@@ -63,8 +65,7 @@ modified by the configuration tools. The same release image remains installed.
 At **2026-11-04 14:36 JST**, the host service is active, core is healthy and all
 five stack containers are running. Jobs remain 6,560 completed, 240 cancelled and
 11 failed, with no unfinished work before or after restart. Trusted public HTTPS
-returns identity 200 with unchanged ServerId
-`01a15429-856a-7763-b558-3c158b1604a0`; unauthenticated route discovery and audio
+returns HTTP 200 with the same server identity; unauthenticated route discovery and audio
 requests return 401. Authenticated production playback is not claimed from these
 checks; real signed-in playback/range acceptance belongs to the isolated source
 fixtures below. The new admin toggle requires a future release installation.
@@ -118,17 +119,17 @@ Early fixture compile errors and the intentionally changed default-route
 expectation were corrected and rerun; they are not successful validation evidence.
 The original failed selector receipt and subsequent command logs remain under
 `/tmp/audio-connection-*` for this working session. Release images, publication,
-iPhone/Safari/cellular and authenticated live Fi playback were not run or claimed.
+iPhone/Safari/cellular and authenticated live playback on the application host were not run or claimed.
 
 ## Release review — 2026-11-04
 
 The review found that optional authority admission was incorrect for the existing
 remote-archive profile: it always starts media, whose first startup needs the
-service key. Retaining a previously generated key on Fi had hidden the fresh-volume
+service key. Retaining a previously generated key on the application host had hidden the fresh-volume
 failure. Preflight now requires the provisioned authority regardless of route
 preference, while allowing normal audio. Offline admission coverage checks normal
 mode with configured authority, wrong sockets and absent authority. During the beta.21
-update, Fi regained its original endpoint section without enabling separate
+update, the application host regained its original endpoint section without enabling separate
 routing. Later admin toggling is now possible without a config edit.
 No UI/API authority, revision/receipt, role/exposure or media-read finding remains
-from the review. Release qualification, publication and the Fi update completed successfully; see the final operation record above.
+from the review. Release qualification, publication and the application host update completed successfully; see the final operation record above.

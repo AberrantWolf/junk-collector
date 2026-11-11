@@ -80,7 +80,7 @@ Btrfs recovery snapshot captured archive, private state including SQLite recover
 files, configuration and TLS together (timestamp UTC):
 
 ```text
-/volume1/collector-recovery/before-beta11-20261028T012658Z
+/path/to/recovery/<snapshot>
 ```
 
 The exact old image and private adjacent recovery metadata are retained. The

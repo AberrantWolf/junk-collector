@@ -75,7 +75,7 @@ captured archive,
 private state including SQLite recovery files, config and TLS together (UTC):
 
 ```text
-/volume1/collector-recovery/before-beta13-20261028T053813Z
+/path/to/recovery/<snapshot>
 ```
 
 The old image and private adjacent recovery metadata are retained. The Portainer

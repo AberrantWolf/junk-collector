@@ -192,9 +192,8 @@ Mac and application-host. With zero unfinished Jobs, all five stack services sto
 actual PIDs reached zero. Database quick checks and read-only snapshots passed
 before sealing this matching recovery pair:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-beta19-20261103-ad3ac98/application-data`.
-- NAS: `/volume1/collector-recovery/before-beta19-20261103-ad3ac98`.
-- NAS snapshot UUID: `755d3d96-27a9-ff4c-9483-965af63b0ea7`.
+- application-host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 The pair retains local private state/WAL, archive originals, imports/scratch,
 configuration/TLS, Bridge home/profiles and exact old deployment metadata. Neither
@@ -205,7 +204,7 @@ Rollback requires the matching pair with all writers stopped.
 Acceptance completed at **2026-11-03 01:42:19 JST**. application-host reports
 `junk-collector 0.1.0-beta.19`; core/media use the qualified image. All five stack
 containers have zero restarts, and core is healthy. Public and LAN trusted HTTPS
-return 200 with unchanged ServerId `01a15429-856a-7763-b558-3c158b1604a0`; seven
+return 200 with unchanged server identity; seven
 served web assets match released source. Counts remain **123 Items, one user, two
 grants and 3,758 Jobs**, with zero unfinished work. Both credential-bearing profiles,
 the one connection's configuration/cursor, purchase history, config/TLS and

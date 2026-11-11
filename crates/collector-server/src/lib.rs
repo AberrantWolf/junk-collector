@@ -981,47 +981,25 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         .map(|peer| peer.0.ip().to_string())
         .unwrap_or_else(|| "unknown-direct-peer".into());
     request.extensions_mut().insert(DirectPeer(peer));
-    let mut local_origins = state
-        .local_playback
-        .as_ref()
-        .map(|local| local.connect_origins())
-        .unwrap_or_default();
-    let media_origin = state
-        .remote_media
-        .as_ref()
-        .and_then(|remote| url::Url::parse(&remote.base_url).ok())
-        .map(|url| url.origin().ascii_serialization())
-        .unwrap_or_default();
-    if !media_origin.is_empty() {
-        local_origins.push(media_origin.clone());
-    }
     let mut response = next.run(request).await;
     for (key, value) in [
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "no-referrer"),
         ("x-frame-options", "DENY"),
         ("cache-control", "private, no-store"),
-        (
-            "content-security-policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-        ),
     ] {
         response
             .headers_mut()
             .insert(key, HeaderValue::from_static(value));
     }
-    if !local_origins.is_empty() {
-        let csp = format!(
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob: {}; connect-src 'self' {}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-            media_origin,
-            local_origins.join(" ")
-        );
-        if let Ok(value) = HeaderValue::from_str(&csp) {
-            response
-                .headers_mut()
-                .insert("content-security-policy", value);
-        }
-    }
+    response
+        .headers_mut()
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert(HeaderValue::from_static(concat!(
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; ",
+            "media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; ",
+            "base-uri 'none'; form-action 'self'"
+        )));
     response
 }
 
@@ -1044,11 +1022,51 @@ fn normalized_origin_header(value: &str) -> Option<String> {
     let normalized = normalized_configured_origin(value)?;
     (value == normalized).then_some(normalized)
 }
-async fn index() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../../../web/dist/index.html"),
-    )
+async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let signed_in = browser_session_cookie(&headers)
+        .is_some_and(|token| state.service.authenticate(token).is_ok());
+    let html = include_str!("../../../web/dist/index.html");
+    let html = if signed_in {
+        std::borrow::Cow::Owned(html.replacen(
+            "<head>",
+            "<head><meta name=\"collector-session\" content=\"active\">",
+            1,
+        ))
+    } else {
+        std::borrow::Cow::Borrowed(html)
+    };
+    let mut response = ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
+    // Only signed-in browser documents need the alternate playback origins.
+    if signed_in {
+        let mut connect_origins = state
+            .local_playback
+            .as_ref()
+            .map(|local| local.connect_origins())
+            .unwrap_or_default();
+        let media_origin = state
+            .remote_media
+            .as_ref()
+            .and_then(|remote| url::Url::parse(&remote.base_url).ok())
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_default();
+        if !media_origin.is_empty() {
+            connect_origins.push(media_origin.clone());
+        }
+        if !connect_origins.is_empty() {
+            let csp = format!(
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; \
+                 media-src 'self' blob: {media_origin}; connect-src 'self' {}; \
+                 frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                connect_origins.join(" ")
+            );
+            if let Ok(value) = HeaderValue::from_str(&csp) {
+                response
+                    .headers_mut()
+                    .insert(header::CONTENT_SECURITY_POLICY, value);
+            }
+        }
+    }
+    response
 }
 async fn app_js() -> impl IntoResponse {
     (

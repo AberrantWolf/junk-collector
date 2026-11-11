@@ -40,8 +40,7 @@ remains absent (404), as before publication.
 ## Recovery and retained installation
 
 Before replacing services, both old processes stopped cleanly. A complete
-read-only Btrfs recovery snapshot was taken at
-`/volume1/collector-recovery/before-beta7-20261025T140956Z` (UTC timestamp), with
+read-only Btrfs recovery snapshot was taken and recorded with a UTC timestamp, with
 private adjacent recovery metadata and the exact previous image retained.
 The new AMD64 image ID is
 `sha256:53bd79c9ea6014c15d944abb5648036fc41c02e5ee0b38d3b3ea529dcc4b7fd8`.

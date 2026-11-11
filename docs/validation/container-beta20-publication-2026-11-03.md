@@ -146,9 +146,8 @@ claimed. The integrity guard remains intact.
 
 A fresh stopped-writer pair was sealed **after** the repair and before restart:
 
-- application-host: `/var/backups/collector-recovery-pairs/repaired-beta20-20261103-253e37e/application-data`.
-- NAS: `/volume1/collector-recovery/repaired-beta20-20261103-253e37e`.
-- NAS snapshot UUID: `681a8840-5b3a-674f-aecc-8a269965e8de`.
+- application-host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 The original `before-beta20-20261103-253e37e` pair and both
 `failed-beta20-20261103-253e37e` diagnostic snapshots remain retained. The original
@@ -165,7 +164,7 @@ Acceptance passed at **2026-11-03 18:34:24 JST**. The executable reports
 `junk-collector 0.1.0-beta.20`; core/media use the qualified immutable image and core
 is healthy. All five services are running with zero automatic restarts after the
 manual recovery restart. Public and LAN HTTPS return 200 with trusted TLS and
-unchanged ServerId `01a15429-856a-7763-b558-3c158b1604a0`. Seven served assets match
+unchanged server identity. Seven served assets match
 frozen source, including Metadata/preparation and import bundles.
 
 Counts remain **123 Items, one user, two grants and 5,199 Jobs**, with zero unfinished

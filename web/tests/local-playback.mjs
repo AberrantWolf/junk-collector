@@ -22,7 +22,40 @@ try{
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  // localhost is a secure context; no certificate-error bypass or security flags.
  const context=await browser.newContext();const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ const anonymous=await page.goto(origin);
+ await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);
+ const [signedIn]=await Promise.all([
+  page.waitForResponse(response=>response.url()===origin+'/'&&response.request().isNavigationRequest()),
+  page.getByRole('button',{name:'Sign in',exact:true}).click(),
+ ]);
+ await page.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ const routes=await (await page.request.get(origin+'/api/v1/playback/routes')).json();
+ const invalid=await fetch(origin,{headers:{cookie:'collector_session='+'0'.repeat(64)}});
+ const asset=await page.request.get(origin+'/app.js');
+ assert.ok(routes.endpoints.length);
+ for(const {https_url: endpoint} of routes.endpoints){
+  assert.ok(signedIn.headers()['content-security-policy'].includes(endpoint));
+  assert.ok(!anonymous.headers()['content-security-policy'].includes(endpoint));
+  assert.ok(!invalid.headers.get('content-security-policy').includes(endpoint));
+  assert.ok(!asset.headers()['content-security-policy'].includes(endpoint));
+ }
+ // A cross-site link withholds the Strict cookie on the first navigation.
+ const linked=await context.newPage();
+ await linked.goto(`http://127.0.0.1:${ports[0]}/healthz`);
+ await linked.setContent(`<a href="${origin}/">Open Collector</a>`);
+ const navigationPolicies=[];
+ linked.on('response',response=>{
+  if(response.url()===origin+'/'&&response.request().isNavigationRequest())
+   navigationPolicies.push(response.headers()['content-security-policy']);
+ });
+ await linked.getByRole('link',{name:'Open Collector'}).click();
+ await linked.getByRole('button',{name:'Administration',exact:true}).waitFor();
+ assert.equal(navigationPolicies.length,2);
+ for(const {https_url: endpoint} of routes.endpoints){
+  assert.ok(!navigationPolicies[0].includes(endpoint));
+  assert.ok(navigationPolicies[1].includes(endpoint));
+ }
+ await linked.close();
  let injectedReadContention=false;
  await page.route('**/api/v1/items/*',route=>{
   if(route.request().method()==='GET'&&!injectedReadContention){injectedReadContention=true;return route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}});}

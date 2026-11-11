@@ -1,7 +1,7 @@
 # Historical local-alpha installation validation
 
 These dated observations describe the installations and tooling exercised at the
-time. They are evidence, not current setup instructions or an active work queue.
+time. Installation paths are illustrative. The original acceptance scope applies.
 For installation use the [container guide](../deploy/container/README.md) or
 [current operator runbook](local-alpha-installation.md).
 
@@ -56,12 +56,12 @@ revocation are not accepted by this record.
 | Browser | Codex in-app browser, Codex 26.623.81905 with bundled Chromium framework 149.0.7827.197 |
 | FLAC | `/opt/homebrew/bin/flac`, FLAC 1.5.0 |
 | Provider identity | `JunkCollector/0.1.0 (https://github.com/AberrantWolf/junk-collector)`; project URL used instead of a personal address |
-| Source configuration | `/private/tmp/junk-collector-la3-owned.YFRhnq/collector.toml` |
-| Source archive / state | `/private/tmp/junk-collector-la3-owned.YFRhnq/archive`; `/private/tmp/junk-collector-la3-owned.YFRhnq/state` |
-| Test inbox | `/private/tmp/junk-collector-la3-owned.YFRhnq/inbox` |
-| Backup | `/private/tmp/junk-collector-la3-owned.YFRhnq/backup` |
-| Restore configuration | `/private/tmp/junk-collector-la3-owned.YFRhnq/restore-parent/collector.toml` |
-| Restore archive / state | `/private/tmp/junk-collector-la3-owned.YFRhnq/restore-parent/archive`; `/private/tmp/junk-collector-la3-owned.YFRhnq/restore-parent/state` |
+| Source configuration | `/path/to/la3-owned-rehearsal/collector.toml` |
+| Source archive / state | `/path/to/la3-owned-rehearsal/archive`; `/path/to/la3-owned-rehearsal/state` |
+| Test inbox | `/path/to/la3-owned-rehearsal/inbox` |
+| Backup | `/path/to/la3-owned-rehearsal/backup` |
+| Restore configuration | `/path/to/la3-owned-rehearsal/restore-parent/collector.toml` |
+| Restore archive / state | `/path/to/la3-owned-rehearsal/restore-parent/archive`; `/path/to/la3-owned-rehearsal/restore-parent/state` |
 | Listeners | public `127.0.0.1:21841`; private management `127.0.0.1:21842`; LAN TLS `0.0.0.0:21843` |
 
 The run began with about 195 GiB free and ended with about 171 GiB free. The source
@@ -169,12 +169,9 @@ remote playback.
 ### Stopped copy and restore results
 
 The source server was stopped before copying and remained stopped while the restored
-identity ran. `pairing` exclusively opened each stopped root successfully. Source
-and restored profiles both reported ServerId
-`01a0adaf-1621-7152-9357-3a6387f04992` and certificate SHA-256
-`eb73cbb34df45936e5593643ae42713f4fcdd9f679b996bce6f509f10d980111`.
-The TLS key digest was
-`319e43415c237427f88c66a9bae3380324566c063e752e572f676dd12f0898c0`.
+identity ran. `pairing` exclusively opened each stopped root successfully. The source
+and restored profiles reported the same server ID and certificate digest.
+Their TLS key digests also matched.
 The two identities were never run concurrently.
 
 While stopped, the source archive manifest contained 88 files and its manifest
@@ -239,7 +236,7 @@ DAT SHA-256:
 `c698671d4fb304ce636352c245323b1f787d216c8f629f9aac1b328537241bb2`.
 
 The provider ZIP and XML are now cached unchanged under
-`/private/tmp/junk-collector-la3-owned.YFRhnq/catalogs/redump/redump-psx/` as
+`/path/to/la3-owned-rehearsal/catalogs/redump/redump-psx/` as
 `source.zip` and `source.dat`. The same directory contains a manifest and an
 explicit full-release `catalog.dat`: 975 rows tagged Alpha, Beta, Demo, Kiosk,
 Preview, Proto/Prototype, Sample or Taikenban were excluded, leaving 10,001 rows.

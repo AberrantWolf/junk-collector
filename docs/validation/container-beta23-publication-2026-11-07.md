@@ -1,4 +1,6 @@
-# Beta.23 publication and Fi update — 2026-11-07 JST
+# Beta.23 publication and application host update — 2026-11-07 JST
+
+> Deployment identifiers are anonymized. Dates, source and artifact identities, outcomes, and qualification limits are retained.
 
 [Beta.23](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.23)
 is a signed prerelease at source `ed65d66e2a27f219dca67f70ebf6b1305c980ead`.
@@ -47,18 +49,17 @@ and the [Proton Bridge folder picker](mail-folder-editing-2026-10-31.md#folder-p
 | Sealed artifact ZIP | `d707376b0c18f28b22e84c7079130c587b86c608742392ac4a088d358c001c1f` |
 | Sealed OCI archive | `0a4f4c0567eb17b07608755d2b67c01d4795c58532ee5812f257398ba594382f` |
 
-## Fi recovery point and live acceptance
+## Application host recovery point and live acceptance
 
-Fi pulled the exact published index and checked the native image's source and
+The application host pulled the exact published index and checked the native image's source and
 version before downtime. All five production services stopped with zero
-unfinished Jobs. The full Fi private-state snapshot and NAS archive-parent
+unfinished Jobs. The full application private-state snapshot and NAS archive-parent
 snapshot are read-only. Both SQLite databases passed `quick_check` against
 the stopped snapshot. Private recovery metadata retains the old image,
 configuration, systemd and Compose files, and media authority key.
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta23-20261107-ed65d66/fi-data`.
-- archive-host.example.com: `/volume1/collector-recovery/before-beta23-20261107-ed65d66`,
-  snapshot UUID `553973a2-9d56-d140-ba7d-ebdd56053a3c`.
+- Application host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 Core and media run the published beta.23 digest with zero restarts. Core is
 healthy and Bridge is synced with its existing certificate pin. The cutoff and

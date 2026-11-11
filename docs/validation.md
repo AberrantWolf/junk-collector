@@ -14,7 +14,7 @@ Use [implementation status](implementation-status.md) for availability and
 | Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md) |
 | Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
 | Library and media | [Layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
-| Security and recovery | [Security review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
+| Security and recovery | [Repository exposure review](validation/repository-exposure-2026-11-11.md), [dependency review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
 | Audio and game support | [Audio matrix](audio-preparation.md), [game matrix](game-identification.md) |
 | Testing and packaging | [Change-based delivery](validation/testing-and-packaging-2026-10-26.md) |
 | Earlier checkpoints | [Foundation and subsequent records](#foundation-and-subsequent-qualification-records) |
@@ -3561,7 +3561,7 @@ at byte two and reaches its checked four-byte digest. This is procedure coverage
 not an owned-dump or live installation claim.
 
 A second CLI rehearsal created a real disposable `collector.toml`, account and TLS
-identity under `/private/tmp/junk-collector-la3-rehearsal.h44Cun`. With no server
+identity under `/path/to/la3-restore-rehearsal`. With no server
 running, complete relative archive/state roots and config were copied through a
 backup directory into separate restore roots and compared recursively. The restored
 profile passed `doctor` and `reindex`. Before and after restore, `pairing` reported
@@ -3607,7 +3607,7 @@ Google Chrome 153.0.8010.37.
 Owned-corpus results:
 
 - Five explicit package directories were copied from `/home/operator/dumps` into
-  `/private/tmp/junk-collector-la3-owned.YFRhnq/inbox`. Final `diff -rq` checks for
+  `/path/to/la3-owned-rehearsal/inbox`. Final `diff -rq` checks for
   all five source/copy pairs returned no differences. The package set comprised 17
   nested mixed-mode game files (1,090,422,259 bytes), a flat 13-file two-track CD
   (334,449,135 bytes), 40 files including 16 existing FLAC sidecars
@@ -3678,7 +3678,7 @@ Journey corrections and focused checks:
 
 Actual stopped-server drill:
 
-- Source roots were `/private/tmp/junk-collector-la3-owned.YFRhnq/archive` and
+- Source roots were `/path/to/la3-owned-rehearsal/archive` and
   `state`; backup was `backup`; restore roots were
   `restore-parent/archive` and `restore-parent/state`. Exclusive `pairing` opens
   proved quiescence. Complete source, backup and pre-open restore manifests matched:
@@ -3686,9 +3686,7 @@ Actual stopped-server drill:
   `c49c3a0bf87ba8cc805e37c32fc33a5f4c4c7e73cd1594797ff8b3a03f1edf79`;
   state 102 files / manifest digest
   `15f41813f286e0bcf45986c90dbec0edf9f71c7eeaa12ee26009ed5ee81caeb4`.
-- Source and restore reported the same ServerId
-  `01a0adaf-1621-7152-9357-3a6387f04992` and certificate SHA-256
-  `eb73cbb34df45936e5593643ae42713f4fcdd9f679b996bce6f509f10d980111`.
+- Source and restore reported the same server ID and certificate digest.
   Representative original, observation and metadata-authority record digests
   matched exactly. Both accounts, the Viewer grant and four unfinished Jobs were
   present before restored startup. Restored `doctor`, `reindex`, resumed publication,
@@ -3737,7 +3735,7 @@ export/change bundles. No commit was made.
 LA3 remains partially qualified and unaccepted. The source corpus at
 `/home/operator/dumps` was not read for mutation or changed. Provider artifacts were
 stored only under
-`/private/tmp/junk-collector-la3-owned.YFRhnq/catalogs`, and only the restored
+`/path/to/la3-owned-rehearsal/catalogs`, and only the restored
 qualification identity ran during catalog work.
 
 Cache and parser results:

@@ -68,8 +68,8 @@ No user jobs were unfinished. With all writers stopped, archive/local writeback
 was synced and matching read-only Btrfs snapshots were taken:
 
 ```text
-application-host: /var/backups/collector-recovery-pairs/before-email-20261031-83a9e0d/application-data
-NAS: /volume1/collector-recovery/before-email-20261031-83a9e0d
+application-host: the private application-state snapshot
+NAS: the private archive-parent snapshot
 ```
 
 The application-host snapshot covers the complete `/srv/junk-collector` subvolume, including

@@ -1,4 +1,4 @@
-"""Offline checks of retained Fi state and post-update refusal paths."""
+"""Offline checks of retained application state and post-update refusal paths."""
 
 from contextlib import closing, redirect_stderr
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -225,7 +225,7 @@ class FiUpdateTests(unittest.TestCase):
                  patch.object(check.subprocess, "run", return_value=SimpleNamespace(stdout="inactive\n")), \
                  patch.object(check, "snapshot_identity", return_value=(snapshot, "fi")), \
                  patch.object(check, "state_facts", side_effect=ValueError("Unfinished Jobs")) as facts:
-                with self.assertRaisesRegex(ValueError, "Stop all Fi"):
+                with self.assertRaisesRegex(ValueError, "Stop all Compose services"):
                     check.seal_cutoff(args, {}, before)
                 facts.assert_not_called()
                 service["State"]["Running"] = False

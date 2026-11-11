@@ -69,7 +69,7 @@ snapshot captured archive, private state including SQLite recovery files,
 configuration and TLS together (timestamp UTC):
 
 ```text
-/volume1/collector-recovery/before-beta12-20261028T032157Z
+/path/to/recovery/<snapshot>
 ```
 
 The old image and private adjacent recovery metadata are retained. The retained

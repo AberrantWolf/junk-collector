@@ -186,15 +186,15 @@ are in its sibling `archive` and `state` directories.
 
 Give the non-root process read access through a dedicated host group and share
 ACL. A bind mount's `ro`/`rw` flag does not grant host filesystem permission.
-The live Synology installation uses `collector-inbox-readers`, GID 65538; discover
-the actual GID on another host rather than copying that number blindly.
+Look up the numeric GID of the inbox-reading group on the host and set
+`COLLECTOR_INBOX_GID` to that value.
 
 For the shipped Compose setup, add these values to `.env`:
 
 ```dotenv
 COMPOSE_FILE=compose.yaml:compose.inbox.yaml
 COLLECTOR_INBOX=/volume1/junk-collector-inbox
-COLLECTOR_INBOX_GID=65538
+COLLECTOR_INBOX_GID=REPLACE_WITH_INBOX_GROUP_GID
 ```
 
 The inbox source must already exist; the override refuses to create a misspelled

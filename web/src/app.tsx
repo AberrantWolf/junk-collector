@@ -125,7 +125,18 @@ function App(){
 
  useEffect(()=>{
   api<Features>('/features').then(setFeatures).catch(e=>setError(requestErrorMessage(e)));
-  api<Principal>('/me').then(value=>{setActor(value);setLoginMessage('');}).catch(e=>{if(!isApiRequestError(e)||e.code!=='unauthenticated')setError(requestErrorMessage(e));}).finally(()=>setReady(true));
+  const recoveredUser=history.state?.recoveredUser;
+  const refreshedSessionDocument=history.state?.refreshedSessionDocument;
+  if(recoveredUser||refreshedSessionDocument){const state={...history.state};delete state.recoveredUser;delete state.refreshedSessionDocument;history.replaceState(state,'');}
+  api<Principal>('/me').then(value=>{
+   // Cross-site navigation can omit the Strict cookie even when same-origin API calls have it.
+   if(!refreshedSessionDocument&&!document.querySelector('meta[name="collector-session"]')){
+    history.replaceState({...history.state,recoveredUser,refreshedSessionDocument:true},'');
+    location.replace(location.href);
+    return;
+   }
+   setRecovered(recoveredUser===value.user_id);setActor(value);setLoginMessage('');setReady(true);
+  }).catch(e=>{if(!isApiRequestError(e)||e.code!=='unauthenticated')setError(requestErrorMessage(e));setReady(true);});
  },[]);
  useEffect(()=>{if(!actor)return;collectionReads.cancel();setCollectionPage(state=>state.key===collectionKey?{...state,loading:true,error:''}:{key:collectionKey,items:[],cursor:null,ready:false,loading:true,error:''});const timer=setTimeout(()=>{const query=new URLSearchParams({search:collectionSearch,limit:'50'});void collectionReads.run(attempt=>api<{items:Collection[];next_cursor:string|null}>(`/collection-search?${query}`,{signal:attempt.signal}),{success:page=>setCollectionPage({key:collectionKey,items:page.items,cursor:page.next_cursor,ready:true,loading:false,error:''}),failure:e=>{setCollectionPage(state=>state.key===collectionKey?{...state,error:requestErrorMessage(e)}:state);if(isApiRequestError(e)&&e.code==='unauthenticated')handleFailure(e);},settled:()=>setCollectionPage(state=>state.key===collectionKey?{...state,loading:false}:state)});},150);return()=>clearTimeout(timer);},[collectionKey,refresh]);
  useEffect(()=>{if(!actor)return;const controller=new AbortController();Promise.all([api<{items:Collection[]}>(`/collection-search?limit=1&min_role=1`,{signal:controller.signal,operation:'Load curation access'}),api<{items:Collection[]}>(`/collection-search?limit=1&min_role=2`,{signal:controller.signal,operation:'Load collection management access'})]).then(([curators,owners])=>{if(!controller.signal.aborted){setCanCurateAny(curators.items.length>0);setCanManageAny(owners.items.length>0);}}).catch(e=>{if(!controller.signal.aborted)handleFailure(e);});return()=>controller.abort();},[actor,refresh]);
@@ -215,7 +226,11 @@ function App(){
  }
 
  if(!ready)return <div className="loading">Opening your collection…</div>;
- if(!actor)return <Login features={features} error={loginMessage||error} onLogin={(value,recovery)=>{setRecovered(!!recovery);setActor(value);setError('');setLoginMessage('');}}/>;
+ if(!actor)return <Login features={features} error={loginMessage||error} onLogin={(value,recovery)=>{
+  if(recovery)history.replaceState({...history.state,recoveredUser:value.user_id},'');
+  // Load the document with the session cookie so its playback policy can include trusted origins.
+  location.reload();
+ }}/>;
  if(location.pathname==='/remote-media')return <RemoteMediaTest key={actor.user_id}/>;
  if(location.pathname==='/pair')return <><PairDevice key={actor.user_id} onSignOut={()=>void signOut()} onSessionExpired={()=>clearSession('Sign in again to approve this app.')}/>{reauth!==null&&<RecentAuthentication key={reauth} username={reauthUsername} passkeys={!!features?.passkeys} onAuthenticated={value=>finishReauth(value,reauth)} onCancel={()=>finishReauth(undefined,reauth)}/>}</>;
  const clientOnly=!!features&&!features.curation&&!features.administration;

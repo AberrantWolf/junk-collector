@@ -68,7 +68,7 @@ The updated real Chrome 156.0.8078.74 purchase journey verifies the warning afte
 reload, unchanged complete original-download SHA-256, real prepared-FLAC playback
 and a 390-pixel mobile review without horizontal overflow. The mobile warning
 screenshot was visually inspected:
-`/var/folders/5w/77h8k79d3z7dftcv8mt3mgzm0000gp/T/collector-purchases-adEiyE/wav-trailing-warning-mobile.png`.
+`<temp-dir>/collector-purchases-adEiyE/wav-trailing-warning-mobile.png`.
 Only validation/status prose was finalized afterward; documentation links,
 formatting and the entire diff were reviewed again.
 

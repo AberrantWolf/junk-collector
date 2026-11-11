@@ -80,6 +80,9 @@ Public login, pairing, library metadata and permission checks remain available.
 ## Trust and transfer policy
 
 The public authenticated control connection is the authority for candidate pins.
+A browser document must have a valid session to receive alternate media origins
+in its Content Security Policy. After sign-in, the browser reloads the document
+with the new session.
 A private IP is neither identity nor authorization. Native clients validate the
 advertised certificate and enrolled ServerId before sending their credential to a
 candidate. Redirects are disabled. Browsers connect using certificate-hash-pinned

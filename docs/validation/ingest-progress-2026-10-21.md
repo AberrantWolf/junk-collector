@@ -60,7 +60,7 @@ mobile row/wording journey also passed on Chrome 155.0.8059.85, using a fresh
 31-package server/profile: rows visible, no horizontal overflow, published albums
 while copying remains unfinished, active/queued/shared stages, reload and terminal
 settlement. Its temporary artifacts are in
-`/var/folders/5w/77h8k79d3z7dftcv8mt3mgzm0000gp/T/collector-intake-review-S7XLQ4`.
+`<temp-dir>/collector-intake-review-S7XLQ4`.
 The archive integration suite finished with 255 passed and three explicitly
 ignored manual scale/performance qualifications; the rest of the workspace passed.
 

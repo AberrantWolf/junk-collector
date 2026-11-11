@@ -50,7 +50,7 @@ were recreated with `--no-deps --pull never`; no initializer or setup was rerun.
 Both old processes stopped cleanly before the complete read-only Btrfs snapshot:
 
 ```text
-/volume1/collector-recovery/before-beta8-20261026T015432Z
+/path/to/recovery/<snapshot>
 ```
 
 Adjacent private recovery metadata and a retained old-image tag preserve rollback

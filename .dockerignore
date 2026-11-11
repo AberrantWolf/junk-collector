@@ -1,8 +1,13 @@
 .git
 .collector
+collector.toml
+collector.toml.*.bak
 target
 web/node_modules
+web/test-results
 deploy/container/.env
-deploy/container/.env.before-update
+deploy/container/.env.*
+!deploy/container/.env.example
 deploy/container/collector.toml
+deploy/container/collector-cert.pem
 *.tar.gz

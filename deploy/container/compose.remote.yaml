@@ -1,4 +1,4 @@
-# Fi remote-archive profile. Always include compose.media.yaml and compose.inbox.yaml.
+# Split-host remote-archive profile. Always include compose.media.yaml and compose.inbox.yaml.
 # Host systemd owns lifecycle; Docker must not bypass the mount preflight at boot.
 services:
   collector:

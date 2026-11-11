@@ -1,4 +1,4 @@
-"""Fi operator helper. Credentials are entered only in the private terminal."""
+"""Proton Bridge operator helper. Credentials are entered only in the private terminal."""
 import argparse, json, os, sqlite3, subprocess, sys
 from pathlib import Path
 

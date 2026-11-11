@@ -159,10 +159,8 @@ its associated DNS record. That action was cancelled: this hostname shares its
 public CNAME with the production catch-all. Instead, the exact test-path route was
 changed to Cloudflare's static `http_status:404` service. No fixture forwarding
 remains. This inert guard row remains in the tunnel configuration; it was not
-deleted. Cloudflare refreshed the existing CNAME to the same tunnel target
-`9e46842f-29ef-4fb9-b59b-dfa4a31e5984.cfargotunnel.com`; no new hostname or target
-was introduced. Public verification returned test path 404 and production root
-200 with normal TLS. Both disposable containers were stopped, and generated
+deleted. Cloudflare refreshed the existing CNAME to the same tunnel target.
+Public verification returned test path 404 and production root 200 with normal TLS. Both disposable containers were stopped, and generated
 WebTransport private key cleanup runs on graceful bridge shutdown. Synthetic
 state and source remain for reproduction; production account/archive mounts
 were never used by the fixture. No new production certificate was needed.

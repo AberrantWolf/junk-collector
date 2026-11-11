@@ -71,9 +71,8 @@ services; all actual PIDs reached zero and all five exit codes were zero.
 After writeback completed, both read-only snapshots succeeded without excluded
 nested subvolumes:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-beta17-20261101-fe7b95c/application-data`.
-- NAS: `/volume1/collector-recovery/before-beta17-20261101-fe7b95c`.
-- NAS snapshot UUID: `32bf3679-e677-2e46-a8a7-932aab4a18be`.
+- application-host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 The matching pair was sealed before activation. application-host covers all local private
 state/WAL, imports/uploads/scratch, config/TLS, Bridge home/cache and profiles;
@@ -88,8 +87,7 @@ writers stopped; an image-only or database-only rollback is insufficient.
 Acceptance completed at **2026-11-01 21:25:03 JST**. The executable reports
 `junk-collector 0.1.0-beta.17`. Core is healthy, core/media run the qualified image,
 and all five stack containers have zero restarts. Public and LAN HTTPS health
-return 200 with normal certificate verification and unchanged ServerId
-`01a15429-856a-7763-b558-3c158b1604a0`. Served `app.js`, `app.css`, `curation.js`,
+return 200 with normal certificate verification and unchanged server identity. Served `app.js`, `app.css`, `curation.js`,
 `library-imports.js` and `purchase-inbox.js` match the frozen release source.
 
 Counts remain **123 Items, one user, two grants and 3,076 Jobs**, with zero

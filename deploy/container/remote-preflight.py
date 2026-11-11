@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only Fi admission. Never mount, mkdir, chown, repair or hash media."""
+"""Read-only remote archive admission. Never mount, mkdir, chown, repair or hash media."""
 import os
 from pathlib import Path
 import re

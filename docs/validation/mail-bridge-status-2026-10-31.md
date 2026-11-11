@@ -120,8 +120,8 @@ left running; the new supervisor's zero-exit stop was separately qualified.
 Complete read-only recovery points retain local databases/WAL, Bridge vault/cache,
 configuration and the matching archive:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-mail-status-20261031/application-data`.
-- archive-host: `/volume1/collector-recovery/before-mail-status-20261031`.
+- application-host: the private application-state snapshot.
+- archive-host: the private archive-parent snapshot.
 
 Snapshot database quick checks pass. The private application-host recovery directory additionally
 retains paired-point metadata, old deployment/environment/unit, authority key,

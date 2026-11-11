@@ -75,9 +75,8 @@ stack services, their PIDs reached zero, clean exit policy passed, and filesyste
 writeback completed before snapshots. Neither source had excluded nested subvolumes.
 Both read-only members succeeded before the pair was sealed:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-beta15-20261101-6c0f42a/application-data`.
-- NAS: `/volume1/collector-recovery/before-beta15-20261101-6c0f42a`.
-- NAS snapshot UUID: `a3fac94d-5229-0743-b717-4fddda1ad14b`.
+- application-host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 application-host covers complete local private state/WAL, imports/scratch, configuration/TLS,
 Bridge home/cache and profiles. The NAS point covers the full archive parent
@@ -92,8 +91,7 @@ stopped; an image-only or single-database rollback is insufficient.
 Acceptance completed at **2026-11-01 12:30:10 JST**. Core is healthy, both core/media
 run the qualified image with zero restarts, and the actual core executable reports
 `junk-collector 0.1.0-beta.15`. Public and LAN HTTPS health return 200 with normal
-certificate verification. Both routes retain ServerId
-`01a15429-856a-7763-b558-3c158b1604a0`; served `app.js`, `app.css`, `curation.js`,
+certificate verification. Both routes retain server identity; served `app.js`, `app.css`, `curation.js`,
 `library-imports.js` and `purchase-inbox.js` match frozen release-commit bytes.
 
 Config/TLS and media-authority key hashes, mount sources, user/groups/isolation,

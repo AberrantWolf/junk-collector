@@ -43,7 +43,7 @@ Passed checks:
 - Rebuilt debug server/media fixtures; actual Chrome purchase
   (156.0.8078.74) and intake-review (153.0.8010.12) journeys, outside macOS seatbelt.
   Purchase artifacts:
-  `/var/folders/5w/77h8k79d3z7dftcv8mt3mgzm0000gp/T/collector-purchases-grfauI`.
+  `<temp-dir>/collector-purchases-grfauI`.
   The 390px format-folder review screenshot was visually inspected; file paths
   wrap within the viewport. Stored originals include the private parent booklet
   and shared cover, and the three versions/albums have distinct Item IDs.

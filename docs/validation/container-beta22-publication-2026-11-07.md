@@ -1,4 +1,6 @@
-# Beta.22 publication and Fi update — 2026-11-07 JST
+# Beta.22 publication and application host update — 2026-11-07 JST
+
+> Deployment identifiers are anonymized. Dates, source and artifact identities, outcomes, and qualification limits are retained.
 
 [Beta.22](https://github.com/AberrantWolf/junk-collector/releases/tag/v0.1.0-beta.22)
 is a signed prerelease at source `6faa8cd195f45a4b2418089d3aad766005f65695`.
@@ -36,19 +38,18 @@ It includes [Opus album preparation and readiness](opus-preparation-2026-11-07.m
 | Sealed artifact ZIP | `36c2591034c702c18066b2eef3554ad0048192ffe2acaf8117f7caab5a130bd0` |
 | Sealed OCI archive | `efc61b28d02dfc517a84cc13b2fc03fe85086f8b35a2c28e0877f20af950f072` |
 
-## Fi recovery point and live acceptance
+## Application host recovery point and live acceptance
 
-Fi anonymously pulled the exact multi-platform index and checked the AMD64
+The application host anonymously pulled the exact multi-platform index and checked the AMD64
 image's source and version labels before downtime. The guarded systemd service
 stopped all five stack containers with zero unfinished Jobs. The full stopped
-Fi private-state snapshot and whole NAS archive-parent snapshot are read-only.
+application private-state snapshot and whole NAS archive-parent snapshot are read-only.
 Both SQLite databases passed `quick_check` against the snapshot. The sealed pair
 also records the old image, environment, Compose and systemd files, and media
 authority key.
 
-- Fi: `/var/backups/collector-fi-pairs/before-beta22-20261107-6faa8cd/fi-data`.
-- archive-host.example.com: `/volume1/collector-recovery/before-beta22-20261107-6faa8cd`,
-  snapshot UUID `7f9cfd26-73c6-1247-b518-b6c34fd25ad1`.
+- Application host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 The service now runs the immutable beta.22 index for core and media. Both use the
 qualified source with zero restarts. Core is healthy and Bridge is synced with

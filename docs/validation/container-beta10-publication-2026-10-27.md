@@ -84,7 +84,7 @@ Both old processes exited cleanly before the complete read-only Btrfs snapshot
 (timestamp UTC):
 
 ```text
-/volume1/collector-recovery/before-beta10-20261027T133907Z
+/path/to/recovery/<snapshot>
 ```
 
 The exact old image and private adjacent recovery metadata are retained. This

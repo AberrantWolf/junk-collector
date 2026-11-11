@@ -62,9 +62,8 @@ stack services. Core, media, Bridge and Caddy exited 0; tunnel shutdown was acce
 under its established normal-stop policy. All container PIDs were zero before sync
 and snapshots. Both read-only snapshots succeeded before the pair was sealed:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-inbox-recovery-20261031-0bec4af/application-data`.
-- archive-host: `/volume1/collector-recovery/before-inbox-recovery-20261031-0bec4af`.
-- NAS snapshot UUID: `ac167c0c-9644-4e4c-83f6-7af96ead7943`.
+- application-host: the private application-state snapshot.
+- archive-host: the private archive-parent snapshot.
 
 The application-host snapshot covers all local private state/WAL, profiles, Bridge vault/cache,
 configuration, TLS, imports and scratch. The NAS point covers the entire archive's

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a routine Fi beta update against a published image and a stopped recovery point."""
+"""Check a routine split-host beta update against a published image and a stopped recovery point."""
 
 import argparse
 from contextlib import closing, contextmanager, nullcontext
@@ -44,7 +44,7 @@ def docker_json(*args):
 
 def beta_version(value):
     match = BETA.fullmatch(value)
-    require(match, "Routine Fi updates require published beta versions")
+    require(match, "Routine updates require published beta versions")
     return tuple(map(int, match.groups()))
 
 
@@ -65,7 +65,7 @@ def target(path):
         and labels.get("org.opencontainers.image.version") == version
         and labels.get("org.opencontainers.image.revision") == revision
         and labels.get("org.opencontainers.image.source") == release["source"],
-        "Pulled Fi image does not match the published release",
+        "Pulled application image does not match the published release",
     )
     return {"reference": ref, "id": image["Id"], "version": version, "revision": revision}
 
@@ -83,7 +83,7 @@ def stack(project, companions):
         name = container["Config"]["Labels"]["com.docker.compose.service"]
         require(name not in services, f"Expected one container for {name}")
         services[name] = container
-    require(REQUIRED <= services.keys(), "Compose project is missing a required Fi service")
+    require(REQUIRED <= services.keys(), "Compose project is missing a required service")
     if companions:
         for container in docker_json("inspect", *companions):
             services["external:" + container["Name"]] = container
@@ -116,7 +116,7 @@ def ready(services, after):
 
 
 def compare_stack(baseline, current, image):
-    require(baseline.keys() == current.keys(), "Fi service set changed")
+    require(baseline.keys() == current.keys(), "Compose service set changed")
     for name, old in baseline.items():
         new = current[name]
         require(new["mounts"] == old["mounts"], f"{name} mount bindings changed")
@@ -167,7 +167,7 @@ def probe(origins, item, session, lan_ca):
         if role != "media":
             get(base, "/healthz", ca=ca)
         identities[role] = str(UUID(get(base, "/api/v1/identity", ca=ca)["server_id"]))
-    require(len(set(identities.values())) == 1, "Fi HTTPS origins disagree on ServerId")
+    require(len(set(identities.values())) == 1, "HTTPS origins disagree on ServerId")
     public = origins["public"]
     principal = get(public, "/api/v1/me", session)
     sample = get(public, "/api/v1/items/" + item, session)
@@ -290,13 +290,13 @@ def wait_for_receipt_scanner(state, started_at, timeout=180):
 
 def snapshot_identity(pair):
     path = pair.resolve() / "fi-data"
-    require(path.resolve(strict=True) == path, "Use the pair's read-only Fi snapshot")
+    require(path.resolve(strict=True) == path, "Use the pair's read-only application-state snapshot")
     command_options = dict(text=True, timeout=15, stderr=subprocess.DEVNULL, env=dict(os.environ, LC_ALL="C"))
     properties = subprocess.check_output(["btrfs", "property", "get", "-ts", str(path), "ro"], **command_options)
-    require(properties.strip() == "ro=true", "Use the pair's read-only Fi snapshot")
+    require(properties.strip() == "ro=true", "Use the pair's read-only application-state snapshot")
     metadata = subprocess.check_output(["btrfs", "subvolume", "show", str(path)], **command_options)
     match = re.search(r"^\s*UUID:\s*([a-f0-9-]+)\s*$", metadata, re.MULTILINE)
-    require(match, "Fi snapshot UUID is missing")
+    require(match, "Application-state snapshot UUID is missing")
     return path, str(UUID(match[1]))
 
 
@@ -322,18 +322,18 @@ def seal_cutoff(args, request, before):
         ["systemctl", "is-active", "junk-collector-remote.service"],
         capture_output=True, text=True, timeout=10,
     )
-    require(status.stdout.strip() == "inactive", "Stop Fi's guarded systemd service before checking the cutoff")
+    require(status.stdout.strip() == "inactive", "Stop the guarded systemd service before checking the cutoff")
     services = stack(args.project, [])
     expected = {name: facts for name, facts in before["services"].items() if not name.startswith("external:")}
-    require(container_facts(services) == expected, "Fi Compose services changed before the cutoff")
+    require(container_facts(services) == expected, "Compose services changed before the cutoff")
     require(all(not service["State"]["Running"] and not service["State"]["Restarting"] for service in services.values()),
-            "Stop all Fi Compose services before checking the cutoff")
+            "Stop all Compose services before checking the cutoff")
     snapshot, snapshot_uuid = snapshot_identity(args.pair_dir)
     cutoff = (snapshot / args.state_in_snapshot).resolve(strict=True)
     config = (snapshot / "config" / "collector.toml").resolve(strict=True)
     state = bound_path(services, "/data/state", True).resolve()
     require(cutoff.is_relative_to(snapshot) and not cutoff.is_relative_to(state) and config.is_relative_to(snapshot),
-            "Use state and config inside the stopped Fi snapshot")
+            "Use state and config inside the stopped application-state snapshot")
     facts = fingerprints(state_facts(cutoff, stopped=True), config)
     write_record(args.pair_dir / "cutoff.json", {
         "request": request, "fi_snapshot_uuid": snapshot_uuid,
@@ -363,7 +363,7 @@ def main():
         require(args.pair_dir.is_dir() and args.pair_dir.stat().st_mode & 0o077 == 0,
                 "Use a private recovery pair directory")
         origins = {name: getattr(args, name) for name in ("public", "lan", "media")}
-        require(len(set(origins.values())) == 3, "Provide three distinct Fi HTTPS origins")
+        require(len(set(origins.values())) == 3, "Provide three distinct HTTPS origins")
         record = args.pair_dir / "before.json"
         image = target(args.release)
         request = {"project": args.project, "target": image, "origins": origins, "item": args.item}
@@ -373,18 +373,18 @@ def main():
             require(before["request"] == request, "Release, origins or sample item changed")
         if args.phase == "cutoff":
             seal_cutoff(args, request, before)
-            print("Stopped Fi cutoff passed. The sealed pair is ready for the image switch.")
+            print("Stopped-stack cutoff passed. The sealed pair is ready for the image switch.")
             return
         if after:
             cutoff = json.loads((args.pair_dir / "cutoff.json").read_text())
             require(cutoff["request"] == request and cutoff["nas_snapshot_uuid"],
                     "Use the cutoff receipt from this update's sealed pair")
             _, snapshot_uuid = snapshot_identity(args.pair_dir)
-            require(cutoff["fi_snapshot_uuid"] == snapshot_uuid, "Fi snapshot changed after cutoff validation")
+            require(cutoff["fi_snapshot_uuid"] == snapshot_uuid, "Application-state snapshot changed after cutoff validation")
         require(subprocess.run(
             ["systemctl", "is-active", "--quiet", "junk-collector-remote.service"],
             timeout=10, stderr=subprocess.DEVNULL,
-        ).returncode == 0, "Fi's guarded systemd service is not active")
+        ).returncode == 0, "the guarded systemd service is not active")
         services = running_stack(args.project, args.companion, after)
         current = container_facts(services)
         state = bound_path(services, "/data/state", True)
@@ -398,7 +398,7 @@ def main():
                 old_image, = docker_json("image", "inspect", image_id)
                 old_version = beta_version(old_image["Config"]["Labels"]["org.opencontainers.image.version"])
                 require((0, 1, 0, 22) <= old_version < beta_version(image["version"]),
-                        "Routine Fi updates require an installed beta.22 or newer and a later target beta")
+                        "Routine updates require an installed beta.22 or newer and a later target beta")
             state_facts(state)
             write_record(record, {"request": request, "services": current, "sample": sample})
             print(f"Pre-update checks passed. Private baseline saved to {record}. {bridge}")
@@ -412,13 +412,13 @@ def main():
             require(old.keys() == new.keys(), "Cutoff receipt has incomplete state evidence")
             changed = [name for name in old if old[name] != new[name]]
             require(not changed, "Retained state differs from the cutoff: " + ", ".join(changed))
-            print(f"Fi {image['version']} passed image, runtime, HTTPS, authenticated read and cutoff checks. {bridge}")
+            print(f"Collector {image['version']} passed image, runtime, HTTPS, authenticated read and cutoff checks. {bridge}")
             print(receipts)
     except (ValueError, OSError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as error:
         # Keep response bodies, Docker output and credentials out of operational logs.
         if type(error) is ValueError:
-            parser.exit(1, f"Fi update check failed: {error}\n")
-        parser.exit(1, f"Fi update check could not read required evidence ({type(error).__name__})\n")
+            parser.exit(1, f"Update check failed: {error}\n")
+        parser.exit(1, f"Update check could not read required evidence ({type(error).__name__})\n")
 
 
 if __name__ == "__main__":

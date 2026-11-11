@@ -1,6 +1,8 @@
-# Beta.21 qualification, publication and Fi update — 2026-11-04 JST
+# Beta.21 qualification, publication and application host update — 2026-11-04 JST
 
-The user authorized review, fixes, pushing, a new release and Fi installation.
+> Deployment identifiers are anonymized. Dates, source and artifact identities, outcomes, and qualification limits are retained.
+
+The user authorized review, fixes, pushing, a new release and installation on the application host.
 GitHub failures must be diagnosed and repaired before another attempt unless the
 cause is demonstrably external. This record distinguishes completed outcomes from
 pending work; earlier source-only acceptance remains dated history.
@@ -17,7 +19,7 @@ preflight: this remote-archive profile always starts media, whose first startup
 requires its service key. The repaired guard requires the provisioned authority
 while permitting normal audio. Core HTTP readiness follows authority startup.
 Offline coverage checks normal mode, missing authority and incorrect sockets.
-Fi regained its retained endpoint configuration during the stopped update,
+The application host regained its retained endpoint configuration during the stopped update,
 with normal audio still selected, enabling admin-only switching.
 No remaining actionable authorization, revision/receipt, byte-read or client-route
 finding was identified. Five existing Rust ignores and the local rootless-skopeo
@@ -30,8 +32,8 @@ of this release; workspace package versions alone advance to beta.21.
 
 ## Qualification and installation status
 
-Qualification, publication and the Fi update completed successfully at signed source
-`280b04f6cfe76f6f52122e63ea00e1238e37d1e6`. Fi is healthy on beta.21 with normal
+Qualification, publication and the application host update completed successfully at signed source
+`280b04f6cfe76f6f52122e63ea00e1238e37d1e6`. The application host is healthy on beta.21 with normal
 audio selected and its separate endpoint retained for the admin toggle. The
 stopped-writer recovery pair, immutable image identity and live acceptance are
 recorded below. Earlier failed attempts remain explicit historical evidence.
@@ -59,7 +61,7 @@ contracts, architecture/document links, format and diff checks pass. Broader pri
 local coverage is retained in the dated audio record; clean exact-source release
 coverage must still come from the candidate workflow.
 
-Fi preflight reports 123 Items, one user, two grants and 6,811 Jobs, with no unfinished
+Application host preflight reports 123 Items, one user, two grants and 6,811 Jobs, with no unfinished
 Jobs, paused mail connection revision 2 and a fresh synced Bridge. Local Btrfs has
 about 458 GB free, and the archive remains the intended hard NFSv4.1 mount. These
 read-only observations do not constitute deployment or a recovery point.
@@ -91,7 +93,7 @@ but that qualification run was cancelled after the source failure, before its
 fallback could execute the same source checks again. These exports are not sealed
 release evidence and will not be published. No workflow was blindly rerun. The next
 candidate's source Checks must pass before container qualification is dispatched.
-Fi remains on the healthy beta.20 image; no deployment or recovery snapshot has
+The application host remains on the healthy beta.20 image; no deployment or recovery snapshot has
 been performed for beta.21 yet.
 
 The readiness drill now selects a real directory through a picker initially
@@ -130,7 +132,7 @@ the chooser control stayed enabled and connected, but received neither files nor
 input/change events. Thus neither disk pressure nor a general Chrome directory
 failure explains that remaining result. Further session/context diagnostics are
 in progress; this diagnostic failure is not release acceptance. No failed release
-workflow has been blindly rerun, and Fi is unchanged.
+workflow has been blindly rerun, and the application host is unchanged.
 
 The expanded diagnostic
 [41794430747](https://github.com/AberrantWolf/junk-collector/actions/runs/41794430747)
@@ -185,28 +187,25 @@ Final source qualification of the isolated journey is still required.
 
 Install reference:
 `ghcr.io/aberrantwolf/junk-collector@sha256:897ed9af50f3f3e500cd83f3177d95389a4d7339cbf2209b9fac07310b5dbc74`.
-The Fi source archive checksum is
+The application host source archive checksum is
 `6643da05bfb38dc6ce2ef92a15415d9e6b3aea79080e2fdff6d111a209f2a38c`.
 
-## Fi activation and live acceptance — 17:27 JST
+## Application host activation and live acceptance — 17:27 JST
 
-Fi anonymously pulled the immutable index using an isolated empty Docker auth
+The application host anonymously pulled the immutable index using an isolated empty Docker auth
 configuration, and its platform/version/source labels matched qualification.
 Before activation, all five stack containers were stopped through the owning
 `junk-collector-remote.service`; no Jobs were cancelled. Both databases passed
 `quick_check` against the stopped full-state snapshot. The complete recovery pair
-is sealed in private metadata under
-`/var/backups/collector-fi-pairs/before-beta21-20261104-280b04f`:
+is sealed in private metadata:
 
-- Fi read-only full local-state snapshot: that directory's `fi-data` subvolume,
-  including config, private/catalog state, profiles, certificates and Caddy data;
-  the media authority service key and exact deployment/env/unit files are retained
-  alongside it with private permissions.
-- NAS read-only whole archive-parent snapshot:
-  `/volume1/collector-recovery/before-beta21-20261104-280b04f`, snapshot UUID
-  `b4ce1310-d18e-8d4c-96a7-16b29eb2cd3e`, source UUID
-  `83961ea2-acfb-374d-a2c6-41be3ebf2a1b`. Nested subvolumes and NAS Collector writers
-  were checked absent before snapshotting. This is a matched stopped-writer pair,
+- The read-only full application-state snapshot includes config, private/catalog
+  state, profiles, certificates and Caddy data. The media authority service key
+  and exact deployment/env/unit files are retained alongside it with private
+  permissions.
+- The private record identifies the read-only whole archive-parent snapshot and
+  its source. The operator checked for nested subvolumes and NAS Collector writers
+  before snapshotting and found neither. This is a matched stopped-writer pair,
   not a partial database rollback or an independent/off-site backup claim.
 
 The exact source's preflight and HTTP readiness overlay were installed. The
@@ -226,8 +225,7 @@ after facts match: 123 Items, 6,811 Jobs, one user, two grants, two profile file
 one paused mail connection at revision 2, unchanged cursor and no unfinished Jobs.
 Receipt suggestions and accepted purchase facts are compared, not recreated.
 
-Trusted public and LAN HTTPS health/identity return 200 with unchanged ServerId
-`01a15429-856a-7763-b558-3c158b1604a0`. All eight checked assets, including the new
+Trusted public and LAN HTTPS health/identity return 200 with unchanged server identity. All eight checked assets, including the new
 administration bundle, match frozen release source. Anonymous playback discovery,
 audio bytes, FLAC export and admin audio-policy requests return 401 on both origins.
 The provisioned separate HTTPS identity also returns the same ServerId. An early
@@ -237,7 +235,7 @@ After the explicit readiness check succeeded, all live checks above passed.
 Authenticated production playback, iPhone/Safari and cellular behavior were not
 retested during this update. Real signed-in playback, ranges, seeking, route
 switching and permission denial are qualified by the isolated source/image tests;
-those are not a claim of a live Fi listening session. Five existing Rust ignores
+those are not a claim of a live listening session on the application host. Five existing Rust ignores
 and the precise old-page directory automation limitation remain documented.
-Private deployment evidence stays on Fi; session logs, public receipts and registry
+Private deployment evidence stays on the application host; session logs, public receipts and registry
 checks are retained under `/tmp/collector-beta21` for this working session.

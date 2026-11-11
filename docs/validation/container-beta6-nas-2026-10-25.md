@@ -17,8 +17,7 @@ installation update, separate from the [publication acceptance](container-beta6-
 - Retained exact beta.5 image:
   `sha256:4965931a4ab99d48b3b285455228d23b809a54111eb75df6dccb226861064965`,
   also tagged `junk-collector:before-beta6-20261024T235154Z`.
-- Complete stopped-server read-only Btrfs snapshot:
-  `/volume1/collector-recovery/before-beta6-20261024T235154Z`.
+- The complete stopped-server read-only Btrfs snapshot was retained.
   The private adjacent `-metadata` directory retains the original stack,
   deployment settings, exact identities/image IDs and the NAS-clock cutoff.
   The timestamp is UTC; the update occurred on October 25 in Japan.

@@ -74,8 +74,8 @@ stopped during offline operations. The retained beta.13 image and full restricte
 stack/runtime metadata accompany the complete read-only snapshot:
 
 ```text
-/volume1/collector-recovery/before-beta14-20261030T045400Z
-/volume1/collector-recovery/before-beta14-20261030T045400Z-metadata
+/path/to/recovery/<snapshot>
+/path/to/recovery/<snapshot>-metadata
 ```
 
 The first extra SQLite check could not initialize SQLite shared memory on the

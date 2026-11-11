@@ -59,9 +59,8 @@ No local image build occurred. With no unfinished Jobs, all five stack services
 stopped and all actual PIDs reached zero. Full read-only snapshots and database
 quick checks succeeded before sealing the matching pair:
 
-- application-host: `/var/backups/collector-recovery-pairs/before-beta18-20261102-4fecd6f/application-data`.
-- NAS: `/volume1/collector-recovery/before-beta18-20261102-4fecd6f`.
-- NAS snapshot UUID: `f16268e0-71ce-c04c-bc6c-d1060eb61d43`.
+- application-host: the private application-state snapshot.
+- NAS: the private archive-parent snapshot.
 
 application-host covers all local private state/WAL, imports/scratch, configuration/TLS, Bridge
 home/cache and profiles; NAS covers the entire archive parent subvolume. Neither
@@ -72,8 +71,7 @@ Rollback requires both matching members with all writers stopped.
 Acceptance completed at **2026-11-02 20:55:20 JST**. The executable reports
 `junk-collector 0.1.0-beta.18`; core/media use the qualified immutable image and all
 five stack containers have zero restarts. Core is healthy. Public and LAN HTTPS
-return 200 with trusted TLS and unchanged ServerId
-`01a15429-856a-7763-b558-3c158b1604a0`. Seven served assets match frozen source:
+return 200 with trusted TLS and unchanged server identity. Seven served assets match frozen source:
 `app.js`, `app.css`, `curation.js`, `library-imports.js`, `purchase-inbox.js`,
 `library-metadata.js` and `library-preparation.js`.
 

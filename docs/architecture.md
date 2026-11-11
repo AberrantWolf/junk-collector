@@ -245,7 +245,7 @@ user decisions and calls application commands rather than composing a second pip
 Full selected checks and 30 browser journeys pass. Independent clean-context review
 and its verified corrections have no remaining actionable findings; see
 [delivery evidence](validation/inbox-recovery-2026-10-31.md). Signed source `0bec4af` is now installed
-on Fi; [deployment evidence](validation/inbox-recovery-deployment-2026-10-31.md) records retained state.
+on the application host; [deployment evidence](validation/inbox-recovery-deployment-2026-10-31.md) records retained state.
 
 ## Connected Bridge folder editing — 2026-10-31
 
