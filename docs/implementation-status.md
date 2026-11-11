@@ -27,12 +27,11 @@ parsed items. Rescans fill missing fields on the same unaccepted suggestion
 without undoing dismissals or changing accepted history. See
 [parser coverage and validation](email-purchases.md#import-and-parser-coverage).
 
-## Beta.24 published — 2026-11-10
+## Beta.26 published and deployed — 2026-11-11
 
-The signed beta.24 image is available from the preview channel. See its
-[qualification and publication record](validation/container-beta24-publication-2026-11-10.md).
-The split-host installation's last accepted deployment is
-[beta.23](validation/container-beta23-publication-2026-11-07.md).
+The signed beta.26 image is available from the preview channel. The split-host
+installation passed deployment acceptance. See the
+[qualification, publication and deployment record](validation/container-beta26-publication-2026-11-11.md).
 
 | Capability | Implemented behavior | Limits / evidence |
 | --- | --- | --- |

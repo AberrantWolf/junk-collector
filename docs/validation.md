@@ -9,8 +9,8 @@ Use [implementation status](implementation-status.md) for availability and
 
 | Topic | Entry point |
 | --- | --- |
-| Latest completed publication | [Beta.20 qualification/publication](validation/container-beta20-publication-2026-11-03.md) |
-| Later source repair | [Withdrawn-publication cleanup](validation/cancelled-publication-2026-11-03.md); not part of the published beta.20 image |
+| Latest completed publication | [Beta.26 qualification, publication and deployment](validation/container-beta26-publication-2026-11-11.md) |
+| Withdrawn-publication recovery | [Withdrawn-publication cleanup](validation/cancelled-publication-2026-11-03.md); not part of the published beta.20 image |
 | Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md) |
 | Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
 | Library and media | [Layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
