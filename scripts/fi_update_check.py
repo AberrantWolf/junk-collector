@@ -3,6 +3,7 @@
 
 import argparse
 from contextlib import closing, contextmanager, nullcontext
+from datetime import datetime
 from getpass import getpass
 from hashlib import sha256
 import json
@@ -28,6 +29,8 @@ UPDATED = {"collector", "media"}
 REQUIRED = UPDATED | {"media-https", "proton-bridge"}
 DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
 BETA = re.compile(r"(\d+)\.(\d+)\.(\d+)-beta\.(\d+)")
+# The scanner updates these fields without changing the connection settings.
+RECEIPT_SCAN_FIELDS = {"cursor", "last_checked", "problem", "failure", "progress"}
 
 
 def require(condition, message):
@@ -193,6 +196,11 @@ def database(path, stopped):
             yield db
 
 
+def mail_connections(db):
+    rows = db.execute("SELECT id, owner, record FROM mail_connections ORDER BY id")
+    return [(id_, owner, json.loads(record)) for id_, owner, record in rows]
+
+
 def state_facts(state, stopped=False):
     with database(state / "private.sqlite", stopped) as db:
         if stopped:
@@ -208,7 +216,10 @@ def state_facts(state, stopped=False):
             "staged_imports": db.execute("SELECT id, revision, phase FROM imports WHERE phase IN ('staging','awaiting_review') ORDER BY id").fetchall(),
             "accounts": db.execute("SELECT id, administrator, enabled FROM users ORDER BY id").fetchall(),
             "grants": db.execute("SELECT collection_id, user_id, role FROM grants ORDER BY collection_id, user_id").fetchall(),
-            "mail_connections": db.execute("SELECT id, owner, record FROM mail_connections ORDER BY id").fetchall(),
+            "mail_connection_settings": [
+                (id_, owner, {key: value for key, value in record.items() if key not in RECEIPT_SCAN_FIELDS})
+                for id_, owner, record in mail_connections(db)
+            ],
         }
     with database(state / "catalog.sqlite", stopped) as db:
         if stopped:
@@ -252,6 +263,31 @@ def wait_for_bridge(reporter, timeout):
         time.sleep(min(2, remaining))
 
 
+def wait_for_receipt_scanner(state, started_at, timeout=180):
+    started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    until = time.monotonic() + timeout
+    while True:
+        with database(state / "private.sqlite", stopped=False) as db:
+            enabled = [record for _, _, record in mail_connections(db) if record["enabled"]]
+        if not enabled:
+            return "Receipt scanner: no enabled connections."
+        problems = sum(bool(record.get("problem") or record.get("failure")) for record in enabled)
+        pending = sum(
+            not record.get("last_checked")
+            or datetime.fromisoformat(record["last_checked"].replace("Z", "+00:00")) <= started
+            for record in enabled
+        )
+        if not problems and not pending:
+            return f"Receipt scanner: successful post-start checks for {len(enabled)} enabled connections."
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            raise ValueError(
+                f"Receipt scanner verification timed out ({problems} reported a problem, "
+                f"{pending} waiting for a successful post-start check)."
+            )
+        time.sleep(min(2, remaining))
+
+
 def snapshot_identity(pair):
     path = pair.resolve() / "fi-data"
     require(path.resolve(strict=True) == path, "Use the pair's read-only Fi snapshot")
@@ -265,7 +301,7 @@ def snapshot_identity(pair):
 
 
 def fingerprints(facts, config):
-    values = {name: value if isinstance(value, bytes) else json.dumps(value).encode()
+    values = {name: value if isinstance(value, bytes) else json.dumps(value, sort_keys=True).encode()
               for name, value in facts.items()}
     values["collector_config"] = config.read_bytes()
     return {name: sha256(value).hexdigest() for name, value in values.items()}
@@ -362,13 +398,14 @@ def main():
                 old_image, = docker_json("image", "inspect", image_id)
                 old_version = beta_version(old_image["Config"]["Labels"]["org.opencontainers.image.version"])
                 require((0, 1, 0, 22) <= old_version < beta_version(image["version"]),
-                        "Routine updates require an installed beta.22 or newer and a later target beta")
+                        "Routine Fi updates require an installed beta.22 or newer and a later target beta")
             state_facts(state)
             write_record(record, {"request": request, "services": current, "sample": sample})
             print(f"Pre-update checks passed. Private baseline saved to {record}. {bridge}")
         else:
             require(before["sample"] == sample, "ServerId, signed-in account or retained item changed")
             compare_stack(before["services"], current, image)
+            receipts = wait_for_receipt_scanner(state, services["collector"]["State"]["StartedAt"])
             config = bound_path(services, "/data/config", False) / "collector.toml"
             old = cutoff["fingerprints"]
             new = fingerprints(state_facts(state), config)
@@ -376,6 +413,7 @@ def main():
             changed = [name for name in old if old[name] != new[name]]
             require(not changed, "Retained state differs from the cutoff: " + ", ".join(changed))
             print(f"Fi {image['version']} passed image, runtime, HTTPS, authenticated read and cutoff checks. {bridge}")
+            print(receipts)
     except (ValueError, OSError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as error:
         # Keep response bodies, Docker output and credentials out of operational logs.
         if type(error) is ValueError:

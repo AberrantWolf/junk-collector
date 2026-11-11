@@ -47,9 +47,8 @@ compare the other companions against the baseline.
    downloaded release bundle and `release-image.json`. Pull the record's exact
    immutable `reference` on the application host with
    `docker pull --platform linux/amd64` before downtime. Keep the old image
-   available locally by digest. Keep imports idle and pause the Collector
-   receipt scan before recording the baseline if it was enabled. Bridge stays
-   running and synced until the service stop.
+   available locally by digest. Keep imports idle. Leave receipt scanning at
+   its saved setting. Bridge stays running and synced until the service stop.
 2. Create a fresh private recovery directory on the application host with mode
    0700. From the source checkout or unpacked release bundle, run the checker
    on the application host. Use the existing Compose project name and three
@@ -90,8 +89,9 @@ compare the other companions against the baseline.
    with both paths and snapshot IDs before editing the pins. An incomplete
    pair stops the update. With writers still stopped, pass the recorded NAS
    snapshot UUID to the cutoff check. It verifies the read-only local snapshot,
-   checks both SQLite databases and requires idle Jobs and imports. It records
-   the local snapshot UUID and fingerprints for the post-update comparison.
+   checks both SQLite databases and requires idle Jobs and imports. The sealed
+   pair is the data baseline. The checker records the snapshot identities and
+   fingerprints the stopped application state for the post-update comparison.
 
    ```bash
    host_admin /usr/bin/python3 -B "$source_dir/scripts/fi_update_check.py" cutoff "${check_args[@]}" \
@@ -104,25 +104,30 @@ compare the other companions against the baseline.
 4. Edit only `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` in the installed
    EnvironmentFile to the verified immutable reference. Run
    `host_admin systemctl start junk-collector-remote.service` so the mount preflight runs.
-   Keep normal traffic and receipt scanning quiet during acceptance. Run the
-   post-update check with the same session.
+   Keep normal traffic quiet during acceptance. Enabled receipt scans can
+   resume at startup. Run the post-update check with the same session.
 
    ```bash
    host_admin /usr/bin/python3 -B "$source_dir/scripts/fi_update_check.py" after "${check_args[@]}"
    ```
 
-5. Record the pass beside the sealed pair, then resume ordinary use and restore
-   the receipt scan setting if it changed. The checker compares the exact
-   running image and its pinned reference, restart counts, mounts, retained
+5. Record the pass beside the sealed pair, then resume ordinary use. The checker
+   compares the exact running image and its pinned reference, restart counts, mounts, retained
    companion identities, a fresh synced Bridge report, public/LAN health, all
    three ServerIds and the authenticated sample revision. It compares account
-   and grant rows, mail connections, archive binding, TLS certificate, config,
-   and Item, Job and Import counts with the stopped application host snapshot.
+   and grant rows, saved mail connection settings, archive binding, TLS
+   certificate, config, and Item, Job and Import counts with the stopped
+   application host snapshot.
    Staged imports and imports awaiting review keep their identity and revision.
    A snapshot WAL is read using a temporary local database copy when needed.
    These checks read no media payloads. The after check waits up to two
    minutes for a fresh completed Bridge sync and reports a sync interruption
-   separately from a timeout.
+   separately from a timeout. It also waits up to three minutes for a successful
+   receipt check after Collector started on every enabled connection. Cursor,
+   last-checked time, folder progress and scan diagnostics may change after
+   startup. A scan problem still present at the deadline or a missing fresh
+   check fails receipt scanner verification. Disabled connections are excluded
+   from the health check and remain covered by the settings comparison.
 
 A failed check is an unresolved update. Preserve the pair and diagnose the
 reported failure. If rollback is needed after new writes, restore the matching

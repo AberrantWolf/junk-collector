@@ -16,6 +16,20 @@ from unittest.mock import patch
 import fi_update_check as check
 
 
+MAIL_CONNECTION = {
+    "profile": {"id": "mail", "owner": "owner", "folders": ["INBOX"]},
+    "collection_id": "music",
+    "enabled": True,
+    "revision": 2,
+    "folders": ["INBOX"],
+    "cursor": "old",
+    "last_checked": "2026-11-11T12:00:00Z",
+    "problem": None,
+    "failure": None,
+    "progress": [],
+}
+
+
 class FiUpdateTests(unittest.TestCase):
     def test_stopped_cutoff_reads_committed_wal_without_modifying_snapshot(self):
         with tempfile.TemporaryDirectory() as temporary, closing(sqlite3.connect(Path(temporary) / "private.sqlite")) as db:
@@ -32,8 +46,9 @@ class FiUpdateTests(unittest.TestCase):
                 INSERT INTO imports VALUES ('saved', 2, 'published'), ('draft', 3, 'awaiting_review');
                 INSERT INTO users VALUES ('owner', 1, 1);
                 INSERT INTO grants VALUES ('music', 'owner', 'owner');
-                INSERT INTO mail_connections VALUES ('mail', 'owner', 'paused cursor');
             """)
+            db.execute("INSERT INTO mail_connections VALUES ('mail', 'owner', ?)", (json.dumps(MAIL_CONNECTION),))
+            db.commit()
             with closing(sqlite3.connect(live / "catalog.sqlite")) as catalog:
                 catalog.executescript("CREATE TABLE items(id); INSERT INTO items VALUES ('item');")
             (live / "archive-binding").write_bytes(b"binding")
@@ -51,6 +66,20 @@ class FiUpdateTests(unittest.TestCase):
             self.assertEqual(old["staged_imports"], [("draft", 3, "awaiting_review")])
             self.assertEqual((cutoff / "private.sqlite-wal").read_bytes(), before)
             self.assertFalse((cutoff / "private.sqlite-shm").exists())
+            config = live / "collector.toml"
+            config.write_text("fixture")
+            saved = check.fingerprints(old, config)
+            advanced = dict(MAIL_CONNECTION, cursor="next", last_checked="2026-11-11T12:05:00Z",
+                            progress=[{"folder": "INBOX", "scanned_through": 5}])
+            db.execute("UPDATE mail_connections SET record=?", (json.dumps(advanced),))
+            db.commit()
+            self.assertEqual(check.fingerprints(check.state_facts(live), config), saved)
+            for change in ({"enabled": False}, {"folders": ["Orders"]}, {"collection_id": "another"},
+                           {"profile": dict(advanced["profile"], owner="another")}, {"revision": 3}):
+                with self.subTest(change=change):
+                    db.execute("UPDATE mail_connections SET record=?", (json.dumps(dict(advanced, **change)),))
+                    db.commit()
+                    self.assertNotEqual(check.fingerprints(check.state_facts(live), config), saved)
             db.execute("DELETE FROM grants")
             db.commit()
             self.assertNotEqual(old["grants"], check.state_facts(live)["grants"])
@@ -63,6 +92,37 @@ class FiUpdateTests(unittest.TestCase):
             db.commit()
             with self.assertRaisesRegex(ValueError, "Unfinished Jobs"):
                 check.state_facts(live)
+
+    def test_receipt_scanner_requires_a_fresh_success_for_each_enabled_connection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            with closing(sqlite3.connect(state / "private.sqlite")) as db:
+                db.execute("CREATE TABLE mail_connections(id, owner, record)")
+                db.executemany("INSERT INTO mail_connections VALUES (?, 'owner', ?)", [
+                    ("mail", json.dumps(MAIL_CONNECTION)),
+                    ("other", json.dumps(dict(MAIL_CONNECTION, last_checked="2026-11-11T12:06:00Z"))),
+                    ("disabled", json.dumps(dict(MAIL_CONNECTION, enabled=False, problem="old failure"))),
+                ])
+                db.commit()
+                started = "2026-11-11T12:05:00.123456789Z"
+                with self.assertRaisesRegex(ValueError, "waiting for a successful post-start check"):
+                    check.wait_for_receipt_scanner(state, started, timeout=0)
+                fresh = dict(MAIL_CONNECTION, last_checked="2026-11-11T12:06:00Z")
+                broken = dict(fresh, problem="private diagnostic", failure={"kind": "transport"})
+                db.execute("UPDATE mail_connections SET record=? WHERE id='mail'", (json.dumps(broken),))
+                db.commit()
+                with self.assertRaisesRegex(ValueError, "reported a problem") as error:
+                    check.wait_for_receipt_scanner(state, started, timeout=0)
+                self.assertNotIn("private diagnostic", str(error.exception))
+                def complete_scan(_):
+                    db.execute("UPDATE mail_connections SET record=? WHERE id='mail'", (json.dumps(fresh),))
+                    db.commit()
+
+                with patch.object(check.time, "sleep", side_effect=complete_scan):
+                    self.assertIn("2 enabled", check.wait_for_receipt_scanner(state, started, timeout=10))
+                db.execute("DELETE FROM mail_connections WHERE id != 'disabled'")
+                db.commit()
+                self.assertIn("no enabled", check.wait_for_receipt_scanner(state, started, timeout=0))
 
     def test_target_pin_and_companion_recreation_are_checked(self):
         old = {"id": "before", "image": "old", "reference": "old-ref", "mounts": []}
