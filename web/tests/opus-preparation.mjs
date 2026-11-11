@@ -244,7 +244,9 @@ opus = "${wrapper}"
  },{timeout:45000}).toEqual(['published','failed']);
  const brokenSummary=await member(intakePage,brokenIntake);
  const failed=await request(intakePage,`/ingests/${brokenSummary.import_id}`);
- assert.match(failed.steps.find(step=>step.step==='preparation').message,/no supported audio tracks/);
+ const preparationFailure=failed.steps.find(step=>step.step==='preparation');
+ assert.equal(preparationFailure.state,'failed');
+ assert.equal(preparationFailure.job_id??null,null,'Unsupported bytes must fail before scheduling preparation');
  const retained=await request(intakePage,`/items/${brokenSummary.target_item_id}`);
  assert.equal(retained.captures[0].representations.length,1);
  assert.equal(retained.captures[0].representations[0].files[0].digest.hex,createHash('sha256').update(brokenBytes).digest('hex'));
