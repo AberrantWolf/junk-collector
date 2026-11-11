@@ -55,6 +55,8 @@ pub fn path_disc_number(name: &str) -> Option<u16> {
 pub struct MusicImportTrack {
     pub file_name: String,
     pub disc_position: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_position: Option<u16>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -137,10 +139,11 @@ pub fn import_layout(
                 !known.contains(track.file_name.as_str())
                     || !selected.insert(track.file_name.as_str())
                     || track.disc_position == Some(0)
+                    || track.display_position == Some(0)
             })
         {
             return Err(ModuleError::Invalid(
-                "Choose distinct audio files and positive disc numbers for album playback.".into(),
+                "Choose distinct audio files and positive disc and track numbers for album playback.".into(),
             ));
         }
         reviewed.to_vec()
@@ -166,6 +169,7 @@ pub fn import_layout(
             .map(|name| MusicImportTrack {
                 file_name: name.clone(),
                 disc_position: path_disc_number(name),
+                display_position: None,
             })
             .collect()
     };
@@ -442,6 +446,7 @@ mod layout_tests {
         let selected = [MusicImportTrack {
             file_name: names[0].clone(),
             disc_position: Some(3),
+            display_position: Some(7),
         }];
         let layout = import_layout(&names, Some(&selected)).unwrap();
         assert!(!layout.needs_attention);
@@ -452,10 +457,16 @@ mod layout_tests {
             vec![MusicImportTrack {
                 file_name: "missing.flac".into(),
                 disc_position: Some(1),
+                display_position: None,
             }],
             vec![MusicImportTrack {
                 file_name: names[0].clone(),
                 disc_position: Some(0),
+                display_position: None,
+            }],
+            vec![MusicImportTrack {
+                display_position: Some(0),
+                ..selected[0].clone()
             }],
         ] {
             assert!(import_layout(&names, Some(&tracks)).is_err());

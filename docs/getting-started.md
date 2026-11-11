@@ -52,7 +52,7 @@ Run the server as an ordinary user with access to its storage and configured inb
 
 1. Sign in at a management-enabled address. Choose **Create collection**, then games or music.
 2. Open **Imports**. Select the collection and **Browser folder / files** or **Server inbox**.
-3. Review each package under **Files and analysis**. Use the options below when needed.
+3. For digital albums, choose a music collection and open **Files and album playback**. Other packages show **Files and analysis**.
 4. Choose **Start import**. Keep the page open until browser uploading finishes.
 5. Open the item to see files, metadata, artwork and evidence.
 
@@ -63,6 +63,7 @@ Run the server as an ordinary user with access to its storage and configured inb
 | Folders | Review discovered packages and their album playback trees. Set **Folder layout** for a browser selection. Server inbox files and directories use **Review packages**. |
 | Individual files | Assemble one package. Unassigned files appear separately. |
 | Analysis anchor | Choose the intended CUE or Redumper anchor when several exist. Review shared files. |
+| Digital album playback | Check the suggested tracks or select a format, then set the disc count and assign checked tracks to discs. All originals are preserved. |
 | Album group | Give related discs the same label. Leave manual title empty for automatic metadata. |
 | Physical copy label | Matching labels within an album mean one purchased copy. Different labels mean separate copies, not disc numbers. |
 | Metadata/artwork | Acquired automatically when available. Manual edits remain authoritative. |

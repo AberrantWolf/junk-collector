@@ -175,8 +175,9 @@ file or directory as one package. Separate top-level physical discs retain the
 existing reviewed album-group workflow. Raw-disc anchors retain their existing
 package/analysis ownership.
 
-Browser discovery accepts a selected-container prefix for boundary discovery only;
-original paths and order must survive. The browser's Folder layout control can
+Browser discovery accepts a selected-container prefix for boundary discovery only.
+Discovery must preserve original paths and order. A reviewer can explicitly
+change the order used for preservation. The browser's Folder layout control can
 choose one album or separate top-level items. Its best guess treats direct audio and immediate format or disc folders as one
 album. Other layouts discover child packages.
 
@@ -187,11 +188,14 @@ appear above or below encoding folders. Unknown audio branches, unequal format
 counts and unscoped files in a multi-disc layout must require review before new
 admission. No review query may hash or decode the payload.
 
-The expandable review tree controls playback membership and per-file disc numbers;
-all reviewed originals and companions must remain in the preservation inventory.
+The expandable review tree controls playback membership, disc numbers and optional
+track number overrides for selected files. All reviewed originals and companions
+must remain in the preservation inventory.
 The tree builds only when opened, pages each folder to 50 children and bounds its
 hierarchy to 32 levels, displaying deeper path suffixes intact at the leaf. File
-and folder checkboxes, format shortcuts and disc dropdowns edit the signed plan.
+and folder checkboxes, format shortcuts, disc dropdowns and track number inputs
+edit the signed plan. An explicit track number must populate the source-bound
+display override without changing the immutable source track identity.
 Optional selections survive existing durable file declarations and publish through
 an idempotent, cancellation-fenced command into ordinary source-bound track
 metadata authority. Later manual edits must survive reconciliation and reindex.

@@ -107,3 +107,6 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 }
 @keyframes page-spin { to { transform: rotate(1turn); } }
 @media (prefers-reduced-motion: reduce) { .page-spinner { animation: none; } }
+
+:root{--row-stripe:color-mix(in srgb,var(--paper) 65%,var(--accent))}
+.striped-rows > :nth-child(even){background:var(--row-stripe)}

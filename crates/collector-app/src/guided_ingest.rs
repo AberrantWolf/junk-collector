@@ -712,7 +712,7 @@ impl CollectionService {
             let album_tracks = package.album_tracks.as_ref().map(|tracks| {
                 tracks
                     .iter()
-                    .map(|track| (track.file_name.as_str(), track.disc_position))
+                    .map(|track| (track.file_name.as_str(), track))
                     .collect::<BTreeMap<_, _>>()
             });
             let files = package
@@ -741,7 +741,8 @@ impl CollectionService {
                             .as_ref()
                             .filter(|_| collector_modules::music::files::is_audio_name(&file.name))
                             .map(|_| reviewed.is_some()),
-                        album_disc_position: reviewed.copied().flatten(),
+                        album_disc_position: reviewed.and_then(|track| track.disc_position),
+                        album_display_position: reviewed.and_then(|track| track.display_position),
                         visibility: file.visibility.unwrap_or(Visibility::Shared),
                         name: file.name.clone(),
                         bytes: file.bytes,

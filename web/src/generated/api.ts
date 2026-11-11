@@ -3955,6 +3955,8 @@ export interface components {
         ImportDeclaredFile: {
             /** Format: int32 */
             album_disc_position?: number | null;
+            /** Format: int32 */
+            album_display_position?: number | null;
             album_selected?: boolean | null;
             bytes: components["schemas"]["ByteLength"];
             digest?: components["schemas"]["Digest"] | null;
@@ -4940,6 +4942,8 @@ export interface components {
         MusicImportTrack: {
             /** Format: int32 */
             disc_position?: number | null;
+            /** Format: int32 */
+            display_position?: number | null;
             file_name: string;
         };
         MusicMediumCoverage: {

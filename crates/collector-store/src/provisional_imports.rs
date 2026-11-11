@@ -651,12 +651,18 @@ impl ProvisionalImportPort for Store {
         {
             return Ok(record);
         }
+        let initial_sizes = initial_inventory
+            .iter()
+            .map(|file| (file.name.as_str(), file.bytes))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        // Directory scans sort by name. Staging indices follow the reviewed manifest.
         if record.view.phase != ImportPhase::Staging
             || initial_inventory.len() != record.view.files.len()
-            || initial_inventory
+            || record
+                .view
+                .files
                 .iter()
-                .zip(&record.view.files)
-                .any(|(left, right)| left.name != right.name || left.bytes != right.bytes)
+                .any(|file| initial_sizes.get(file.name.as_str()) != Some(&file.bytes))
         {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }

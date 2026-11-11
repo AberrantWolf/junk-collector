@@ -41,6 +41,8 @@ try{
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
  await admin.getByLabel('Collection name').fill('Digital shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await page.getByRole('button',{name:'Administration',exact:true}).click();
+ await admin.getByLabel('Collection name').fill('Game Purchases');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const response=await fetch('/api/v1/collection-search?limit=50');const data=await response.json();return data.items.find(c=>c.name==='Digital shelf').id;});
  await page.goto(`${origin}/imports?collection=${collection}`);
  const imports=page.getByRole('region',{name:'Imports workspace'});
@@ -111,10 +113,82 @@ try{
  await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await page.getByText('1. My retained title',{exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(scratch,'digital-mobile.png'),fullPage:true});
  await page.setViewportSize({width:1440,height:1000});
- await page.goto(`${origin}/imports?collection=${collection}`);
- await imports.getByRole('combobox',{name:/^Source/}).selectOption('inbox');
- await imports.getByRole('region',{name:'Inbox package chooser'}).getByLabel('Digital purchase',{exact:true}).check();
- await imports.getByRole('button',{name:'Review packages',exact:true}).click();
+ // Mixed files in the same inbox directory, first reviewed under the wrong collection.
+ await copyFile(path.join(fixture,'01.flac'),path.join(fixture,'02.FLAC'));
+ await copyFile(path.join(fixture,'02.mp3'),path.join(fixture,'01.mp3'));
+ const gameCollection=await page.evaluate(async()=>{const response=await fetch('/api/v1/collection-search?limit=50');return (await response.json()).items.find(c=>c.name==='Game Purchases').id;});
+ async function reviewInboxPurchase(){
+  await imports.getByRole('combobox',{name:/^Source/}).selectOption('inbox');
+  await imports.getByRole('region',{name:'Inbox package chooser'}).getByLabel('Digital purchase',{exact:true}).check();
+  await imports.getByRole('button',{name:'Review packages',exact:true}).click();
+ }
+ await page.goto(`${origin}/imports?collection=${gameCollection}`);
+ await reviewInboxPurchase();
+ const destinationHint=imports.getByRole('region',{name:'Audio import destination'});
+ await expect(destinationHint).toContainText('Game Purchases');
+ await destinationHint.getByRole('button',{name:'Switch to Digital shelf'}).click();
+ await page.waitForURL(url=>url.searchParams.get('collection')===collection);
+ await reviewInboxPurchase();
+ await openFileTree(imports);
+ const playbackBox=name=>imports.getByRole('checkbox',{name:`Use for album playback: ${name}`,exact:true});
+ const playbackRows=imports.getByRole('checkbox',{name:/^Use for album playback:/});
+ assert.deepEqual(await playbackRows.evaluateAll(inputs=>inputs.map(input=>input.getAttribute('aria-label'))),
+  ['01.flac','02.FLAC','01.mp3','02.mp3'].map(name=>`Use for album playback: ${name}`),'Audio formats must stay together in a loose mixed directory');
+ await expect(playbackBox('01.flac')).toBeChecked();
+ await expect(playbackBox('02.FLAC')).toBeChecked();
+ await expect(playbackBox('01.mp3')).not.toBeChecked();
+ await imports.getByRole('button',{name:'Select MP3',exact:true}).click();
+ await expect(playbackBox('01.flac')).not.toBeChecked();
+ await expect(playbackBox('02.mp3')).toBeChecked();
+ await imports.getByRole('button',{name:'Select FLAC',exact:true}).click();
+ const discFor=name=>imports.getByLabel(`Disc for ${name}`,{exact:true});
+ const discCount=imports.getByLabel('Number of discs',{exact:true});
+ const applyDiscs=imports.getByRole('button',{name:'Apply disc count'});
+ await discCount.fill('2');await applyDiscs.click();
+ const trackNumber=name=>imports.getByRole('spinbutton',{name:`Track number for ${name}`,exact:true});
+ await trackNumber('02.FLAC').fill('7');
+ await trackNumber('02.FLAC').press('Tab');
+ await trackNumber('01.flac').fill('7');
+ await trackNumber('01.flac').press('Enter');
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 01.flac');
+ await trackNumber('01.flac').fill('9');
+ await trackNumber('01.flac').press('Enter');
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 02.FLAC');
+ await expect(trackNumber('01.flac')).toBeFocused();
+ await trackNumber('01.flac').fill('1');
+ await trackNumber('01.flac').press('Tab');
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 01.flac');
+ await discFor('01.flac').selectOption('2');
+ await imports.getByRole('button',{name:'Apply to below: Disc 2 from 01.flac',exact:true}).click();
+ await expect(discFor('02.FLAC')).toHaveValue('2');
+ await expect(playbackBox('02.mp3')).not.toBeChecked();
+ await discCount.fill('1');await applyDiscs.click();
+ await expect(discFor('02.FLAC')).toHaveValue('1');
+ await discFor('01.flac').selectOption({label:'New disc (2)'});
+ await imports.getByRole('button',{name:'Apply to below: Disc 2 from 01.flac',exact:true}).click();
+ await discFor('01.flac').selectOption('1');
+ const moveUp=imports.getByRole('button',{name:'Move 02.FLAC up',exact:true});
+ const moveDown=imports.getByRole('button',{name:'Move 02.FLAC down',exact:true});
+ await expect(moveDown).toBeDisabled();
+ await moveUp.click();
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 02.FLAC');
+ await expect(moveDown).toBeFocused();
+ await moveDown.press('Space');
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 01.flac');
+ await moveUp.click();
+ await expect(imports.getByRole('status').filter({hasText:'Import review saved'})).toBeVisible();
+ await page.reload();
+ await openFileTree(imports);
+ await expect(playbackRows.first()).toHaveAccessibleName('Use for album playback: 02.FLAC');
+ await expect(discFor('01.mp3')).toHaveCount(0);
+ await expect(trackNumber('01.mp3')).toHaveCount(0);
+ await expect(trackNumber('02.FLAC')).toHaveValue('7');
+ await expect(discFor('02.FLAC')).toHaveValue('2');
+ for(const width of [390,1440]){
+  await page.setViewportSize({width,height:1000});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Mixed import review overflows');
+  await imports.locator('details').filter({has:page.getByLabel('Number of discs',{exact:true})}).screenshot({path:path.join(scratch,`mixed-inbox-review-${width}.png`)});
+ }
  await imports.getByLabel('Store',{exact:true}).fill('Separate inbox purchase');
  await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
  const inboxId=new URL(page.url()).searchParams.get('item');
@@ -123,6 +197,12 @@ try{
  assert.notEqual(inboxItem,item);
  const inboxCapture=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),inboxItem);
  assert.equal(inboxCapture.specimens.length,0);assert.equal(inboxCapture.captures[0].association.specimen_id,null);assert.equal(inboxCapture.captures[0].purchase.store,'Separate inbox purchase');
+ assert.deepEqual(inboxCapture.captures[0].representations[0].files.map(file=>file.name).sort(),
+  ['01.flac','01.mp3','02.FLAC','02.mp3','booklet.txt','cover.png','receipt.txt']);
+ assert.deepEqual(inboxCapture.captures[0].representations[0].files.filter(file=>/\.flac$/i.test(file.name)).map(file=>file.name),
+  ['02.FLAC','01.flac'],'Preservation must use the reviewed file order');
+ const inboxTracks=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,inboxItem);
+ assert.deepEqual(inboxTracks.map(track=>[track.disc_position,track.display_position,track.audio_format.codec]),[[1,1,'flac'],[2,7,'flac']]);
  await writeFile(path.join(fixture,'broken.mp3'),Buffer.from('not a valid audio stream'));
  await page.goto(`${origin}/imports?collection=${collection}`);
  await imports.getByLabel("Choose one package's files").setInputFiles(path.join(fixture,'broken.mp3'));
@@ -304,13 +384,22 @@ try{
  await chooseFolder(page,steamImports.getByLabel('Choose folders',{exact:true}),large);
  await steamImports.locator('summary').filter({hasText:'Files and album playback'}).click();
  assert.equal(await steamImports.locator('.import-tree-file').count(),0);
- await steamImports.getByRole('button',{name:'▸ All files',exact:true}).click();
  await steamImports.getByRole('button',{name:'▸ Large review',exact:true}).click();
  const fileLabels=()=>steamImports.locator('.import-tree-file input[aria-label^="Use for album playback:"]').evaluateAll(inputs=>inputs.map(input=>input.getAttribute('aria-label')));
  const firstPage=await fileLabels();assert.equal(firstPage.length,50);
+ const largeDisc=name=>steamImports.getByLabel(`Disc for Large review/${name}.flac`,{exact:true});
+ await largeDisc('0048').selectOption('1');
+ await largeDisc('0049').selectOption({label:'New disc (2)'});
+ await steamImports.getByRole('button',{name:'Apply to below: Disc 2 from Large review/0049.flac',exact:true}).click();
+ await expect(largeDisc('0048')).toHaveValue('1');
  await steamImports.getByRole('button',{name:'Next entries',exact:true}).click();
  const secondPage=await fileLabels();assert.equal(secondPage.length,50);
  assert.equal(new Set([...firstPage,...secondPage]).size,100);
+ await expect(largeDisc('0050')).toHaveValue('2');
+ await largeDisc('0051').selectOption({label:'New disc (3)'});
+ await steamImports.getByRole('button',{name:'Apply to below: Disc 3 from Large review/0051.flac',exact:true}).click();
+ await expect(largeDisc('0050')).toHaveValue('2');
+ await expect(largeDisc('0099')).toHaveValue('3');
  // Steam-style format wrappers: real folder discovery, review and publication.
  const steam=path.join(scratch,'Steam soundtracks');
  for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/WAV','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
@@ -335,6 +424,8 @@ try{
  await openFileTree(wildRow);
  await wildRow.getByRole('button',{name:'Select FLAC',exact:true}).click();
  await wildRow.getByLabel(/Use for album playback: .*All FLAC\/02.flac$/).uncheck();
+ await wildRow.getByLabel('Number of discs',{exact:true}).fill('2');
+ await wildRow.getByRole('button',{name:'Apply disc count'}).click();
  await wildRow.getByLabel(/Disc for .*All FLAC\/01.flac$/).selectOption('2');
  // A saved draft restores choices independently of the browser's file handles.
  await expect(steamImports.getByRole('status').filter({hasText:'Import review saved'})).toBeVisible();

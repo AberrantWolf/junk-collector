@@ -505,6 +505,8 @@ pub struct ImportDeclaredFile {
     pub album_selected: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub album_disc_position: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_display_position: Option<u16>,
     #[serde(default, skip_serializing_if = "Visibility::is_shared")]
     pub visibility: Visibility,
     pub name: String,
@@ -4205,6 +4207,7 @@ impl CollectionService {
                 Ok(ImportDeclaredFile {
                     album_selected: None,
                     album_disc_position: None,
+                    album_display_position: None,
                     visibility: file
                         .visibility
                         .unwrap_or_else(|| default_import_visibility(file_audio, &file.name)),

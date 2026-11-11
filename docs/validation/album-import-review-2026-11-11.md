@@ -78,3 +78,71 @@ under `<temp-dir>/collector-purchases-Dt0l3s`. The tested debug server had SHA-2
 `13b2a3141b2091073f73559f0a780102e198043d78392fc12d426a230da738a3`.
 The full workspace suite was outside this focused rerun. Opus browser acceptance
 requires the unavailable `opusenc` executable.
+
+## Collection destination and disc controls follow-up
+
+A read-only inspection of an installed beta.25 in Firefox showed a mixed
+soundtrack inbox review under a Games collection. That review displayed
+original-file privacy checkboxes and a file-order editor. Playback proposals
+and disc assignments were available only when the same source was reviewed in
+a Music collection. The source change adds a collection switch, separates the
+playback and sharing controls, and sorts mixed directory entries by format
+without reordering the preserved inventory. It replaces the file-order buttons
+with a package-level disc count and per-file and folder assignment.
+
+The real-server purchase journey reproduced the Games destination, switched
+to Music, and confirmed that two FLAC tracks were checked by default and two MP3
+tracks were outside the playback selection. It exercised both format shortcuts,
+disc-count reduction, draft reload, and publication. The saved album played FLAC
+from discs 1 and 2 and retained all seven originals. Desktop and 390 px captures
+were inspected and the browser checked for horizontal overflow. An initial run
+timed out at a screenshot locator; the corrected journey passed in Chrome
+156.0.8078.74. Captures are under `<temp-dir>/collector-purchases-9tdK0S`.
+
+Web type checks, bundle build, web models, documentation checks and the short
+browser smoke passed. The inbox review journey also passed in Chromium
+153.0.8010.12, covering anchor selection, privacy, draft recovery, cleanup and
+31-album activity. Tested debug server SHA-256:
+`abfbb165e7b1107df0ec477265eec2ad25d796cecf33bcffa8c3e5b523bf823f`.
+This follow-up did not qualify a release or change the live installation.
+
+## Assign discs from a track onward
+
+Chrome 156.0.8078.74 passed the purchase journey with two successive disc splits
+in the 1,001-file review. The first split crossed a page boundary and the second
+retained the disc assignments before its starting track. The mixed inbox case
+verified that unchecked MP3s stayed outside playback, the reviewed assignments
+survived reload, and the imported album played the two FLACs on separate discs.
+Desktop and 390 px captures were inspected under
+`<temp-dir>/collector-purchases-v64lET`. The initial fixture timed out while
+trying to apply the already displayed disc count. The passing fixture creates
+each new disc from its starting track.
+
+The short smoke, type check, bundle build, web models and documentation checks
+passed. Tested debug server SHA-256
+`cf7d611fdf31c080db6a9c28f209b55cecc1d25e77871b8288c676cf7a5aee09`.
+
+## Aligned file review and editable track numbers
+
+Chrome 156.0.8078.74 passed the purchase journey on the final debug server.
+The mixed inbox fixture used Enter and Tab to move a numbered track, used both
+arrow directions, and kept keyboard focus on the edited track after Enter.
+The reordered review survived reload. Inbox staging preserved the reviewed
+file order, and the imported playback snapshot showed discs 1 and 2 with track
+numbers 1 and 7. Unchecked MP3 files had no disc or track number controls and
+were retained as originals. The 390 px and desktop captures were inspected under
+`<temp-dir>/collector-purchases-97cKpk`.
+
+Earlier runs exposed a tie in the keyboard test fixture, overflow outside the
+mobile table scroll area, and an inbox staging comparison that treated sorted
+directory order as part of file identity. The passing fixture uses distinct
+numbers, and the final UI and staging checks cover both fixes.
+
+The short browser smoke, module layout tests, 14 inbox archive tests, and the
+reviewed-number reindex test passed. The inbox review journey passed in Chromium
+153.0.8010.12, including anchor selection, privacy, cleanup, and 31-album
+activity. The standalone archive target needed Tokio
+macros enabled through its provider dependency. Strict Clippy for the affected
+crates, web type checks, bundle build, web models, API contract matching,
+formatting and documentation checks passed. Tested debug server SHA-256
+`3076dceba282c642470d5dded1cd68091c83a9d638b90d2a5a02e18d5d654429`.

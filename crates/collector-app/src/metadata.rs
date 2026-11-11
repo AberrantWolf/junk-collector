@@ -1908,6 +1908,9 @@ impl CollectionService {
                         if edit.disc_position.is_none() {
                             edit.disc_position = file.album_disc_position;
                         }
+                        if edit.display_position.is_none() {
+                            edit.display_position = file.album_display_position;
+                        }
                     } else {
                         overrides.track_overrides.push(
                             collector_modules::disc_audio::TrackMetadataOverride {
@@ -1915,7 +1918,7 @@ impl CollectionService {
                                 track_position: track.position,
                                 album_selected: Some(selected),
                                 disc_position: file.album_disc_position,
-                                display_position: None,
+                                display_position: file.album_display_position,
                                 title: None,
                             },
                         );

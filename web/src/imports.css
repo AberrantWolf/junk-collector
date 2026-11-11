@@ -264,7 +264,7 @@
 
 /* Batch review keeps package details above the independent grouping choices. */
 .intake-review-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;overflow-wrap:anywhere}
-.intake-review-row>.row-text{grid-column:1/-1}
+.intake-review-row>.row-text{grid-column:1/-1;grid-template-columns:minmax(0,1fr)}
 .intake-review-row label,.intake-review-row input,.intake-review-row select{min-width:0;max-width:100%}
 .intake-review-row input[type="checkbox"],.intake-actions input[type="checkbox"]{width:auto;flex:none}
 .intake-review-row .row-text label:has(input[type="checkbox"]),.intake-actions>label{display:flex;align-items:start;gap:.6rem}
@@ -301,7 +301,7 @@
 .import-review .guided-ingest { margin-bottom: 0; }
 
 .striped-imports > :nth-child(even) {
-  background: color-mix(in srgb, var(--paper) 65%, var(--accent));
+  background: var(--row-stripe);
 }
 .striped-imports > button:hover { background: var(--accent); }
 .intake-members > .care-row { padding-inline: .75rem; }
@@ -327,12 +327,56 @@ label.intake-select {
 }
 .intake-album-fields > div + div { margin-top: .75rem; }
 
-.import-file-tree,.import-file-tree ul{list-style:none;margin:.4rem 0;padding-left:1rem;border-left:1px solid var(--line)}
-.import-file-tree{padding-left:0;border-left:0}
-.import-tree-line{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;padding:.4rem 0;min-width:0}
-.import-tree-line>label{margin:0}
-.import-tree-line>small{color:var(--muted)}
+.import-format-actions,.import-disc-setup{display:flex;flex-wrap:wrap;gap:.5rem}
+.import-disc-setup{align-items:end;margin-block:.75rem}
+.import-disc-setup label{margin:0}
+.import-disc-setup input{width:6rem}
+.import-disc-setup small{align-self:center}
+
+.import-file-scroll{min-width:0;max-width:100%;overflow-x:auto}
+.import-file-tree,.import-original-table{
+ width:100%;table-layout:fixed;border-collapse:collapse;font-size:.875rem;background:var(--paper);
+}
+.import-file-tree{min-width:55rem}
+.import-file-tree :is(th,td),.import-original-table :is(th,td){
+ padding:.35rem .5rem;text-align:start;vertical-align:middle;overflow-wrap:anywhere;
+}
+.import-file-tree tbody th,.import-original-table tbody th{font-weight:500}
+.import-file-tree thead,.import-original-table thead{color:var(--muted)}
+.import-file-tree .striped-rows > :nth-child(even){background:transparent}
+.import-file-tree .striped-rows > :nth-child(even of .import-tree-file, .import-folder-row){background:var(--row-stripe)}
+.import-play-column{width:3.25rem}
+.import-disc-column{width:9rem}
+.import-track-column{width:6rem}
+.import-apply-column{width:9.5rem}
+.import-order-column{width:5.5rem}
+.import-size-column{width:5rem}
+.import-privacy-column{width:6.5rem}
+.import-file-tree :is(th,td):first-child,
+.import-file-tree tr:has(>:nth-child(8))>:last-child,
+.import-original-table :is(th,td):last-child{text-align:center}
+.import-file-tree th:first-child{padding-inline:.25rem;white-space:nowrap}
+.import-file-tree .import-disc-choice{display:block;margin:0}
+.import-file-tree :is(select,input[type=number]){width:100%;padding:.45rem}
+.import-file-tree input[type=checkbox],.import-original-table input[type=checkbox]{margin:0}
+.import-file-tree button{padding:.4rem .55rem}
 .import-folder-toggle{text-align:left;overflow-wrap:anywhere;max-width:100%}
-.import-tree-line .import-disc-choice{display:flex;align-items:center;gap:.4rem}
-.import-disc-choice select{width:auto}
-@media(max-width:700px){.import-file-tree ul{padding-left:.6rem}.import-tree-line{align-items:start}.import-tree-line>label:first-child{flex-basis:100%}}
+.import-folder-row small{display:block;margin-top:.25rem;color:var(--muted)}
+.import-format-heading{color:var(--muted);font-weight:650}
+.import-file-size{font-variant-numeric:tabular-nums}
+.playback-excluded :is(th,.import-file-size){color:var(--muted)}
+.import-order-buttons{display:flex;gap:.25rem}
+.import-order-buttons button{min-width:2rem}
+.import-order-buttons button:disabled{cursor:default}
+.import-file-tree .import-file-pages td:first-child{text-align:start}
+.import-file-pages span{margin-inline:.5rem}
+@media(max-width:700px){
+ .import-disc-setup small{flex-basis:100%}
+ .import-file-tree{min-width:45rem}
+ .import-play-column{width:2.5rem}
+ .import-disc-column{width:7rem}
+ .import-track-column{width:4rem}
+ .import-apply-column{width:8rem}
+ .import-size-column{width:4.5rem}
+ .import-privacy-column{width:5.5rem}
+}

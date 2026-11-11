@@ -13865,6 +13865,14 @@
             "format": "int32",
             "minimum": 0
           },
+          "album_display_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
           "album_selected": {
             "type": [
               "boolean",
@@ -18067,6 +18075,14 @@
         ],
         "properties": {
           "disc_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "display_position": {
             "type": [
               "integer",
               "null"

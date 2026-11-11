@@ -119,11 +119,36 @@ folders, or **Separate top-level albums / discs** for an imports container. Orig
 paths and all reviewed files are preserved in either mode. Raw-disc anchors keep
 their established analysis boundaries.
 
-Expand **Files and album playback** to inspect the file tree. File and folder
-checkboxes choose the main album's playback files. **Select FLAC**, **Select WAV**
-and **Select MP3** choose a format across folders. **Disc** dropdowns apply a number
-to checked files or folders, including a new disc number entered through the next
-available option. Files outside the playback selection are still preserved.
+Use a music collection to import playable albums. If you review loose audio
+in another collection, Imports identifies that destination and offers a switch
+to an editable music collection. Review the source again in the music collection.
+
+Expand **Files and album playback** to inspect the suggested selection. File and
+folder checkboxes choose the album's playback files. In a mixed directory, audio
+files are grouped by format; **Select FLAC**, **Select WAV** and **Select MP3**
+replace playback selection across the package with the named format. The
+**Curators only** checkboxes control access to individual originals.
+
+Set **Number of discs** and choose **Apply disc count**, then assign checked
+tracks or folders with their **Disc** controls. Applying the count puts tracks
+with automatic numbering on Disc 1 and moves tracks from higher disc numbers
+onto the last disc. Only discs assigned to tracks become part of the album.
+Every reviewed original is preserved, regardless of playback selection or disc
+assignment. To change track numbers after import, use **Edit track details**
+in the entry's Music editor.
+
+To split an ordered track list, choose **New disc** on the first track of the
+next disc and then choose **Apply to below**. This assigns that disc to every
+later checked track in the displayed file order, including tracks in collapsed
+folders or on later pages. Repeat from the start of each next disc.
+
+Use the up and down arrows to move checked tracks within the same folder and
+format. **Apply to below** follows that reviewed order. The **Track no.**
+placeholder shows the audio file's position before tag analysis. Enter a number
+and press Enter or Tab to place the track among checked tracks on the same disc
+in that folder and format. The entered number overrides embedded tags. Clear
+the field to use automatic numbering again. Unchecked tracks have no disc or
+track number controls and remain available as originals.
 
 The default prefers FLAC, WAV, then MP3 within each discovered numbered disc.
 `Album/FLAC/Disc 1` and `Album/Disc 1/FLAC` both work. Mixed formats in the same
@@ -148,8 +173,10 @@ historical separate-format policy.
 A successful replacement preview replaces the reviewed files. A failed preview
 leaves the previous review and its selected originals available.
 
-Review exposes destination/group, file order, visibility and private purchase
-facts before admission. Reviewed inbox order/visibility survive rescans; inventory
+Review exposes destination/group, playback membership, disc assignment, visibility
+and private purchase facts before admission. Format grouping is display only.
+The arrow controls and track number edits can change reviewed file order.
+Reviewed inbox order and visibility survive rescans; inventory
 changes fail admission/recovery. Submitted purchase inputs and receipts survive
 reopen. Failed analysis still permits preservation, with failed steps visible and
 no successfully analyzed/playable track claim.

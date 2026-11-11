@@ -7227,6 +7227,7 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
             files: vec![ImportDeclaredFile {
                 album_selected: None,
                 album_disc_position: None,
+                album_display_position: None,
                 visibility: Default::default(),
                 name: "track01.bin".into(),
                 bytes: ByteLength(4),
@@ -9369,6 +9370,7 @@ fn import_validation_rejects_unsafe_or_incoherent_staging_state() {
     collision.view.files.push(ImportDeclaredFile {
         album_selected: None,
         album_disc_position: None,
+        album_display_position: None,
         visibility: Default::default(),
         name: "TRACK01.BIN".into(),
         bytes: ByteLength(4),
@@ -25369,6 +25371,7 @@ fn reviewed_test_tracks(names: &[&str]) -> Vec<collector_modules::music::files::
         .map(|name| collector_modules::music::files::MusicImportTrack {
             file_name: (*name).into(),
             disc_position: None,
+            display_position: None,
         })
         .collect()
 }
@@ -25590,12 +25593,13 @@ fn viewer_rows_do_not_promote_an_alternate_when_the_preferred_file_is_private() 
 }
 
 #[test]
-fn reviewed_album_files_and_manual_disc_numbers_survive_reconciliation_and_reindex() {
+fn reviewed_album_files_and_manual_numbers_survive_reconciliation_and_reindex() {
     let (_root, store, actor, service, collection) = setup();
     let names = ["All/01.flac", "Expansion/01.mp3", "Expansion/01.wav"];
     let tracks = vec![collector_modules::music::files::MusicImportTrack {
         file_name: names[1].into(),
         disc_position: Some(2),
+        display_position: Some(7),
     }];
     let detail = admit_digital_test_package_with_review(
         &service,
@@ -25618,6 +25622,7 @@ fn reviewed_album_files_and_manual_disc_numbers_survive_reconciliation_and_reind
     assert_eq!(snapshot.tracks.len(), 1);
     assert_eq!(snapshot.tracks[0].track_position, 2);
     assert_eq!(snapshot.tracks[0].disc_position, Some(2));
+    assert_eq!(snapshot.tracks[0].display_position, Some(7));
     assert_eq!(
         snapshot.tracks[0].audio_format.as_ref().unwrap().codec,
         "mp3"
