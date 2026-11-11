@@ -107,6 +107,23 @@ def command(*arguments):
     return subprocess.check_output(arguments, text=True).strip()
 
 
+def pull_public_platforms(image, children, root):
+    # Use separate image references for classic Docker stores, which cannot
+    # record two platforms under the same index digest.
+    auth = root / "docker"
+    auth.mkdir()
+    (auth / "config.json").write_text('{"auths":{}}')
+    endpoint = os.environ.get("DOCKER_HOST") or command(
+        "docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"
+    )
+    for platform, child_digest in children.items():
+        subprocess.run(
+            ["docker", "--config", str(auth), "--host", endpoint,
+             "pull", "--platform", platform, image + "@" + child_digest],
+            check=True,
+        )
+
+
 def verify(expected, source, digest, output):
     if not DIGEST.fullmatch(digest):
         raise ValueError("Missing build-output digest")
@@ -137,13 +154,7 @@ def verify(expected, source, digest, output):
             image = json.loads(command("skopeo", "--override-os", "linux", "--override-arch", architecture, "inspect", destination))
             check_labels(image, expected, platform)
         if public:
-            # Empty credentials, without logging out the operator or changing saved Docker settings.
-            auth = root / "docker"
-            auth.mkdir()
-            (auth / "config.json").write_text('{"auths":{}}')
-            endpoint = os.environ.get("DOCKER_HOST") or command("docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
-            for platform in children:
-                subprocess.run(["docker", "--config", str(auth), "--host", endpoint, "pull", "--platform", platform, expected["image"] + "@" + digest], check=True)
+            pull_public_platforms(expected["image"], children, root)
         record = dict(expected, digest=digest, reference=expected["image"] + "@" + digest,
                       platforms=children, anonymous_docker_pulls=public)
         output.write_text(json.dumps(record, indent=2) + "\n")

@@ -55,11 +55,15 @@ not rerun compilation, source tests or image builds.
    successful exact-source validation automatically;
    the newest matching validation run must be usable. It restores/reverifies
    its archive before logging in to GHCR. Anonymous version pulls on both
-   platforms precede moving-channel promotion and pinned release assets.
+   platforms precede moving-channel promotion and pinned release assets. The
+  verifier checks the version index and pulls its two child manifests by digest
+  so Docker can store each architecture under a distinct reference.
 
 An explicit publication retry can select `retry_release_tag=vVERSION`, optionally
 with `validation_run_id=RUN_ID`. It must reference an existing published release,
-checks out that exact tag and reuses its validated bytes. This is a publishing
+checks out that exact tag and reuses its validated bytes. The anonymous pull
+verifier comes from the dispatched workflow revision, so a verifier correction
+can recover publication without changing the tagged source. This is a publishing
 operation; do not set the release tag for a rehearsal. The existing concurrency
 lock and semantic-version comparison prevent an old release from downgrading
 `preview` or stable `latest`. Stable and prerelease channels remain separate.

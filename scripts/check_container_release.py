@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import container_release as release
 
 SHA = "a"*40
@@ -84,6 +85,24 @@ class ReleaseTests(unittest.TestCase):
                 release.check_labels(changed, expected, "linux/amd64")
         with self.assertRaises(ValueError):
             release.check_labels(image, expected, "linux/arm64")
+
+    def test_anonymous_docker_pulls_use_distinct_platform_digests(self):
+        image = planned()["image"]
+        expected = {"linux/amd64": image + "@" + AMD, "linux/arm64": image + "@" + ARM}
+        pulled = {}
+
+        def docker(args, *, check):
+            self.assertTrue(check)
+            config = Path(args[args.index("--config") + 1]) / "config.json"
+            self.assertEqual(json.loads(config.read_text()), {"auths": {}})
+            platform = args[args.index("--platform") + 1]
+            reference = args[-1]
+            self.assertNotIn(reference, pulled.values(), "Docker rejects replacing a digest with another platform")
+            pulled[platform] = reference
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"DOCKER_HOST": "unix:///fixture.sock"}), patch.object(release.subprocess, "run", docker):
+            release.pull_public_platforms(image, release.platforms(index()), Path(directory))
+        self.assertEqual(pulled, expected)
 
     def test_published_bundle_is_pinned_and_self_contained(self):
         expected = planned()

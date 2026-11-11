@@ -301,12 +301,19 @@ jobs:
       - name: Publish validated bytes preserving every digest
         if: needs.plan.outputs.publish == 'true'
         run: skopeo copy --all --preserve-digests --authfile "$HOME/.docker/config.json" oci-archive:/tmp/restored/collector-multiarch.oci.tar "docker://$RELEASE_IMAGE"
+      - name: Check out publication verifier from the dispatch workflow revision
+        if: needs.plan.outputs.publish == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-control
+          persist-credentials: false
       - name: Require anonymous version pulls, both platforms and matching source labels
         if: needs.plan.outputs.publish == 'true'
         env:
           RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
           BUILD_DIGEST: ${{ steps.restored.outputs.digest }}
-        run: python3 scripts/container_release.py verify "docker://$RELEASE_IMAGE" "$BUILD_DIGEST"
+        run: python3 release-control/scripts/container_release.py verify "docker://$RELEASE_IMAGE" "$BUILD_DIGEST"
       - name: Retain consumed validation provenance in the pinned image record
         if: needs.plan.outputs.reuse == 'true'
         run: python3 scripts/container_validation.py record-provenance /tmp/restored
