@@ -4246,8 +4246,8 @@ fn paged_inbox_packages(
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if !metadata.is_dir()
-            || collector_app::is_intake_housekeeping(&name, true)
+        if !(metadata.is_dir() || metadata.is_file())
+            || collector_app::is_intake_housekeeping(&name, metadata.is_dir())
             || collector_app::is_inbox_cleanup_directory(&name)
             || metadata.file_type().is_symlink()
             || name.is_empty()
@@ -4283,8 +4283,8 @@ fn direct_inbox_packages(root: &std::path::Path) -> Result<Vec<String>> {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if metadata.is_dir()
-            && !collector_app::is_intake_housekeeping(&name, true)
+        if (metadata.is_dir() || metadata.is_file())
+            && !collector_app::is_intake_housekeeping(&name, metadata.is_dir())
             && !collector_app::is_inbox_cleanup_directory(&name)
             && !metadata.file_type().is_symlink()
             && !name.is_empty()
@@ -4322,7 +4322,7 @@ fn resolve_inbox_package_retaining(
                 || collector_app::is_inbox_cleanup_directory(&source.package_name)))
     {
         return Err(Error::Invalid(
-            "select a direct inbox package directory".into(),
+            "select a direct inbox file or directory".into(),
         ));
     }
     let root = state.inboxes.get(label).ok_or(Error::NotFound)?;
@@ -4333,7 +4333,9 @@ fn resolve_inbox_package_retaining(
         .map_err(|error| Error::Storage(error.to_string()))?;
     let path =
         std::fs::canonicalize(&unresolved).map_err(|error| Error::Storage(error.to_string()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() || !path.starts_with(canonical_root)
+    if metadata.file_type().is_symlink()
+        || !(metadata.is_dir() || metadata.is_file())
+        || !path.starts_with(canonical_root)
     {
         return Err(Error::Forbidden);
     }
@@ -4472,7 +4474,7 @@ async fn stage_inbox_import(
         || matches!(input.package.as_str(), "." | "..")
         || collector_app::is_intake_housekeeping(&input.package, true)
     {
-        return Err(Error::Invalid("select a direct inbox package directory".into()).into());
+        return Err(Error::Invalid("select a direct inbox file or directory".into()).into());
     }
     let root = state.inboxes.get(&label).ok_or(Error::NotFound)?.clone();
     let source = root.join(&input.package);
@@ -4482,7 +4484,10 @@ async fn stage_inbox_import(
         let metadata =
             std::fs::symlink_metadata(&source).map_err(|e| Error::Storage(e.to_string()))?;
         let path = std::fs::canonicalize(&source).map_err(|e| Error::Storage(e.to_string()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() || !path.starts_with(root) {
+        if metadata.file_type().is_symlink()
+            || !(metadata.is_dir() || metadata.is_file())
+            || !path.starts_with(root)
+        {
             return Err(Error::Forbidden);
         }
         let files = Store::inventory_directory(&path)?;
@@ -5368,7 +5373,7 @@ async fn import_inbox(
         || matches!(input.package.as_str(), "." | "..")
         || collector_app::is_intake_housekeeping(&input.package, true)
     {
-        return Err(Error::Invalid("select a direct inbox package directory".into()).into());
+        return Err(Error::Invalid("select a direct inbox file or directory".into()).into());
     }
     let root = state.inboxes.get(&name).ok_or(Error::NotFound)?.clone();
     let source = root.join(&input.package);

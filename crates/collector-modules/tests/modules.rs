@@ -2166,18 +2166,12 @@ fn scan_planning_selects_only_eligible_anchors_without_opening_bytes() {
 }
 
 #[test]
-fn purchase_discovery_preserves_multidisc_and_independent_nested_packages() {
+fn purchase_discovery_preserves_multidisc_and_top_level_package_boundaries() {
     for names in [
         vec![
             "Album/Disc 1/01.flac",
             "Album/Disc 2/01.mp3",
             "Album/cover.png",
-            "Other/single.mp3",
-        ],
-        vec![
-            "Disc 1/01.flac",
-            "Disc 2/01.mp3",
-            "cover.png",
             "Other/single.mp3",
         ],
         vec![
@@ -2204,13 +2198,6 @@ fn purchase_discovery_preserves_multidisc_and_independent_nested_packages() {
                 .len(),
             names.len()
         );
-        assert_eq!(
-            packages.len(),
-            if names[1].as_str().contains("Bonus") {
-                3
-            } else {
-                2
-            }
-        );
+        assert_eq!(packages.len(), 2);
     }
 }

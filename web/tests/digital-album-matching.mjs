@@ -7,6 +7,10 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes,createHash,X509Certificate} from 'node:crypto';
+async function includeAllAlbumFiles(imports){
+ await imports.locator('summary').filter({hasText:'Files and album playback'}).click();
+ await imports.getByLabel('Use folder for album playback: All files',{exact:true}).check();
+}
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-digital-matching-'));const origin='https://localhost:19893';const password=randomBytes(24).toString('hex');
 const release='00000000-0000-4000-8000-000000000090';const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const partial=true;const fingerprints=new Map();const requests=[];const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
@@ -52,7 +56,7 @@ try{
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Matching shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const result=await(await fetch('/api/v1/collection-search?limit=50')).json();return result.items.find(c=>c.name==='Matching shelf').id;});
- await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
+ await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await includeAllAlbumFiles(imports);await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
  await page.route('**/api/v1/items/'+item,route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'Metadata changed during read'}}}),{times:1});
  await page.route('**/api/v1/library-care/metadata?*',route=>route.fulfill({status:409,json:{error:{code:'revision_conflict',message:'Catalog changed'}}}),{times:1});
@@ -245,7 +249,7 @@ try{
   await page.goto(`${origin}/imports?collection=${collection}`);
   const intakeForm=page.getByRole('region',{name:'Imports workspace'});
   await intakeForm.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);
-  await intakeForm.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+  await intakeForm.getByRole('heading',{name:'Review packages and groups'}).waitFor();await includeAllAlbumFiles(intakeForm);
   await intakeForm.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
   const intakeId=new URL(page.url()).searchParams.get('item');let nextItem;
   await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);nextItem=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');

@@ -12728,6 +12728,13 @@
           "collection_id": {
             "$ref": "#/components/schemas/CollectionId"
           },
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Selected browser directory, excluded only while determining package boundaries."
+          },
           "files": {
             "type": "array",
             "items": {
@@ -13850,6 +13857,20 @@
           "received_bytes"
         ],
         "properties": {
+          "album_disc_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "album_selected": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "bytes": {
             "$ref": "#/components/schemas/ByteLength"
           },
@@ -14379,6 +14400,15 @@
           "files"
         ],
         "properties": {
+          "album_tracks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MusicImportTrack"
+            }
+          },
           "anchor_file_index": {
             "type": [
               "integer",
@@ -14482,6 +14512,15 @@
           "preparation_available"
         ],
         "properties": {
+          "album_tracks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MusicImportTrack"
+            }
+          },
           "analysis_available": {
             "type": "boolean"
           },
@@ -14514,6 +14553,16 @@
           },
           "music_actions_available": {
             "type": "boolean"
+          },
+          "music_layout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicImportLayout"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "position": {
             "type": "integer",
@@ -17986,6 +18035,51 @@
           }
         }
       },
+      "MusicImportLayout": {
+        "type": "object",
+        "required": [
+          "tracks",
+          "needs_attention",
+          "notices"
+        ],
+        "properties": {
+          "needs_attention": {
+            "type": "boolean"
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MusicImportTrack"
+            }
+          }
+        }
+      },
+      "MusicImportTrack": {
+        "type": "object",
+        "required": [
+          "file_name"
+        ],
+        "properties": {
+          "disc_position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "file_name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "MusicMediumCoverage": {
         "type": "object",
         "required": [
@@ -19215,6 +19309,15 @@
                 "preparation_available"
               ],
               "properties": {
+                "album_tracks": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/components/schemas/MusicImportTrack"
+                  }
+                },
                 "analysis_available": {
                   "type": "boolean"
                 },
@@ -19247,6 +19350,16 @@
                 },
                 "music_actions_available": {
                   "type": "boolean"
+                },
+                "music_layout": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MusicImportLayout"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "position": {
                   "type": "integer",

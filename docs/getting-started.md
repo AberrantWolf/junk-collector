@@ -60,7 +60,7 @@ Run the server as an ordinary user with access to its storage and configured inb
 
 | Option | Use |
 | --- | --- |
-| Folders | Discover packages. For server inbox directories, choose **Review packages**. |
+| Folders | Review discovered packages and their album playback trees. Set **Folder layout** for a browser selection. Server inbox files and directories use **Review packages**. |
 | Individual files | Assemble one package. Unassigned files appear separately. |
 | Analysis anchor | Choose the intended CUE or Redumper anchor when several exist. Review shared files. |
 | Album group | Give related discs the same label. Leave manual title empty for automatic metadata. |

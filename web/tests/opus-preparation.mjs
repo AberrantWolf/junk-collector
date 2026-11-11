@@ -7,6 +7,10 @@ import path from 'node:path';
 import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 
+async function includeAllAlbumFiles(imports){
+ await imports.locator('summary').filter({hasText:'Files and album playback'}).click();
+ await imports.getByLabel('Use folder for album playback: All files',{exact:true}).check();
+}
 const opus=process.env.COLLECTOR_OPUS||spawnSync('which',['opusenc'],{encoding:'utf8'}).stdout?.trim();
 assert.ok(opus&&spawnSync(opus,['--version']).status===0,'Opus journey requires COLLECTOR_OPUS or opusenc on PATH');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-opus-'));
@@ -115,6 +119,7 @@ opus = "${wrapper}"
  const imports=intakePage.getByRole('region',{name:'Imports workspace'});
  const audio=['01.flac','02.mp3','03.wav'].map(file=>path.join(root,'crates/collector-store/tests/fixtures/digital-audio',file));
  const defaultChoice=await reviewImport(imports,audio);
+ await includeAllAlbumFiles(imports);
  await expect(defaultChoice.locator('option[value=default]')).toContainText('Opus 96 kbps');
  await setDefaultBitrate(page,collection,128,'cd');
  const digitalIntake=await startImport(intakePage,imports);

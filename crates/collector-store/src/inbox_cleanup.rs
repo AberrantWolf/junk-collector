@@ -154,7 +154,14 @@ impl Store {
             previous
         } else {
             let path = PathBuf::from(source);
-            let root = real_directory(&path)?;
+            let metadata = fs::symlink_metadata(&path).map_err(storage)?;
+            if !(metadata.is_dir() || metadata.is_file()) {
+                return Err(Error::Invalid(
+                    "Inbox source changed; files retained.".into(),
+                ));
+            }
+            let directory = metadata.is_dir();
+            let root = identity(&metadata)?;
             let path = path.canonicalize().map_err(storage)?;
             if overlaps(&path, &self.archive) || overlaps(&path, &self.state) {
                 return Err(Error::Invalid(
@@ -179,7 +186,11 @@ impl Store {
                     "Inbox inventory differs from this import; nothing removed.".into(),
                 ));
             }
-            let mut directories = BTreeMap::from([(String::new(), root)]);
+            let mut directories = if directory {
+                BTreeMap::from([(String::new(), root)])
+            } else {
+                BTreeMap::new()
+            };
             let mut files = BTreeMap::new();
             let mut budget = 0usize;
             for file in &import.view.files {
@@ -197,7 +208,7 @@ impl Store {
                     );
                     parent = relative.parent();
                 }
-                let observed = stamp(&path.join(&file.name))?;
+                let observed = stamp(&crate::files::inbox_member_path(&path, &file.name))?;
                 if observed.bytes != file.bytes.0 {
                     return Err(Error::Conflict);
                 }
@@ -426,7 +437,10 @@ impl Store {
         }
         let wrapper = quarantine(id, &record)?;
         let held = wrapper.join("package");
-        let moved = record.moving && (record.finalizing || held.try_exists().map_err(storage)?);
+        let file_removal_started = record.directories.is_empty()
+            && (record.deleting.is_some() || !record.removed.is_empty());
+        let moved = record.moving
+            && (record.finalizing || file_removal_started || held.try_exists().map_err(storage)?);
         let root = if moved {
             held.clone()
         } else {
@@ -478,7 +492,7 @@ impl Store {
             if record.removed.contains(&file.name) {
                 continue;
             }
-            let path = root.join(&file.name);
+            let path = cleanup_file_path(&record, &root, &file.name);
             if record.deleting.as_deref() == Some(&file.name)
                 && !path.try_exists().map_err(storage)?
             {
@@ -548,11 +562,17 @@ impl Store {
             checkpoint()?;
             self.cleanup_effect(claim, |_| {
                 check_directories(&record, &held)?;
-                if stamp(&held.join(&file.name))? != record.files[&file.name] {
+                if stamp(&cleanup_file_path(&record, &held, &file.name))?
+                    != record.files[&file.name]
+                {
                     return Err(Error::Conflict);
                 }
-                fs::remove_file(held.join(&file.name)).map_err(storage)?;
-                sync_directory(held.join(&file.name).parent().ok_or(Error::Conflict)?)
+                fs::remove_file(cleanup_file_path(&record, &held, &file.name)).map_err(storage)?;
+                sync_directory(
+                    cleanup_file_path(&record, &held, &file.name)
+                        .parent()
+                        .ok_or(Error::Conflict)?,
+                )
             })?;
             self.publication_fault
                 .check(PublicationFaultPoint::BytesStaged)?;
@@ -609,7 +629,26 @@ fn charge_observation(budget: &mut usize, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn cleanup_file_path(record: &Cleanup, root: &Path, name: &str) -> PathBuf {
+    if record.directories.is_empty() {
+        root.to_owned()
+    } else {
+        root.join(name)
+    }
+}
+
 fn check_directories(record: &Cleanup, root: &Path) -> Result<()> {
+    if record.directories.is_empty() && !record.finalizing {
+        let (name, expected) = record.files.first_key_value().ok_or(Error::Conflict)?;
+        if !record.removed.contains(name)
+            && (record.deleting.as_ref() != Some(name) || root.try_exists().map_err(storage)?)
+            && stamp(root)? != *expected
+        {
+            return Err(Error::Invalid(
+                "Inbox file identity changed; file retained.".into(),
+            ));
+        }
+    }
     for (name, expected) in &record.directories {
         if record.finalizing && !root.join(name).try_exists().map_err(storage)? {
             continue;
@@ -631,7 +670,7 @@ fn verify_source(
 ) -> Result<()> {
     check_directories(record, root)?;
     let expected = record.files.get(name).ok_or(Error::Conflict)?;
-    let path = root.join(name);
+    let path = cleanup_file_path(record, root, name);
     if stamp(&path)? != *expected {
         return Err(Error::Invalid(
             "Inbox file changed since cleanup was requested; remaining files retained.".into(),
@@ -698,8 +737,17 @@ fn create_wrapper(path: &Path, id: ImportId, record: &Cleanup) -> Result<()> {
             return Err(Error::Conflict);
         }
         let marker = path.join("source.json");
-        let data =
-            serde_json::to_vec(&(id, &record.source, &record.directories[""])).map_err(storage)?;
+        let package_identity = record
+            .directories
+            .get("")
+            .or_else(|| {
+                record
+                    .files
+                    .first_key_value()
+                    .map(|(_, stamp)| &stamp.identity)
+            })
+            .ok_or(Error::Conflict)?;
+        let data = serde_json::to_vec(&(id, &record.source, package_identity)).map_err(storage)?;
         if marker.exists() {
             if {
                 crate::backup::regular_file(&marker)?;

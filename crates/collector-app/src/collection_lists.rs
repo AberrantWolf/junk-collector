@@ -176,6 +176,7 @@ impl CollectionService {
         // absent. A disc/album addition must not turn that partial view into a
         // successful-looking complete expansion. Recorded structure defines the
         // full audio scope; individual track additions remain deliberately narrow.
+        let mut file_sources = BTreeSet::new();
         if track.is_none() {
             if rows.iter().any(|r| {
                 source.is_none_or(|id| id == r.source_representation_id)
@@ -189,6 +190,7 @@ impl CollectionService {
                 if let Some(manifest) = self
                     .recorded_file_tracks(item.collection_id, candidate.source_representation_id)?
                 {
+                    file_sources.insert(candidate.source_representation_id);
                     let available = rows
                         .iter()
                         .filter(|r| {
@@ -196,11 +198,12 @@ impl CollectionService {
                         })
                         .map(|r| r.track_position)
                         .collect::<BTreeSet<_>>();
-                    if manifest
-                        .tracks
-                        .iter()
-                        .any(|t| !available.contains(&t.position))
-                    {
+                    if self.missing_file_album_tracks(
+                        item,
+                        candidate.source_representation_id,
+                        &manifest,
+                        &available,
+                    )? {
                         return Err(Error::Unavailable("Some purchased tracks are unavailable; add individual available tracks instead.".into()));
                     }
                     continue;
@@ -296,9 +299,24 @@ impl CollectionService {
                             .values()
                             .any(|ids| ids.contains(&s.source_representation_id))
                     })
-                    .any(|s| s.medium_position.is_none())
+                    .any(|s| s.medium_position.is_none() && !(file_sources.contains(&s.source_representation_id)
+                        && rows.iter().filter(|row| row.primary_playback() && row.source_representation_id == s.source_representation_id && row.album_selection == collector_api_types::MusicAlbumSelection::Included).all(|row| row.disc_position.is_some())))
             {
                 return Err(Error::Invalid("Assign each original to an album disc before adding the whole multi-disc album. You can add discs individually now.".into()));
+            }
+            let mut digital_discs = BTreeMap::new();
+            for row in rows.iter().filter(|row| {
+                row.primary_playback()
+                    && file_sources.contains(&row.source_representation_id)
+                    && row.album_selection == collector_api_types::MusicAlbumSelection::Included
+            }) {
+                if let Some(disc) = row.disc_position
+                    && digital_discs
+                        .insert(disc, row.source_representation_id)
+                        .is_some_and(|source| source != row.source_representation_id)
+                {
+                    return Err(Error::Invalid("Multiple digital originals are assigned to the same album disc. Review their disc numbers or playback files.".into()));
+                }
             }
             discs.values().flat_map(|v| v.iter().copied()).collect()
         };

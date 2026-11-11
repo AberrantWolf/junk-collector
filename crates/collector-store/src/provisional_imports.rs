@@ -628,7 +628,9 @@ impl ProvisionalImportPort for Store {
     ) -> Result<ImportRecord> {
         let source = Path::new(source_locator);
         let source_metadata = fs::symlink_metadata(source).map_err(storage)?;
-        if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        if source_metadata.file_type().is_symlink()
+            || !(source_metadata.is_dir() || source_metadata.is_file())
+        {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }
         let root = fs::canonicalize(source).map_err(storage)?;
@@ -662,7 +664,7 @@ impl ProvisionalImportPort for Store {
             self.ensure_job_continues(job, Some(claim_token))?;
             let declared = record.view.files[index].clone();
             safe_name(&declared.name)?;
-            let path = root.join(&declared.name);
+            let path = crate::files::inbox_member_path(&root, &declared.name);
             let metadata_before = fs::symlink_metadata(&path).map_err(storage)?;
             let canonical = fs::canonicalize(&path).map_err(storage)?;
             if metadata_before.file_type().is_symlink()

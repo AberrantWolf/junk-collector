@@ -167,22 +167,45 @@ integrity checks and download-completion validation retain their separate polici
 [Delivery and qualification](validation/layered-library-refresh-2026-11-02.md) records
 source limits and the unmerged native worktree; no deployment is included.
 
-## Digital format-folder discovery — 2026-11-01
+## Digital album discovery and review — source work, 2026-11-11
 
-Music module intake policy owns logical-path grouping in `music/discovery.rs`.
-It consumes names only, before upload; it does not inspect or hash audio. Exact
-case-insensitive FLAC/MP3/WAV wrapper names and numbered Disc/CD folders collapse
-to an album root in either order. Encoding remains a separate group key; named
-soundtrack sections and independently anchored raw-disc packages stay separate.
-The existing application plan, durable bulk discovery, review, visibility defaults
-and publication pipeline consume the unchanged disjoint package contract.
+Music must preserve the top-level digital album boundary across format, numbered
+Disc/CD and named section folders. The configured inbox admits each direct regular
+file or directory as one package. Separate top-level physical discs retain the
+existing reviewed album-group workflow. Raw-disc anchors retain their existing
+package/analysis ownership.
 
-Companions attach to the deepest discovered album root and, where applicable,
-their enclosing format branch. Common parent companions are assigned once in
-stable encoding order (unwrapped tracks first, then FLAC, MP3, WAV), independent
-of input enumeration. This preserves original paths without duplicating file
-ownership or merging alternate encodings. No archived records are regrouped.
-See [delivery and limits](validation/format-folder-discovery-2026-11-01.md).
+Browser discovery accepts a selected-container prefix for boundary discovery only;
+original paths and order must survive. The browser's Folder layout control can
+choose one album or separate top-level items. Its best guess treats direct audio and immediate format or disc folders as one
+album. Other layouts discover child packages.
+
+The names-only Music proposal must prefer FLAC, then WAV, then MP3 within each
+explicit disc, including loose mixed-format files. Formats represent alternative
+copies by default, without claiming sample equivalence. Numbered disc folders may
+appear above or below encoding folders. Unknown audio branches, unequal format
+counts and unscoped files in a multi-disc layout must require review before new
+admission. No review query may hash or decode the payload.
+
+The expandable review tree controls playback membership and per-file disc numbers;
+all reviewed originals and companions must remain in the preservation inventory.
+The tree builds only when opened, pages each folder to 50 children and bounds its
+hierarchy to 32 levels, displaying deeper path suffixes intact at the leaf. File
+and folder checkboxes, format shortcuts and disc dropdowns edit the signed plan.
+Optional selections survive existing durable file declarations and publish through
+an idempotent, cancellation-fenced command into ordinary source-bound track
+metadata authority. Later manual edits must survive reconciliation and reindex.
+Presentation-only proposals are excluded from plan identity, retaining older
+accepted manifests. Optional absent selection fields retain their existing JSON.
+
+Playback, collection-list expansion, matching, search and album preparation consume
+the same effective selections. Same-format ambiguity remains visible. Availability
+uses bounded indexes over recorded observations. Originals and saved track targets
+keep their exact identities. Previously archived packages are not regrouped.
+The [earlier format-folder evidence](validation/format-folder-discovery-2026-11-01.md)
+retains its historical separate-format behavior and qualification limits.
+Current source validation is recorded in
+[album import review](validation/album-import-review-2026-11-11.md).
 
 ## Inbox connector recovery and review corrections — 2026-10-31
 

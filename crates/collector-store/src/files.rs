@@ -572,7 +572,7 @@ impl Store {
         for (index, entry) in upload.files.iter().enumerate() {
             self.ensure_job_continues(id, Some(claim_token))?;
             safe_name(&entry.name)?;
-            let path = root.join(&entry.name);
+            let path = inbox_member_path(&root, &entry.name);
             let metadata = fs::symlink_metadata(&path).map_err(storage)?;
             let canonical = fs::canonicalize(&path).map_err(storage)?;
             if metadata.file_type().is_symlink()
@@ -1674,6 +1674,15 @@ impl Store {
     }
 }
 
+/// A top-level file is its entire package; directories retain relative members.
+pub(crate) fn inbox_member_path(root: &Path, name: &str) -> PathBuf {
+    if root.file_name().is_some_and(|file| file == name) && root.is_file() {
+        root.to_owned()
+    } else {
+        root.join(name)
+    }
+}
+
 pub(crate) fn deterministic_integrity_evidence_id(
     job_id: JobId,
     representation_id: RepresentationId,
@@ -1790,7 +1799,13 @@ impl Store {
             Ok(())
         }
         let mut files = Vec::new();
-        walk(source, source, &mut files, 0, retained)?;
+        let metadata = fs::symlink_metadata(source).map_err(storage)?;
+        let root = if metadata.is_file() {
+            source.parent().ok_or(Error::Conflict)?
+        } else {
+            source
+        };
+        walk(root, source, &mut files, 0, retained)?;
         files.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(files)
     }

@@ -1535,6 +1535,7 @@ fn removed_item_is_recoverable_and_keeps_inventory_across_reindex() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -4365,6 +4366,7 @@ fn start_cleanup_fixture_import(
             PlanIngestCommand {
                 collection_id: collection,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -4411,6 +4413,82 @@ fn request_cleanup(
             |_| Ok(source.to_str().unwrap().into()),
         )
         .unwrap()
+}
+
+#[test]
+fn top_level_inbox_file_stages_preserves_and_cleans_only_that_file() {
+    let (root, store, actor, service, collection) = setup();
+    let source = root.path().join("inbox/package");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, b"exact top-level original").unwrap();
+    let neighbor = source.with_file_name("neighbor.bin");
+    std::fs::write(&neighbor, b"independent media item").unwrap();
+    let id = start_cleanup_fixture_import(&service, &actor, collection.id, &source).unwrap();
+    service
+        .ensure_guided_inbox_staging(id, source.to_str().unwrap())
+        .unwrap();
+    provider_drain(&service);
+    service.resume_guided_ingests().unwrap();
+    provider_drain(&service);
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(
+        detail.summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+    let saved = store.item(detail.summary.target_item_id.unwrap()).unwrap();
+    let rep = &saved.captures[0].representations[0];
+    assert_eq!(rep.files[0].name, "package");
+    assert_eq!(
+        rep.files[0].digest,
+        Digest::sha256(b"exact top-level original")
+    );
+    drop(service);
+    drop(store);
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::BytesStaged,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    request_cleanup(&service, &actor, id, &source);
+    provider_drain(&service);
+    assert_eq!(
+        store.inbox_cleanup_status(id).unwrap().unwrap().state,
+        JobState::Failed
+    );
+    assert!(!source.exists());
+    std::fs::write(&source, b"replacement package").unwrap();
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service
+        .request_inbox_cleanup(
+            &actor,
+            id,
+            collector_app::CleanupInboxCommand {
+                source_is_idle: true,
+            },
+            &command(),
+            |_| panic!("quarantine resume must not resolve the replacement"),
+        )
+        .unwrap();
+    provider_drain(&service);
+    assert!(store.inbox_cleanup_status(id).unwrap().unwrap().completed);
+    assert_eq!(std::fs::read(&source).unwrap(), b"replacement package");
+    assert_eq!(std::fs::read(&neighbor).unwrap(), b"independent media item");
+    store.reindex().unwrap();
+    let mut media = service.representation(&actor, saved.id, rep.id, 0).unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut media.reader, &mut bytes).unwrap();
+    assert_eq!(bytes, b"exact top-level original");
 }
 
 #[test]
@@ -4847,6 +4925,7 @@ fn browser_intake_filters_housekeeping_before_discovery_and_remaps_explicit_anch
         .discover_bulk_intake(
             &actor,
             collector_app::DiscoverIngestCommand {
+                directory: None,
                 collection_id: collection.id,
                 files: files.clone(),
             },
@@ -4864,6 +4943,7 @@ fn browser_intake_filters_housekeeping_before_discovery_and_remaps_explicit_anch
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -7145,6 +7225,8 @@ fn provisional_import(user_id: UserId, collection_id: CollectionId) -> ImportRec
                 package_name: "disc-one".into(),
             },
             files: vec![ImportDeclaredFile {
+                album_selected: None,
+                album_disc_position: None,
                 visibility: Default::default(),
                 name: "track01.bin".into(),
                 bytes: ByteLength(4),
@@ -7219,6 +7301,7 @@ fn guided_ingest_persists_selected_redumper_anchor_from_signed_plan() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: Some(1),
                     source: ImportSourceSummary {
@@ -7294,6 +7377,7 @@ fn guided_game_analysis_does_not_receive_the_music_anchor_extension() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -7360,6 +7444,7 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        album_tracks: None,
         purchase: None,
         anchor_file_index: None,
         source: ImportSourceSummary {
@@ -7666,6 +7751,7 @@ fn guided_two_created_items_retire_only_the_reassigned_source_after_settlement()
     let packages = ["Disc A", "Disc B"]
         .into_iter()
         .map(|name| IngestPackageSelection {
+            album_tracks: None,
             purchase: None,
             anchor_file_index: None,
             source: ImportSourceSummary {
@@ -7777,6 +7863,7 @@ fn guided_existing_destination_preserves_inventory_and_is_never_retired_as_a_pla
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -7911,6 +7998,7 @@ fn guided_existing_destination_receipt_replays_before_upload_after_an_item_edit(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -7975,6 +8063,7 @@ fn guided_preservation_only_publishes_without_claiming_analysis() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -8071,6 +8160,7 @@ fn ingest_activity_distinguishes_upload_wait_queue_claim_and_cancellation() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -8249,6 +8339,7 @@ fn guided_album_cancel_recovers_a_missing_intent_pointer_and_fences_retry() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -8348,6 +8439,7 @@ fn guided_music_preparation_uses_the_album_batch_and_reuses_its_valid_output() {
     let toc = b"TRACK AUDIO\nFILE \"disc.bin\" 00:00:00\n";
     let pcm = vec![0_u8; 2352 * 10];
     let selection = IngestPackageSelection {
+        album_tracks: None,
         purchase: None,
         anchor_file_index: Some(0),
         source: ImportSourceSummary {
@@ -8564,6 +8656,7 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -8708,6 +8801,7 @@ fn guided_automatic_enrichment_applies_provider_title_and_front_art_without_manu
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -8952,6 +9046,7 @@ fn guided_malformed_analysis_does_not_prevent_preserving_originals() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -9023,6 +9118,7 @@ fn guided_discard_reclaims_only_unpublished_staging_and_denies_other_users() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -9110,6 +9206,7 @@ fn guided_cancel_stops_unpublished_work_without_discarding_retained_bytes() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -9270,6 +9367,8 @@ fn import_validation_rejects_unsafe_or_incoherent_staging_state() {
 
     let mut collision = provisional_import(user, collection);
     collision.view.files.push(ImportDeclaredFile {
+        album_selected: None,
+        album_disc_position: None,
         visibility: Default::default(),
         name: "TRACK01.BIN".into(),
         bytes: ByteLength(4),
@@ -15986,6 +16085,7 @@ fn metadata_refresh_replaces_versions_and_preserves_unmatched_choice() {
 fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
     let (_root, _store, actor, service, collection) = setup();
     let input = collector_app::DiscoverIngestCommand {
+        directory: None,
         collection_id: collection.id,
         files: [
             "Dumps/disc1/disc.cue",
@@ -16524,6 +16624,7 @@ fn fx02_manual_analysis_ownership_survives_guided_cancel_and_restart() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -17013,6 +17114,7 @@ fn fx05_plan(
             PlanIngestCommand {
                 collection_id: collection,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -19001,6 +19103,7 @@ fn grouped_disc_publication_case(
     let packages = (0..2)
         .map(|position| IntakePackage {
             package: IngestPackageSelection {
+                album_tracks: None,
                 purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
@@ -19230,6 +19333,7 @@ fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admiss
     let packages = (0..2)
         .map(|position| IntakePackage {
             package: IngestPackageSelection {
+                album_tracks: None,
                 purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
@@ -19384,6 +19488,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
     let packages = (0..70)
         .map(|position| IntakePackage {
             package: IngestPackageSelection {
+                album_tracks: None,
                 purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
@@ -19791,6 +19896,7 @@ fn bulk_discovery_preserves_nested_members_and_paginates_more_than_one_guided_pa
         sha256: None,
     });
     let request = collector_app::DiscoverIngestCommand {
+        directory: None,
         collection_id: collection.id,
         files,
     };
@@ -19851,6 +19957,7 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
         .unwrap();
     let package = IntakePackage {
         package: IngestPackageSelection {
+            album_tracks: None,
             purchase: None,
             source: ImportSourceSummary {
                 kind: ImportSourceKind::Browser,
@@ -20293,6 +20400,7 @@ fn bulk_generated_thousands_query_admission_and_restart_measurements() {
         let packages = (offset..(offset + 64).min(count))
             .map(|position| IntakePackage {
                 package: IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -20527,6 +20635,7 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
     let packages = (0..2)
         .map(|i| IntakePackage {
             package: IngestPackageSelection {
+                album_tracks: None,
                 purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
@@ -23437,6 +23546,7 @@ fn automatic_game_scan_recovers_later_pages_and_retains_direct_owners_and_manual
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -24824,6 +24934,7 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
     let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
     let receipt = b"private order 1234".as_slice();
     let package = IngestPackageSelection {
+        album_tracks: Some(reviewed_test_tracks(&["01.flac", "02.mp3"])),
         purchase: Some(DigitalPurchase {
             store: Some("Fixture store".into()),
             order_reference: Some("private order".into()),
@@ -25000,8 +25111,8 @@ fn digital_purchases_preserve_native_originals_and_play_without_encoders() {
         change:MetadataAuthorityChange::SetDomainOverrides { overrides:ModuleData {
             module:ModuleId("org.junk.music".into()),schema_version:1,
             payload:RawJson::from_value(serde_json::json!({"artist":"My artist","track_overrides":[
-                {"source_representation_id":source,"track_position":1,"title":"私のタイトル","disc_position":2,"display_position":9},
-                {"source_representation_id":source,"track_position":2,"title":null,"disc_position":1,"display_position":1}
+                {"source_representation_id":source,"track_position":1,"album_selected":true,"title":"私のタイトル","disc_position":2,"display_position":9},
+                {"source_representation_id":source,"track_position":2,"album_selected":true,"title":null,"disc_position":1,"display_position":1}
             ]}))
         }}
     },&command()).unwrap();
@@ -25203,6 +25314,7 @@ fn guided_import_freezes_the_reviewed_opus_default_after_settings_change() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,
@@ -25249,6 +25361,35 @@ fn guided_import_freezes_the_reviewed_opus_default_after_settings_change() {
     );
 }
 
+// These fixtures intentionally use different formats for distinct songs. The
+// import review must explicitly include both instead of relying on format guesses.
+fn reviewed_test_tracks(names: &[&str]) -> Vec<collector_modules::music::files::MusicImportTrack> {
+    names
+        .iter()
+        .map(|name| collector_modules::music::files::MusicImportTrack {
+            file_name: (*name).into(),
+            disc_position: None,
+        })
+        .collect()
+}
+fn admit_reviewed_digital_test_package(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+) -> collector_app::IngestDetail {
+    admit_digital_test_package_with_review(
+        service,
+        actor,
+        collection,
+        names,
+        bytes,
+        |_| None,
+        Some(reviewed_test_tracks(names)),
+    )
+}
+
 fn admit_digital_test_package(
     service: &CollectionService,
     actor: &Principal,
@@ -25266,12 +25407,32 @@ fn admit_digital_test_package_with_visibility(
     bytes: &[&[u8]],
     visibility: Option<Visibility>,
 ) -> collector_app::IngestDetail {
+    admit_digital_test_package_with_review(
+        service,
+        actor,
+        collection,
+        names,
+        bytes,
+        |_| visibility,
+        None,
+    )
+}
+fn admit_digital_test_package_with_review(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    names: &[&str],
+    bytes: &[&[u8]],
+    visibility: impl Fn(&str) -> Option<Visibility>,
+    album_tracks: Option<Vec<collector_modules::music::files::MusicImportTrack>>,
+) -> collector_app::IngestDetail {
     let plan = service
         .plan_ingest(
             actor,
             PlanIngestCommand {
                 collection_id: collection,
                 packages: vec![IngestPackageSelection {
+                    album_tracks,
                     purchase: Some(DigitalPurchase {
                         store: Some("Independent purchase".into()),
                         ..Default::default()
@@ -25289,7 +25450,7 @@ fn admit_digital_test_package_with_visibility(
                             name: (*name).into(),
                             bytes: ByteLength(data.len() as u64),
                             sha256: None,
-                            visibility,
+                            visibility: visibility(name),
                         })
                         .collect(),
                 }],
@@ -25323,16 +25484,163 @@ fn admit_digital_test_package_with_visibility(
     service.ingest_detail(actor, import).unwrap()
 }
 #[test]
-fn alternate_encodings_require_explicit_album_selection_without_retargeting_tracks() {
+fn mixed_format_album_preserves_every_original_and_defaults_to_flac_across_reindex() {
+    let (_root, store, actor, service, collection) = setup();
+    let original_bytes: [&[u8]; 3] = [
+        include_bytes!("fixtures/digital-audio/02.mp3"),
+        include_bytes!("fixtures/digital-audio/03.wav"),
+        include_bytes!("fixtures/digital-audio/01.flac"),
+    ];
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &["unrelated-name.mp3", "wav-original.wav", "lossless.flac"],
+        &original_bytes,
+        |name| name.ends_with(".wav").then_some(Visibility::Curators),
+        None,
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let viewer_id = store
+        .create_user("alternate-viewer", "long alternate viewer password", false)
+        .unwrap();
+    store.grant(collection.id, viewer_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id: viewer_id,
+        administrator: false,
+        device_id: None,
+    };
+    for reindex in [false, true] {
+        if reindex {
+            store.reindex().unwrap();
+        }
+        let saved = store.item(item).unwrap();
+        assert!(saved.specimens.is_empty());
+        let rep = &saved.captures[0].representations[0];
+        assert_eq!(rep.files.len(), 3);
+        for (index, expected) in original_bytes.iter().enumerate() {
+            let mut media = service.representation(&actor, item, rep.id, index).unwrap();
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut media.reader, &mut bytes).unwrap();
+            assert_eq!(&bytes, expected);
+        }
+        assert!(matches!(
+            service.representation(&viewer, item, rep.id, 1),
+            Err(Error::Forbidden)
+        ));
+        let snapshot = service
+            .album_playback_snapshot(&viewer, item, None)
+            .unwrap();
+        assert_eq!(snapshot.tracks.len(), 1);
+        assert_eq!(snapshot.tracks[0].track_position, 3);
+        assert_eq!(
+            snapshot.tracks[0].audio_format.as_ref().unwrap().codec,
+            "flac"
+        );
+    }
+}
+
+#[test]
+fn viewer_rows_do_not_promote_an_alternate_when_the_preferred_file_is_private() {
+    let (_root, store, actor, service, collection) = setup();
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &["01.flac", "02.mp3"],
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/02.mp3"),
+        ],
+        |name| name.ends_with(".flac").then_some(Visibility::Curators),
+        None,
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let user_id = store
+        .create_user("restricted-format-viewer", "long viewer password", false)
+        .unwrap();
+    store.grant(collection.id, user_id, Role::Viewer).unwrap();
+    let viewer = Principal {
+        user_id,
+        administrator: false,
+        device_id: None,
+    };
+    let rows = service
+        .recorded_music_track_availability(&viewer, item)
+        .unwrap();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.primary_playback())
+            .map(|row| (row.track_position, row.album_selection))
+            .collect::<Vec<_>>(),
+        [(2, collector_app::MusicAlbumSelection::Excluded)]
+    );
+    assert!(matches!(
+        service.album_playback_snapshot(&viewer, item, None),
+        Err(Error::Unavailable(_))
+    ));
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, item, None)
+            .unwrap()
+            .tracks[0]
+            .track_position,
+        1
+    );
+}
+
+#[test]
+fn reviewed_album_files_and_manual_disc_numbers_survive_reconciliation_and_reindex() {
+    let (_root, store, actor, service, collection) = setup();
+    let names = ["All/01.flac", "Expansion/01.mp3", "Expansion/01.wav"];
+    let tracks = vec![collector_modules::music::files::MusicImportTrack {
+        file_name: names[1].into(),
+        disc_position: Some(2),
+    }];
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &names,
+        &[
+            include_bytes!("fixtures/digital-audio/01.flac"),
+            include_bytes!("fixtures/digital-audio/02.mp3"),
+            include_bytes!("fixtures/digital-audio/03.wav"),
+        ],
+        |_| None,
+        Some(tracks),
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    service.resume_guided_ingests().unwrap();
+    provider_drain(&service);
+    store.reindex().unwrap();
+    let snapshot = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(snapshot.tracks.len(), 1);
+    assert_eq!(snapshot.tracks[0].track_position, 2);
+    assert_eq!(snapshot.tracks[0].disc_position, Some(2));
+    assert_eq!(
+        snapshot.tracks[0].audio_format.as_ref().unwrap().codec,
+        "mp3"
+    );
+    assert_eq!(
+        store.item(item).unwrap().captures[0].representations[0]
+            .files
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn same_codec_alternates_require_selection_without_retargeting_tracks() {
     let (_root, store, actor, service, collection) = setup();
     let detail = admit_digital_test_package(
         &service,
         &actor,
         collection.id,
-        &["01.flac", "01.mp3", "booklet.pdf"],
+        &["01.flac", "alternate.flac", "booklet.pdf"],
         &[
             include_bytes!("fixtures/digital-audio/01.flac"),
-            include_bytes!("fixtures/digital-audio/02.mp3"),
+            include_bytes!("fixtures/digital-audio/01.flac"),
             b"original companion",
         ],
     );
@@ -25405,23 +25713,6 @@ fn alternate_encodings_require_explicit_album_selection_without_retargeting_trac
             .tracks[0]
             .track_position,
         1
-    );
-    // Matching printed slots require review for same-codec originals too; codec
-    // inequality is not proof that two files are the same intended album track.
-    let same_codec = admit_digital_test_package(
-        &service,
-        &actor,
-        collection.id,
-        &["01.flac", "alternate.flac"],
-        &[
-            include_bytes!("fixtures/digital-audio/01.flac"),
-            include_bytes!("fixtures/digital-audio/01.flac"),
-        ],
-    );
-    assert!(
-        service
-            .album_playback_snapshot(&actor, same_codec.summary.target_item_id.unwrap(), None)
-            .is_err()
     );
 }
 #[test]
@@ -25557,6 +25848,7 @@ fn private_purchase_audio_does_not_publish_its_embedded_tags_or_artwork() {
 fn purchase_privacy_defaults_do_not_share_receipt_photos_and_review_can_share_booklets() {
     let (_root, _store, actor, service, collection) = setup();
     let selected = IngestPackageSelection {
+        album_tracks: None,
         purchase: None,
         source: ImportSourceSummary {
             kind: ImportSourceKind::Browser,
@@ -25677,6 +25969,7 @@ fn game_disc_audio_import_preparation_search_playlists_and_reindex() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: Some(0),
                     source: ImportSourceSummary {
@@ -28405,6 +28698,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: Some(0),
                     source: ImportSourceSummary {
@@ -28716,6 +29010,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -29419,7 +29714,7 @@ fn digital_matching_full_workflow(wav: bool, manual: bool, scenario: DigitalDisc
         ("01.flac", flac.as_slice())
     };
     let mp3 = include_bytes!("fixtures/digital-matching/02.mp3");
-    let detail = admit_digital_test_package(
+    let detail = admit_reviewed_digital_test_package(
         &base,
         &actor,
         collection.id,
@@ -30144,7 +30439,7 @@ fn wav_digital_originals_prepare_native_flac_without_reencoding_mp3_or_flac() {
     stereo[22..24].copy_from_slice(&2u16.to_le_bytes());
     stereo[28..32].copy_from_slice(&576000u32.to_le_bytes());
     stereo[32..34].copy_from_slice(&6u16.to_le_bytes());
-    let detail = admit_digital_test_package(
+    let detail = admit_reviewed_digital_test_package(
         &service,
         &actor,
         collection.id,
@@ -30856,6 +31151,7 @@ fn preserved_file_analysis_retry(corrupt: bool, prepare: bool) {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: None,
                     anchor_file_index: None,
                     source: ImportSourceSummary {
@@ -31165,7 +31461,7 @@ fn digital_multiple_album_fixture(cancel_first: bool) {
     let mut items = Vec::new();
     for _ in 0..3 {
         items.push(
-            admit_digital_test_package(
+            admit_reviewed_digital_test_package(
                 &base,
                 &actor,
                 collection.id,

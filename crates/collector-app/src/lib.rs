@@ -501,6 +501,10 @@ pub struct ImportSourceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ImportDeclaredFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_selected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_disc_position: Option<u16>,
     #[serde(default, skip_serializing_if = "Visibility::is_shared")]
     pub visibility: Visibility,
     pub name: String,
@@ -597,6 +601,10 @@ pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_tracks: Option<Vec<collector_modules::music::files::MusicImportTrack>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_layout: Option<collector_modules::music::files::MusicImportLayout>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purchase: Option<DigitalPurchase>,
     // Retained private intake plans may predate this presentation capability.
     #[serde(default)]
@@ -618,6 +626,9 @@ pub struct IngestPlanPackage {
 #[serde(deny_unknown_fields)]
 pub struct DiscoverIngestCommand {
     pub collection_id: CollectionId,
+    /// Selected browser directory, excluded only while determining package boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
     pub files: Vec<UploadFile>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -636,6 +647,8 @@ pub struct PlanIngestCommand {
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IngestPackageSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_tracks: Option<Vec<collector_modules::music::files::MusicImportTrack>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purchase: Option<DigitalPurchase>,
     pub source: ImportSourceSummary,
@@ -4190,6 +4203,8 @@ impl CollectionService {
                     supplied_digest
                 };
                 Ok(ImportDeclaredFile {
+                    album_selected: None,
+                    album_disc_position: None,
                     visibility: file
                         .visibility
                         .unwrap_or_else(|| default_import_visibility(file_audio, &file.name)),

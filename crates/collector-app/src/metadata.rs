@@ -1835,6 +1835,139 @@ impl CollectionService {
         Ok(())
     }
 
+    pub(crate) fn apply_import_album_selection(
+        &self,
+        intent: &crate::GuidedIngestIntent,
+        import: &crate::ImportRecord,
+        item: &Item,
+    ) -> Result<()> {
+        if !import
+            .view
+            .files
+            .iter()
+            .any(|file| file.album_selected.is_some())
+        {
+            return Ok(());
+        }
+        let Some(manifest) =
+            self.recorded_file_tracks(item.collection_id, import.view.representation_id)?
+        else {
+            return Ok(());
+        };
+        let actor = Principal {
+            user_id: intent.user_id,
+            administrator: false,
+            device_id: None,
+        };
+        let context = CommandContext::new(format!("import-album-selection-{}", intent.import_id))?;
+        self.execute_command(
+            &actor,
+            &context,
+            "import.album-selection",
+            &(intent.import_id, &import.view.files),
+            |effects| {
+                let item = self.reader.item(item.id)?;
+                self.content_write_eligibility(&actor, item.collection_id)?;
+                let LoadedMetadataAuthority {
+                    revision,
+                    mut authority,
+                    legacy,
+                    current,
+                } = self.authority_or_inventory(&item)?;
+                let mut overrides = authority
+                    .domain_overrides
+                    .as_ref()
+                    .map(|value| {
+                        value
+                            .payload
+                            .parse::<collector_modules::music::MusicMetadataOverrides>()
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                let previous = overrides.track_overrides.clone();
+                let positions = previous
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, edit)| {
+                        edit.source_representation_id == import.view.representation_id
+                    })
+                    .map(|(index, edit)| (edit.track_position, index))
+                    .collect::<BTreeMap<_, _>>();
+                for track in &manifest.tracks {
+                    let file = import
+                        .view
+                        .files
+                        .get(track.file_index)
+                        .ok_or(Error::Conflict)?;
+                    let Some(selected) = file.album_selected else {
+                        continue;
+                    };
+                    if let Some(index) = positions.get(&track.position) {
+                        let edit = &mut overrides.track_overrides[*index];
+                        edit.album_selected.get_or_insert(selected);
+                        if edit.disc_position.is_none() {
+                            edit.disc_position = file.album_disc_position;
+                        }
+                    } else {
+                        overrides.track_overrides.push(
+                            collector_modules::disc_audio::TrackMetadataOverride {
+                                source_representation_id: import.view.representation_id,
+                                track_position: track.position,
+                                album_selected: Some(selected),
+                                disc_position: file.album_disc_position,
+                                display_position: None,
+                                title: None,
+                            },
+                        );
+                    }
+                }
+                authority.domain_overrides = Some(ModuleData {
+                    module: item.domain.module.clone(),
+                    schema_version: item.domain.schema_version,
+                    payload: RawJson::from_value(
+                        serde_json::to_value(overrides)
+                            .map_err(|error| Error::Invalid(error.to_string()))?,
+                    ),
+                });
+                self.modules
+                    .validate_metadata_authority(&item.domain.module, &authority)
+                    .map_err(Error::from)?;
+                self.validate_listening_track_edits(&item, &authority, &previous)?;
+                let candidates = self
+                    .processing
+                    .metadata_candidates(item.collection_id, item.id)?;
+                let active =
+                    current_metadata_candidates(&authority, &candidates, current.as_deref())?;
+                let record = MetadataAuthorityRecord {
+                    resolution_policy: 4,
+                    inventory: Some((&item).into()),
+                    collection_id: item.collection_id,
+                    item_id: item.id,
+                    revision: Revision(revision.0.checked_add(1).ok_or(Error::Conflict)?),
+                    display: Some(resolve_metadata_display(
+                        &item,
+                        &authority,
+                        &active,
+                        &self.metadata_language(actor.user_id)?,
+                    )?),
+                    authority,
+                    observations: legacy,
+                    current_candidates: current,
+                    updated_at: self.authentication.now(),
+                };
+                effects.publish_metadata_authority(
+                    TransactionId::new(),
+                    record,
+                    Some(crate::ItemEffectContext {
+                        item_id: item.id,
+                        generation: item.lifecycle.generation,
+                        source: crate::ItemEffectSource::GuidedImport(intent.import_id),
+                    }),
+                )
+            },
+        )
+    }
+
     pub fn update_metadata_authority(
         &self,
         actor: &Principal,

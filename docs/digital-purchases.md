@@ -88,10 +88,12 @@ to the complete source fingerprint and rebound package-file IDs. Its source trac
 positions follow the reviewed file order. Native format and decoded frames belong
 to that source; editable titles, disc numbers, printed numbers and album inclusion
 are separate metadata authority. Existing saved list targets never change files
-when those labels/order change. Alternative encodings with the same file stem or
-matching disc/track/title claims require an explicit album inclusion/exclusion
-choice. Individual originals remain playable. Album/list expansion refuses an
-unresolved choice; the browser queue and native album view honor the same fields.
+when those labels/order change. Album playback defaults to one format per explicit disc, preferring FLAC, then
+WAV, then MP3. This also applies to loose mixed-format files, without inferring
+sample equivalence. A reviewed import selection or later track override takes
+precedence. Same-format files with conflicting track slots still require a choice;
+individual originals remain available. Browser queues, collection lists, audio
+matching and preparation use the effective selection.
 
 Availability uses `profile: null` for originals, exact file ID/index/digest/length,
 actual codec, sample rate, channels, optional bit depth and known delay/padding.
@@ -105,25 +107,58 @@ prepared outputs keep their existing identities and 44.1-kHz timeline.
 
 Browser file/folder selection and configured inboxes use the existing signed
 plan, resumable staging, guided/bulk intents and ordinary publication pipeline.
-Discovery groups disc subfolders and keeps independent nested packages disjoint.
-The format-folder behavior below is published in beta.16; see
-[publication/deployment evidence](validation/container-beta16-publication-2026-11-01.md).
-Exact case-insensitive `FLAC`, `MP3` and `WAV` folders use the parent album name,
-including `Album/FLAC/Disc 1` and `Album/Disc 1/FLAC`. Sibling encodings remain
-separate packages with format suffixes in review. Parent covers, booklets and other
-companions join the album; nested independent albums/sections keep their own files.
-Files within a format branch stay with that version. Common parent companions are
-included once, with unwrapped tracks if present, otherwise the first format in
-FLAC/MP3/WAV order. Review can attach the other version to the same album if wanted.
-Discovery does not guess decorated names such as `FLAC 24-bit` or arbitrary section
-names. If the selected paths contain no parent album name, the format name remains
-the fallback. Existing archived packages are unchanged. See
-[format-folder discovery acceptance](validation/format-folder-discovery-2026-11-01.md).
+Each direct regular file or directory in a configured server inbox is one package.
+A digital album keeps its format branches, numbered disc folders, named sections,
+artwork and companions together. Separate top-level discs can use the same reviewed
+album group, with a physical-copy label where appropriate.
+
+Browser folder selection has a **Folder layout** control. **Best guess** treats
+loose audio or immediate format/disc folders as one album and otherwise
+discovers top-level items. Choose **One album in the selected folder** for an album with custom section
+folders, or **Separate top-level albums / discs** for an imports container. Original
+paths and all reviewed files are preserved in either mode. Raw-disc anchors keep
+their established analysis boundaries.
+
+Expand **Files and album playback** to inspect the file tree. File and folder
+checkboxes choose the main album's playback files. **Select FLAC**, **Select WAV**
+and **Select MP3** choose a format across folders. **Disc** dropdowns apply a number
+to checked files or folders, including a new disc number entered through the next
+available option. Files outside the playback selection are still preserved.
+
+The default prefers FLAC, WAV, then MP3 within each discovered numbered disc.
+`Album/FLAC/Disc 1` and `Album/Disc 1/FLAC` both work. Mixed formats in the same
+folder are treated as alternate copies. Unknown named audio branches, different
+format track counts and missing disc folders in a multi-disc layout show **Needs
+attention** and require a confirmed selection before starting. The proposal uses
+names and counts. Actual audio validation remains background work after staging.
+An explicit choice is retained across draft reload, retry and catalog rebuild,
+and later manual track edits keep authority. After **Import review saved**, the
+review can be reopened. If the browser has released its file handles, use
+**Reselect folder for reviewed import** to restore the originals without replacing
+the review.
+
+The tree is built only for opened reviews. Folder children are paged in groups of
+50. At more than 32 path levels, the remaining original path is shown at the leaf.
+Existing intake and metadata limits remain applicable. The format default also
+applies to older mixed-format packages without a manual track choice. Existing
+package boundaries and saved track targets retain their identities.
+See [current source validation](validation/album-import-review-2026-11-11.md).
+The [beta.16 evidence](validation/format-folder-discovery-2026-11-01.md) records the
+historical separate-format policy.
+A successful replacement preview replaces the reviewed files. A failed preview
+leaves the previous review and its selected originals available.
+
 Review exposes destination/group, file order, visibility and private purchase
 facts before admission. Reviewed inbox order/visibility survive rescans; inventory
 changes fail admission/recovery. Submitted purchase inputs and receipts survive
 reopen. Failed analysis still permits preservation, with failed steps visible and
 no successfully analyzed/playable track claim.
+
+Manual disc assignments take precedence. For digital originals, numbered disc
+folders supply the default before embedded disc tags. Automatic preparation
+uses the source belonging to that import after its playback selection is applied.
+If the selection cannot be applied, the import reports the failure and retains
+the preserved originals for retry.
 
 The narrow `junk-libs-audio` reader owns structure, tags, pictures and decoding.
 Music maps its result to portable sources and descriptive candidates. Local tags
@@ -176,7 +211,8 @@ Purchase fields are curator-only. New digital imports default audio and ordinary
 `cover`/`folder`/`front` images to shared; other companions, including receipt
 photos and booklets, default to curators. Review can explicitly share a booklet or
 restrict an entire audio file. Private audio contributes no public tag candidate,
-artwork or listener availability. Raw original authorization enforces each stored
+artwork or listener availability. A restricted preferred track can make album
+playback unavailable to a viewer. The other formats remain individual originals. Raw original authorization enforces each stored
 file's visibility, including historical sources. Presented files retain their
 original indices after filtering. There is no whole-package download bypass.
 

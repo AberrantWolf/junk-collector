@@ -3675,6 +3675,8 @@ export interface components {
         };
         DiscoverIngestCommand: {
             collection_id: components["schemas"]["CollectionId"];
+            /** @description Selected browser directory, excluded only while determining package boundaries. */
+            directory?: string | null;
             files: components["schemas"]["UploadFile"][];
         };
         DiscoveredIngestPlan: {
@@ -3951,6 +3953,9 @@ export interface components {
             observation: unknown;
         };
         ImportDeclaredFile: {
+            /** Format: int32 */
+            album_disc_position?: number | null;
+            album_selected?: boolean | null;
             bytes: components["schemas"]["ByteLength"];
             digest?: components["schemas"]["Digest"] | null;
             name: string;
@@ -4072,6 +4077,7 @@ export interface components {
         /** @enum {string} */
         IngestEnrichmentPolicy: "automatic" | "none";
         IngestPackageSelection: {
+            album_tracks?: components["schemas"]["MusicImportTrack"][] | null;
             anchor_file_index?: number | null;
             files: components["schemas"]["UploadFile"][];
             purchase?: components["schemas"]["DigitalPurchase"] | null;
@@ -4091,6 +4097,7 @@ export interface components {
             token: string;
         };
         IngestPlanPackage: {
+            album_tracks?: components["schemas"]["MusicImportTrack"][] | null;
             analysis_available: boolean;
             anchors: components["schemas"]["IngestAnchorChoice"][];
             artwork_available: boolean;
@@ -4099,6 +4106,7 @@ export interface components {
             files: components["schemas"]["UploadFile"][];
             metadata_available: boolean;
             music_actions_available?: boolean;
+            music_layout?: components["schemas"]["MusicImportLayout"] | null;
             /** Format: int32 */
             position: number;
             preparation_available: boolean;
@@ -4924,6 +4932,16 @@ export interface components {
             source_representation_id: components["schemas"]["RepresentationId"];
             track_count?: number | null;
         };
+        MusicImportLayout: {
+            needs_attention: boolean;
+            notices: string[];
+            tracks: components["schemas"]["MusicImportTrack"][];
+        };
+        MusicImportTrack: {
+            /** Format: int32 */
+            disc_position?: number | null;
+            file_name: string;
+        };
         MusicMediumCoverage: {
             /** Format: int32 */
             position: number;
@@ -5224,6 +5242,7 @@ export interface components {
         };
         Page_IngestPlanPackage: {
             items: {
+                album_tracks?: components["schemas"]["MusicImportTrack"][] | null;
                 analysis_available: boolean;
                 anchors: components["schemas"]["IngestAnchorChoice"][];
                 artwork_available: boolean;
@@ -5232,6 +5251,7 @@ export interface components {
                 files: components["schemas"]["UploadFile"][];
                 metadata_available: boolean;
                 music_actions_available?: boolean;
+                music_layout?: components["schemas"]["MusicImportLayout"] | null;
                 /** Format: int32 */
                 position: number;
                 preparation_available: boolean;

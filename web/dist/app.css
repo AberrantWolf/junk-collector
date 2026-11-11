@@ -537,6 +537,16 @@ label.intake-select {
 }
 .intake-album-fields > div + div { margin-top: .75rem; }
 
+.import-file-tree,.import-file-tree ul{list-style:none;margin:.4rem 0;padding-left:1rem;border-left:1px solid var(--line)}
+.import-file-tree{padding-left:0;border-left:0}
+.import-tree-line{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;padding:.4rem 0;min-width:0}
+.import-tree-line>label{margin:0}
+.import-tree-line>small{color:var(--muted)}
+.import-folder-toggle{text-align:left;overflow-wrap:anywhere;max-width:100%}
+.import-tree-line .import-disc-choice{display:flex;align-items:center;gap:.4rem}
+.import-disc-choice select{width:auto}
+@media(max-width:700px){.import-file-tree ul{padding-left:.6rem}.import-tree-line{align-items:start}.import-tree-line>label:first-child{flex-basis:100%}}
+
 .job-ledger {
   border-top: 1px solid var(--line);
   margin-top: 28px;

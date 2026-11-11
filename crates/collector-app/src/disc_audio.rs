@@ -221,7 +221,13 @@ impl CollectionService {
             _ => return Ok(()),
         };
         let mut positions = std::collections::BTreeMap::new();
-        for edit in edits.iter().filter(|edit| !previous.contains(edit)) {
+        let previous = previous
+            .iter()
+            .map(|edit| ((edit.source_representation_id, edit.track_position), edit))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for edit in edits.iter().filter(|edit| {
+            previous.get(&(edit.source_representation_id, edit.track_position)) != Some(edit)
+        }) {
             if !item
                 .captures
                 .iter()

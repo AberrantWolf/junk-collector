@@ -51,6 +51,44 @@ pub fn is_inbox_cleanup_directory(name: &str) -> bool {
         .is_some_and(|id| id.parse::<ImportId>().is_ok())
 }
 
+fn signed_packages(packages: &[IngestPlanPackage]) -> Vec<IngestPlanPackage> {
+    packages
+        .iter()
+        .cloned()
+        .map(|mut package| {
+            package.music_layout = None;
+            package
+        })
+        .collect()
+}
+
+/// Keep original names intact while discovering children of a browser-selected root.
+pub(crate) fn discovery_names(
+    files: &[UploadFile],
+    directory: Option<&str>,
+) -> Result<Vec<PackageFileName>> {
+    let prefix = directory.map(|name| format!("{name}/"));
+    if directory.is_some_and(|name| {
+        name.is_empty() || name.contains(['/', '\\']) || matches!(name, "." | "..")
+    }) {
+        return Err(Error::Invalid(
+            "Choose one direct browser directory.".into(),
+        ));
+    }
+    files
+        .iter()
+        .map(|file| {
+            let name = match &prefix {
+                Some(prefix) => file.name.strip_prefix(prefix).ok_or_else(|| {
+                    Error::Invalid("File is outside the selected directory.".into())
+                })?,
+                None => &file.name,
+            };
+            PackageFileName::new(name)
+        })
+        .collect()
+}
+
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
     validate_intake_files(files, 10_000)
 }
@@ -189,11 +227,7 @@ impl CollectionService {
         command
             .files
             .retain(|file| !is_intake_housekeeping(&file.name, false));
-        let names = command
-            .files
-            .iter()
-            .map(|file| PackageFileName::new(file.name.clone()))
-            .collect::<Result<Vec<_>>>()?;
+        let names = discovery_names(&command.files, command.directory.as_deref())?;
         let discovered = self.modules.discover_imports(&eligibility.owner, &names)?;
         let mut used = BTreeSet::new();
         let mut packages = Vec::new();
@@ -211,6 +245,7 @@ impl CollectionService {
                 files.push(file.clone());
             }
             packages.push(IngestPackageSelection {
+                album_tracks: None,
                 purchase: None,
                 source: ImportSourceSummary {
                     kind: ImportSourceKind::Browser,
@@ -356,6 +391,26 @@ impl CollectionService {
                     "Purchase facts apply to digital music packages.".into(),
                 ));
             }
+            let music_layout = if file_audio {
+                Some(
+                    collector_modules::music::files::import_layout(
+                        &package
+                            .files
+                            .iter()
+                            .map(|file| file.name.clone())
+                            .collect::<Vec<_>>(),
+                        package.album_tracks.as_deref(),
+                    )
+                    .map_err(Error::from)?,
+                )
+            } else {
+                if package.album_tracks.is_some() {
+                    return Err(Error::Invalid(
+                        "Album playback files require a digital music package.".into(),
+                    ));
+                }
+                None
+            };
             let analysis_blocked = blockers.iter().any(|issue| issue.blocks_analysis);
             let (preparation_available, preparation_reason) = if eligibility.owner.0
                 == "org.junk.music"
@@ -385,6 +440,8 @@ impl CollectionService {
                 )
             };
             packages.push(IngestPlanPackage {
+                album_tracks: package.album_tracks.clone(),
+                music_layout,
                 purchase: package.purchase.clone(),
                 music_actions_available: eligibility.owner.0 == "org.junk.music",
                 position: position
@@ -403,8 +460,12 @@ impl CollectionService {
             });
         }
         let token = Digest::sha256(
-            &serde_json::to_vec(&(command.collection_id, &eligibility.binding, &packages))
-                .map_err(|error| Error::Invalid(error.to_string()))?,
+            &serde_json::to_vec(&(
+                command.collection_id,
+                &eligibility.binding,
+                &signed_packages(&packages),
+            ))
+            .map_err(|error| Error::Invalid(error.to_string()))?,
         )
         .hex;
         Ok(IngestPlan {
@@ -502,6 +563,7 @@ impl CollectionService {
                         .packages
                         .iter()
                         .map(|package| IngestPackageSelection {
+                            album_tracks: package.album_tracks.clone(),
                             purchase: package.purchase.clone(),
                             source: package.source.clone(),
                             files: package.files.clone(),
@@ -515,12 +577,24 @@ impl CollectionService {
                 },
             )?;
             if replanned.token != command.plan.token
-                || serde_json::to_value(&replanned.packages)
+                || serde_json::to_value(signed_packages(&replanned.packages))
                     .map_err(|error| Error::Invalid(error.to_string()))?
-                    != serde_json::to_value(&command.plan.packages)
+                    != serde_json::to_value(signed_packages(&command.plan.packages))
                         .map_err(|error| Error::Invalid(error.to_string()))?
             {
                 return Err(Error::Conflict);
+            }
+            if command.analysis != IngestAnalysisPolicy::PreserveOnly
+                && replanned.packages.iter().any(|package| {
+                    package
+                        .music_layout
+                        .as_ref()
+                        .is_some_and(|layout| layout.needs_attention)
+                })
+            {
+                return Err(Error::Invalid(
+                    "Review the album playback files before importing this layout.".into(),
+                ));
             }
             if (command.prepare_music || explicit_profile == Some(ConversionProfile::Flac))
                 && let Some(package) = replanned
@@ -635,6 +709,12 @@ impl CollectionService {
                 &key,
             ));
             let empty_digest = Digest::sha256(b"");
+            let album_tracks = package.album_tracks.as_ref().map(|tracks| {
+                tracks
+                    .iter()
+                    .map(|track| (track.file_name.as_str(), track.disc_position))
+                    .collect::<BTreeMap<_, _>>()
+            });
             let files = package
                 .files
                 .iter()
@@ -653,7 +733,15 @@ impl CollectionService {
                             "declared digest does not match the empty file".into(),
                         ));
                     }
+                    let reviewed = album_tracks
+                        .as_ref()
+                        .and_then(|tracks| tracks.get(file.name.as_str()));
                     Ok(ImportDeclaredFile {
+                        album_selected: album_tracks
+                            .as_ref()
+                            .filter(|_| collector_modules::music::files::is_audio_name(&file.name))
+                            .map(|_| reviewed.is_some()),
+                        album_disc_position: reviewed.copied().flatten(),
                         visibility: file.visibility.unwrap_or(Visibility::Shared),
                         name: file.name.clone(),
                         bytes: file.bytes,
@@ -1355,10 +1443,28 @@ impl CollectionService {
                     return Ok(());
                 }
                 let current_item = self.reader.item(intent.target_item_id)?;
-                if current_item.domain.module.0 == "org.junk.music"
-                    && intent.enrichment_error.is_none()
-                {
-                    self.apply_file_tags(&intent, &record, &current_item)?;
+                if current_item.domain.module.0 == "org.junk.music" {
+                    if let Err(error) =
+                        self.apply_import_album_selection(&intent, &record, &current_item)
+                    {
+                        if matches!(error, Error::CatalogBusy) {
+                            return Err(error);
+                        }
+                        intent.enrichment_error =
+                            Some(error.to_string().chars().take(512).collect());
+                        if intent.prepare_music {
+                            intent.preparation_error = Some(
+                                "Apply the reviewed album selection before preparing playback."
+                                    .into(),
+                            );
+                        }
+                        intent.settled = true;
+                        intent.updated_at = self.authentication.now();
+                        return self.provisional_imports.save_guided_ingest_intent(intent);
+                    }
+                    if intent.enrichment_error.is_none() {
+                        self.apply_file_tags(&intent, &record, &current_item)?;
+                    }
                 }
                 let enrichment_done = if intent.enrichment == IngestEnrichmentPolicy::None
                     || intent.enrichment_error.is_some()

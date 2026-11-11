@@ -336,13 +336,12 @@ impl CollectionService {
         let selected_rows = rows.iter().filter(|row| {
             preparation_row(row, profile) && selected.contains(&row.source_representation_id)
         });
-        if matches!(profile, ConversionProfile::Opus { .. })
-            && selected_rows.clone().any(|row| {
-                row.album_selection == collector_api_types::MusicAlbumSelection::NeedsReview
-            })
+        if selected_rows
+            .clone()
+            .any(|row| row.album_selection == collector_api_types::MusicAlbumSelection::NeedsReview)
         {
             return Err(Error::Unavailable(
-                "Choose which alternate audio files belong to the album before preparing Opus."
+                "Choose which alternate audio files belong to the album before preparing it."
                     .into(),
             ));
         }
@@ -574,35 +573,24 @@ impl CollectionService {
         {
             return Err(Error::Unavailable("Automatic preparation stopped because the Capture association changed. Open the associated album to prepare it explicitly.".into()));
         }
-        if matches!(profile, ConversionProfile::Opus { .. }) {
-            let sources = [import.view.representation_id];
-            let rows = self.music_track_availability_for_item(user_id, &item)?;
-            if !rows.iter().any(|row| {
-                row.source_representation_id == sources[0] && preparation_row(row, profile)
-            }) {
-                return Err(Error::Unavailable("The preserved import has no supported audio tracks for Opus. Review its analysis result and source format.".into()));
-            }
-            let frozen =
-                self.freeze_music_album_batch(user_id, &item, &sources, profile, batch_id)?;
-            return Self::enqueue_music_album_batch(self.jobs.as_ref(), frozen, Some(import_id));
-        }
-        let rows = self.music_track_availability_for_item(user_id, &item)?;
-        let plan = album_plan_for_item(&item, &rows, profile);
-        if plan.discs.iter().any(|disc| disc.ambiguous) {
-            return Err(Error::Unavailable(
-                "Album preparation needs a source choice because this import is associated with alternative disc sources. Use Prepare album to choose explicitly."
-                    .into(),
-            ));
-        }
-        let sources = plan
-            .discs
-            .iter()
-            .flat_map(|disc| disc.sources.iter())
-            .filter(|source| source.default_selected)
-            .map(|source| source.source_representation_id)
-            .collect::<Vec<_>>();
-        validate_album_sources(&sources)?;
-        let frozen = self.freeze_music_album_batch(user_id, &item, &sources, profile, batch_id)?;
+        // Admission belongs to this import. Siblings may still be applying
+        // their reviewed playback selections after the preservation barrier.
+        let source = import.view.representation_id;
+        let frozen = self.freeze_music_album_batch_with_selection(
+            user_id, &item, profile, batch_id, |plan| {
+                let disc = plan.discs.iter().find(|disc| {
+                    disc.sources.iter().any(|candidate| candidate.source_representation_id == source)
+                }).ok_or_else(|| Error::Unavailable(
+                    "The preserved import has no selected audio tracks for this preparation format. Review its analysis and playback selection.".into()
+                ))?;
+                if *profile == ConversionProfile::Flac && disc.ambiguous {
+                    return Err(Error::Unavailable(
+                        "This disc has alternative sources. Use Prepare album to choose one.".into()
+                    ));
+                }
+                Ok(vec![source])
+            },
+        )?;
         Self::enqueue_music_album_batch(self.jobs.as_ref(), frozen, Some(import_id))
     }
 
@@ -1031,6 +1019,7 @@ pub(crate) fn album_plan_for_item(
 fn preparation_row(row: &MusicTrackAvailability, profile: &ConversionProfile) -> bool {
     if *profile == ConversionProfile::Flac {
         row.primary_playback()
+            && row.album_selection != collector_api_types::MusicAlbumSelection::Excluded
     } else {
         row.profile.as_ref() == Some(profile)
             && row.album_selection != collector_api_types::MusicAlbumSelection::Excluded

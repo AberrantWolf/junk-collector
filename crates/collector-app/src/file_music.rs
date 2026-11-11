@@ -1,6 +1,94 @@
 //! Recorded file-source resolution. Never opens or hashes audio during browsing.
 use crate::*;
 use collector_modules::music::{MusicImportAnalysisOutput, files::FileTrackManifest};
+/// Encoding is an album-copy choice within each explicit disc directory.
+/// Defaults use only recorded observations, and never override curator selections.
+fn file_album_selections(
+    manifest: &FileTrackManifest,
+    files: &[StoredFile],
+    role: Role,
+) -> Vec<collector_api_types::MusicAlbumSelection> {
+    use collector_api_types::MusicAlbumSelection;
+    use collector_modules::music::files::path_disc_number;
+    let rank = collector_modules::music::files::codec_priority;
+    let mut preferred = std::collections::BTreeMap::new();
+    for track in &manifest.tracks {
+        if let Some(file) = files.get(track.file_index) {
+            let choice = rank(&track.audio.codec);
+            preferred
+                .entry(path_disc_number(&file.name).unwrap_or(1))
+                .and_modify(|value: &mut u8| *value = (*value).min(choice))
+                .or_insert(choice);
+        }
+    }
+    let mut tag_counts = std::collections::BTreeMap::new();
+    let mut stem_counts = std::collections::BTreeMap::new();
+    for track in &manifest.tracks {
+        let Some(file) = files.get(track.file_index) else {
+            continue;
+        };
+        if file.visibility == Visibility::Curators && role == Role::Viewer {
+            continue;
+        }
+        let scope = (
+            path_disc_number(&file.name).unwrap_or(1),
+            track.audio.codec.as_str(),
+        );
+        if let Some(tags) = file_track_tag_key(track) {
+            *tag_counts.entry((scope, tags)).or_insert(0usize) += 1;
+        }
+        if let Some((stem, _)) = file.name.rsplit_once('.') {
+            *stem_counts.entry((scope, stem)).or_insert(0usize) += 1;
+        }
+    }
+    manifest
+        .tracks
+        .iter()
+        .map(|track| {
+            let Some(file) = files.get(track.file_index) else {
+                return MusicAlbumSelection::NeedsReview;
+            };
+            let disc = path_disc_number(&file.name).unwrap_or(1);
+            if preferred.get(&disc) != Some(&rank(&track.audio.codec)) {
+                return MusicAlbumSelection::Excluded;
+            }
+            let scope = (disc, track.audio.codec.as_str());
+            let duplicate_tags = file_track_tag_key(track).is_some_and(|tags| {
+                tag_counts
+                    .get(&(scope, tags))
+                    .is_some_and(|count| *count > 1)
+            });
+            let duplicate_stem = file.name.rsplit_once('.').is_some_and(|(stem, _)| {
+                stem_counts
+                    .get(&(scope, stem))
+                    .is_some_and(|count| *count > 1)
+            });
+            if duplicate_tags || duplicate_stem {
+                MusicAlbumSelection::NeedsReview
+            } else {
+                MusicAlbumSelection::Included
+            }
+        })
+        .collect()
+}
+
+fn file_track_tag_key(
+    track: &collector_modules::music::files::FileTrack,
+) -> Option<(&str, &str, Option<&str>)> {
+    Some((
+        track.audio.tag("title")?,
+        track.audio.tag("track_number")?,
+        track.audio.tag("disc_number"),
+    ))
+}
+
+fn recorded_file_disc(name: &str, tag: Option<&str>) -> Option<u16> {
+    collector_modules::music::files::path_disc_number(name).or_else(|| {
+        tag.and_then(|value| value.split('/').next()?.parse().ok())
+            .filter(|position| *position > 0)
+    })
+}
+
 impl CollectionService {
     /// A failed optional identification may already have been followed by
     /// preservation. Retry against those exact archived bytes through the same
@@ -118,6 +206,52 @@ impl CollectionService {
             after = page.items.last().map(|o| o.id);
         }
     }
+    /// Missing unselected alternates do not make a complete playback selection partial.
+    pub(crate) fn missing_file_album_tracks(
+        &self,
+        item: &Item,
+        source_id: RepresentationId,
+        manifest: &FileTrackManifest,
+        available: &std::collections::BTreeSet<u16>,
+    ) -> Result<bool> {
+        if manifest
+            .tracks
+            .iter()
+            .all(|track| available.contains(&track.position))
+        {
+            return Ok(false);
+        }
+        let source = item
+            .captures
+            .iter()
+            .flat_map(|capture| &capture.representations)
+            .find(|source| source.id == source_id)
+            .ok_or(Error::Conflict)?;
+        let authority = self
+            .processing
+            .metadata_authority(item.collection_id, item.id)?;
+        let reviewed = file_track_overrides(item, authority.as_ref())?
+            .into_iter()
+            .filter(|edit| edit.source_representation_id == source_id)
+            .filter_map(|edit| {
+                edit.album_selected
+                    .map(|selected| (edit.track_position, selected))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let selections = file_album_selections(manifest, &source.files, Role::Curator);
+        Ok(manifest
+            .tracks
+            .iter()
+            .zip(selections)
+            .any(|(track, selection)| {
+                !available.contains(&track.position)
+                    && reviewed
+                        .get(&track.position)
+                        .copied()
+                        .unwrap_or(selection != collector_api_types::MusicAlbumSelection::Excluded)
+            }))
+    }
+
     pub(crate) fn file_track_rows(
         &self,
         item: &Item,
@@ -135,7 +269,11 @@ impl CollectionService {
         let authority = self
             .processing
             .metadata_authority(item.collection_id, item.id)?;
-        let edits = file_track_overrides(item, authority.as_ref())?;
+        let edits = file_track_overrides(item, authority.as_ref())?
+            .into_iter()
+            .filter(|edit| edit.source_representation_id == source.id)
+            .map(|edit| (edit.track_position, edit))
+            .collect::<std::collections::BTreeMap<_, _>>();
         let active = self.jobs.active_derivative_jobs(capture.id)?;
         let fingerprint = self
             .processing
@@ -158,10 +296,9 @@ impl CollectionService {
             }
         }
         let mut rows = Vec::new();
-        for track in &manifest.tracks {
-            let edit = edits.iter().find(|edit| {
-                edit.source_representation_id == source.id && edit.track_position == track.position
-            });
+        let selections = file_album_selections(&manifest, &source.files, role);
+        for (track, default_selection) in manifest.tracks.iter().zip(selections) {
+            let edit = edits.get(&track.position);
             let file = source.files.get(track.file_index).ok_or(Error::Conflict)?;
             // Curation access can play a private original; listener views never
             // receive its tags or media target.
@@ -178,26 +315,10 @@ impl CollectionService {
                 })
                 .or_else(|| audio.tag("title").map(str::to_owned))
                 .unwrap_or_else(|| file.name.rsplit('/').next().unwrap_or("Track").to_owned());
-            let alternate = manifest.tracks.iter().any(|other| {
-                other.position != track.position
-                    && ((audio.tag("title").is_some()
-                        && audio.tag("track_number").is_some()
-                        && audio.tag("title") == other.audio.tag("title")
-                        && audio.tag("track_number") == other.audio.tag("track_number")
-                        && audio.tag("disc_number") == other.audio.tag("disc_number"))
-                        || source
-                            .files
-                            .get(other.file_index)
-                            .is_some_and(|other_file| {
-                                file.name.rsplit_once('.').map(|(stem, _)| stem)
-                                    == other_file.name.rsplit_once('.').map(|(stem, _)| stem)
-                            }))
-            });
             let album_selection = match edit.and_then(|e| e.album_selected) {
                 Some(true) => collector_api_types::MusicAlbumSelection::Included,
                 Some(false) => collector_api_types::MusicAlbumSelection::Excluded,
-                None if alternate => collector_api_types::MusicAlbumSelection::NeedsReview,
-                None => collector_api_types::MusicAlbumSelection::Included,
+                None => default_selection,
             };
             let wav = audio.codec == "wav";
             let encoder = self.encoder_availability(&ConversionProfile::Flac);
@@ -278,11 +399,9 @@ impl CollectionService {
                 }),
                 capture_id: capture.id,
                 source_label: "Digital original".into(),
-                disc_position: edit.and_then(|e| e.disc_position).or_else(|| {
-                    audio
-                        .tag("disc_number")
-                        .and_then(|v| v.split('/').next()?.parse().ok())
-                }),
+                disc_position: edit
+                    .and_then(|edit| edit.disc_position)
+                    .or_else(|| recorded_file_disc(&file.name, audio.tag("disc_number"))),
                 source_representation_id: source.id,
                 track_position: track.position,
                 start_frame: PcmFrame(0),
@@ -633,7 +752,10 @@ pub fn file_music_search_projection(
         .payload
         .parse::<collector_modules::music::MusicItemData>()
         .ok();
-    let edits = file_track_overrides(item, authority)?;
+    let edits = file_track_overrides(item, authority)?
+        .into_iter()
+        .map(|edit| ((edit.source_representation_id, edit.track_position), edit))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut songs = std::collections::BTreeMap::new();
     for observation in observations {
         let Ok(output) = observation
@@ -656,7 +778,15 @@ pub fn file_music_search_projection(
             .flat_map(|c| &c.representations)
             .find(|r| r.id == source)
             .ok_or(Error::Conflict)?;
-        for track in manifest.tracks {
+        let selections = file_album_selections(&manifest, &representation.files, Role::Viewer);
+        for (track, selection) in manifest.tracks.into_iter().zip(selections) {
+            let edit = edits.get(&(source, track.position));
+            if !edit
+                .and_then(|edit| edit.album_selected)
+                .unwrap_or(selection != collector_api_types::MusicAlbumSelection::Excluded)
+            {
+                continue;
+            }
             if representation
                 .files
                 .get(track.file_index)
@@ -666,9 +796,6 @@ pub fn file_music_search_projection(
             }
             let audio = track.audio;
             let position = track.position;
-            let edit = edits.iter().find(|edit| {
-                edit.source_representation_id == source && edit.track_position == position
-            });
             let title = edit
                 .and_then(|e| e.title.clone())
                 .or_else(|| {
@@ -678,10 +805,11 @@ pub fn file_music_search_projection(
                 })
                 .or_else(|| audio.tag("title").map(str::to_owned))
                 .unwrap_or_else(|| format!("Track {position:02}"));
-            let disc = edit.and_then(|e| e.disc_position).or_else(|| {
-                audio
-                    .tag("disc_number")
-                    .and_then(|v| v.split('/').next()?.parse().ok())
+            let disc = edit.and_then(|edit| edit.disc_position).or_else(|| {
+                recorded_file_disc(
+                    &representation.files[track.file_index].name,
+                    audio.tag("disc_number"),
+                )
             });
             songs.entry((disc, position)).or_insert(MusicSearchRecord {
                 source_representation_id: None,
@@ -1010,5 +1138,23 @@ pub fn import_preservation_format(
         "original-file-audio-package"
     } else {
         "original-package"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recorded_file_disc;
+
+    #[test]
+    fn disc_folders_take_precedence_over_conflicting_tags() {
+        assert_eq!(
+            recorded_file_disc("Album/FLAC/CD_2/01.flac", Some("1/2")),
+            Some(2)
+        );
+        assert_eq!(
+            recorded_file_disc("Album/Disc 2/FLAC/01.flac", Some("1/2")),
+            Some(2)
+        );
+        assert_eq!(recorded_file_disc("Album/01.flac", Some("3/4")), Some(3));
     }
 }

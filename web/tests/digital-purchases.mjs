@@ -25,6 +25,11 @@ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/stat
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
+async function openFileTree(row){
+ await row.locator('summary').filter({hasText:'Files and album playback'}).click();
+ await row.locator('.import-file-tree').waitFor();
+ for(;;){const closed=row.locator('.import-file-tree button[aria-expanded="false"]');if(!await closed.count())break;await closed.first().click();}
+}
 let browser,page;
 try{
  await waitForServer(`http://127.0.0.1:${publicPort}/healthz`,server,{logs:()=>logs});
@@ -42,7 +47,8 @@ try{
  await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','02.mp3','receipt.txt','booklet.txt','cover.png'].map(file=>path.join(fixture,file)));
  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  await imports.getByLabel('Store',{exact:true}).fill('Private store');await imports.getByLabel('Purchase date').fill('2026-10-19');await imports.getByLabel('Order reference').fill('Private order 482');await imports.getByLabel('Price',{exact:true}).fill('1500');
- await imports.getByText('Files and analysis',{exact:true}).click();
+ await openFileTree(imports);
+ await imports.getByLabel('Use folder for album playback: All files',{exact:true}).check();
  await expect(imports.getByLabel(/Curators only: receipt.txt/)).toBeChecked();await expect(imports.getByLabel(/Curators only: booklet.txt/)).toBeChecked();await imports.getByLabel(/Curators only: booklet.txt/).uncheck();
  let releaseUpload;const held=new Promise(resolve=>{releaseUpload=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await held;await route.abort('aborted').catch(()=>{});},{times:1});
@@ -126,10 +132,10 @@ try{
  await page.goto(`${origin}/?collection=${collection}&item=${broken}`);
  await page.getByText(/playable audio analysis is not complete/).waitFor();
  assert.equal(await page.getByText('Inspect CD structure',{exact:true}).count(),0);
- // Alternate encodings remain an explicit album choice; track Play stays usable.
- await copyFile(path.join(fixture,'02.mp3'),path.join(fixture,'01.mp3'));
+ // Same-format copies still require a choice after tag analysis.
+ await copyFile(path.join(fixture,'01.flac'),path.join(fixture,'alternate.flac'));
  await page.goto(`${origin}/imports?collection=${collection}`);
- await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','01.mp3'].map(name=>path.join(fixture,name)));
+ await imports.getByLabel("Choose one package's files").setInputFiles(['01.flac','alternate.flac'].map(name=>path.join(fixture,name)));
  await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
  const alternateIntake=new URL(page.url()).searchParams.get('item');let alternate;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,alternateIntake);alternate=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:60000}).toBe('succeeded');
@@ -291,26 +297,55 @@ try{
  // previous long-lived export/playback page, including for a plain file input.
  await page.close();page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
  const steamImports=page.getByRole('region',{name:'Imports workspace'});
+ // Folder review uses names only and bounds rendered children even for large inventories.
+ const large=path.join(scratch,'Large review');await mkdir(large);
+ for(let i=0;i<1001;i++)await writeFile(path.join(large,`${String(i).padStart(4,'0')}.flac`),'review inventory only');
+ await page.goto(`${origin}/imports?collection=${collection}`);
+ await chooseFolder(page,steamImports.getByLabel('Choose folders',{exact:true}),large);
+ await steamImports.locator('summary').filter({hasText:'Files and album playback'}).click();
+ assert.equal(await steamImports.locator('.import-tree-file').count(),0);
+ await steamImports.getByRole('button',{name:'▸ All files',exact:true}).click();
+ await steamImports.getByRole('button',{name:'▸ Large review',exact:true}).click();
+ const fileLabels=()=>steamImports.locator('.import-tree-file input[aria-label^="Use for album playback:"]').evaluateAll(inputs=>inputs.map(input=>input.getAttribute('aria-label')));
+ const firstPage=await fileLabels();assert.equal(firstPage.length,50);
+ await steamImports.getByRole('button',{name:'Next entries',exact:true}).click();
+ const secondPage=await fileLabels();assert.equal(secondPage.length,50);
+ assert.equal(new Set([...firstPage,...secondPage]).size,100);
  // Steam-style format wrappers: real folder discovery, review and publication.
  const steam=path.join(scratch,'Steam soundtracks');
- for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3','Game Name OST/Booklet','Other Album/WAV'])await mkdir(path.join(steam,folder),{recursive:true});
+ for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/WAV','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
  await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Game Name OST/FLAC/Disc 1/01.flac'));
- await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Game Name OST/MP3/01.mp3'));
+ await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Game Name OST/MP3/Disc 1/01.mp3'));
  await copyFile(wavFile,path.join(steam,'Other Album/WAV/01.wav'));
+ await copyFile(wavFile,path.join(steam,'Game Name OST/WAV/Disc 1/01.wav'));
+ for(const name of ['01.flac','02.flac'])await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Wild Album/All FLAC',name));
+ await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Wild Album/DLC MP3/01.mp3'));
  await copyFile(path.join(fixture,'cover.png'),path.join(steam,'Game Name OST/cover.png'));
  await writeFile(path.join(steam,'Game Name OST/Booklet/booklet.txt'),'PRIVATE STEAM BOOKLET');
  await page.goto(`${origin}/imports?collection=${collection}`);
  await chooseFolder(page,steamImports.getByLabel('Choose folders',{exact:true}),steam);
  await steamImports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  const packageRows=steamImports.locator('.intake-review-row');await expect(packageRows).toHaveCount(3);
- const flacRow=packageRows.filter({has:page.getByText('Game Name OST (FLAC)',{exact:true})});
- const mp3Row=packageRows.filter({has:page.getByText('Game Name OST (MP3)',{exact:true})});
+ const flacRow=packageRows.filter({has:page.getByText('Game Name OST',{exact:true})});
+ const wildRow=packageRows.filter({has:page.getByText('Wild Album',{exact:true})});
  const otherRow=packageRows.filter({has:page.getByText('Other Album',{exact:true})});
- await expect(flacRow).toHaveCount(1);await expect(mp3Row).toHaveCount(1);await expect(otherRow).toHaveCount(1);
- await flacRow.getByText('Files and analysis',{exact:true}).click();
+ await expect(flacRow).toHaveCount(1);await expect(wildRow).toHaveCount(1);await expect(otherRow).toHaveCount(1);
+ await expect(steamImports.getByRole('button',{name:'Start import',exact:true})).toBeDisabled();
+ await expect(wildRow).toContainText('Needs attention');
+ await openFileTree(wildRow);
+ await wildRow.getByRole('button',{name:'Select FLAC',exact:true}).click();
+ await wildRow.getByLabel(/Use for album playback: .*All FLAC\/02.flac$/).uncheck();
+ await wildRow.getByLabel(/Disc for .*All FLAC\/01.flac$/).selectOption('2');
+ // A saved draft restores choices independently of the browser's file handles.
+ await expect(steamImports.getByRole('status').filter({hasText:'Import review saved'})).toBeVisible();
+ await page.reload();await expect(packageRows).toHaveCount(3);
+ await openFileTree(wildRow);
+ await expect(wildRow.getByLabel(/Use for album playback: .*All FLAC\/02.flac$/)).not.toBeChecked();
+ await expect(wildRow.getByLabel(/Disc for .*All FLAC\/01.flac$/)).toHaveValue('2');
+ await chooseFolder(page,steamImports.getByLabel('Reselect folder for reviewed import',{exact:true}),steam);
+ await openFileTree(flacRow);
  await expect(flacRow.getByLabel(/Curators only: .*Booklet\/booklet.txt/)).toBeChecked();
  await expect(flacRow.getByLabel(/Curators only: .*cover.png/)).not.toBeChecked();
- await expect(mp3Row.getByText(/cover.png/)).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:path.join(scratch,'format-discovery-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
  await steamImports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
@@ -318,12 +353,17 @@ try{
  let steamMembers;
  await expect.poll(async()=>{steamMembers=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,steamIntake);return steamMembers.filter(m=>m.import?.outcome==='succeeded').length;},{timeout:45000}).toBe(3);
  assert.equal(new Set(steamMembers.map(m=>m.import.target_item_id)).size,3);
- const flacMember=steamMembers.find(m=>m.plan.default_title==='Game Name OST (FLAC)');
+ const flacMember=steamMembers.find(m=>m.plan.default_title==='Game Name OST');
  let steamAlbum;
  await expect.poll(async()=>{steamAlbum=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),flacMember.import.target_item_id);return !!steamAlbum.primary_artwork;},{timeout:45000}).toBe(true);
  assert.equal(steamAlbum.captures.length,1);assert.equal(steamAlbum.specimens.length,0);
  const steamFiles=steamAlbum.captures[0].representations[0].files;
- assert.equal(steamFiles.length,3);
+ assert.equal(steamFiles.length,5);
+ const selectedSteam=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,flacMember.import.target_item_id);
+ assert.equal(selectedSteam.length,1);assert.equal(selectedSteam[0].audio_format.codec,'flac');
+ const wildMember=steamMembers.find(m=>m.plan.default_title==='Wild Album');
+ const selectedWild=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,wildMember.import.target_item_id);
+ assert.equal(selectedWild.length,1);assert.equal(selectedWild[0].disc_position,2);
  assert.ok(steamFiles.some(file=>file.name.endsWith('/Booklet/booklet.txt')&&file.visibility==='curators'));
  assert.ok(steamFiles.some(file=>file.name.endsWith('/cover.png')&&(file.visibility??'shared')==='shared'));
  assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');
@@ -430,5 +470,41 @@ try{
  // Immediate Library refresh exposes the newly imported version and its track.
  await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
  await page.getByRole('region',{name:'Album tracks'}).getByText('1. FLAC original',{exact:true}).waitFor();
+ // Separate top-level digital discs may join one reviewed album without
+ // borrowing a physical carrier or a MusicBrainz medium assignment.
+ await page.close();page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
+ const discImports=page.getByRole('region',{name:'Imports workspace'});
+ const discRows=discImports.locator('.intake-review-row');
+ const discs=path.join(scratch,'Two discs');
+ for(const disc of [1,2]){
+  const folder=path.join(discs,`Disc ${disc}`);await mkdir(folder,{recursive:true});
+  await copyFile(path.join(fixture,'02.mp3'),path.join(folder,'02.mp3'));
+  await copyFile(wavFile,path.join(folder,'03.wav'));
+ }
+ await page.goto(`${origin}/imports?collection=${collection}`);
+ await discImports.getByLabel('Folder layout',{exact:true}).selectOption('items');
+ await chooseFolder(page,discImports.getByLabel('Choose folders',{exact:true}),discs);
+ await expect(discRows).toHaveCount(2);
+ for(const row of await discRows.all()){
+  await row.getByLabel('Album group',{exact:true}).fill('Two reviewed discs');
+  await row.locator('summary').filter({hasText:'Files and album playback'}).click();
+  await row.getByRole('button',{name:'Select MP3',exact:true}).click();
+ }
+ await discImports.getByLabel('Audio preparation after import',{exact:true}).selectOption('flac');
+ // A failed replacement preview must leave the previously reviewed files attached.
+ await page.route('**/api/v1/ingests/plan',route=>route.fulfill({status:422,json:{error:{code:'invalid',message:'Replacement review rejected'}}}),{times:1});
+ await discImports.getByLabel("Choose one package's files").setInputFiles(wavFile);
+ await expect(discImports.getByRole('alert')).toContainText('Replacement review rejected');
+
+ await discImports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
+ const groupedIntake=new URL(page.url()).searchParams.get('item');let groupedMembers;
+ await expect.poll(async()=>{groupedMembers=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,groupedIntake);return groupedMembers.filter(member=>member.import?.outcome==='succeeded').length;},{timeout:60000}).toBe(2);
+ assert.equal(new Set(groupedMembers.map(member=>member.import.target_item_id)).size,1);
+ const groupedPlayback=await page.evaluate(async id=>{const response=await fetch(`/api/v1/items/${id}/client-playback`);if(!response.ok)throw Error(await response.text());return await response.json();},groupedMembers[0].import.target_item_id);
+ assert.deepEqual(groupedPlayback.tracks.map(track=>track.disc_position),[1,2]);
+ assert.deepEqual(groupedPlayback.tracks.map(track=>track.audio_format.codec),['mp3','mp3']);
+ const groupedAlbum=await page.evaluate(async id=>(await fetch(`/api/v1/items/${id}`)).json(),groupedMembers[0].import.target_item_id);
+ assert.deepEqual(groupedAlbum.captures.map(capture=>capture.representations.length),[1,1],
+  'No preparation batch should encode the other disc’s excluded WAV');
  assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery, paged bulk album metadata and failure recovery, striped rows, loading states and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(error);console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{try{await browser?.close();}finally{await stopProcess(server);}}

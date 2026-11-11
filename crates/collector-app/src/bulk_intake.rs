@@ -260,11 +260,11 @@ impl CollectionService {
             let eligibility=self.content_write_eligibility(actor,command.collection_id)?;
             crate::guided_ingest::validate_intake_files(&command.files,INTAKE_FILE_LIMIT as usize)?;
             let files=command.files.iter().filter(|file| !is_intake_housekeeping(&file.name,false)).cloned().collect::<Vec<_>>();
-            let names=files.iter().map(|f|PackageFileName::new(f.name.clone())).collect::<Result<Vec<_>>>()?;
+            let names=crate::guided_ingest::discovery_names(&files,command.directory.as_deref())?;
             let found=self.modules.discover_imports(&eligibility.owner,&names)?;
             if found.len()>INTAKE_PACKAGE_LIMIT as usize {return Err(Error::Invalid("This folder contains more than 10,000 packages. Select a smaller folder or split it into separate intakes.".into()));}
             let mut used=BTreeSet::new();let mut selections=Vec::new();
-            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection{purchase:None,source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
+            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection { album_tracks: None,purchase:None,source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
             let mut packages=Vec::new();for page in selections.chunks(64){packages.extend(self.plan_ingest(actor,PlanIngestCommand{collection_id:command.collection_id,packages:page.to_vec()})?.packages);}
             let unassigned=files.iter().enumerate().filter(|(i,_)|!used.contains(i)).map(|(_,f)|f.name.clone()).collect::<Vec<_>>();
             effects.freeze_intake_discovery(actor.user_id,IntakeDiscovery{id:deterministic_job_id(actor.user_id,"intake.discover",context.key()),collection_id:command.collection_id,package_count:packages.len() as u32,unassigned_count:unassigned.len() as u32},packages,unassigned)
@@ -423,6 +423,9 @@ impl CollectionService {
                             .collect(),
                     },
                 )?;
+                if plan.packages.iter().any(|package| package.music_layout.as_ref().is_some_and(|layout| layout.needs_attention)) {
+                    return Err(Error::Invalid("Review the album playback files before importing this layout.".into()));
+                }
                 preflight(&plan)?;
                 let packages = plan
                     .packages

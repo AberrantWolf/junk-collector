@@ -786,7 +786,7 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
     let inbox_root = root.path().join("private-drop-root");
     std::fs::create_dir_all(inbox_root.join("package-one")).unwrap();
     std::fs::write(inbox_root.join("package-one/disc.bin"), b"data").unwrap();
-    std::fs::write(inbox_root.join("not-a-package"), b"ignored").unwrap();
+    std::fs::write(inbox_root.join("loose.flac"), b"top-level original").unwrap();
     Arc::make_mut(&mut state.inboxes).insert("Optical shelf".into(), inbox_root.clone());
     let service = state.service.clone();
     let app = router(state);
@@ -809,7 +809,7 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("Optical shelf"));
     assert!(text.contains("package-one"));
-    assert!(!text.contains("not-a-package"));
+    assert!(text.contains("loose.flac"));
     assert!(!text.contains(inbox_root.to_str().unwrap()));
 
     for index in 0..105 {
@@ -1033,39 +1033,46 @@ async fn provisional_import_routes_converge_sources_and_hide_inbox_paths_and_oth
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!(
-                    "/api/v1/collections/{}/inboxes/Optical%20shelf/stage",
-                    collection.id
-                ))
-                .header("authorization", format!("Bearer {owner_token}"))
-                .header("origin", "https://collector.example")
-                .header("idempotency-key", "stage-inbox-import")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"package":"package-one"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
-    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
-        .await
-        .unwrap();
-    let inbox: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(
-        !String::from_utf8(body.to_vec())
-            .unwrap()
-            .contains(inbox_root.to_str().unwrap())
-    );
-    assert!(service.run_next_job("http-import-worker").unwrap());
-    let inbox_id: ImportId = inbox["import"]["id"].as_str().unwrap().parse().unwrap();
-    let completed = service.provisional_import(&actor, inbox_id).unwrap();
-    assert_eq!(completed.phase, collector_app::ImportPhase::Analyzing);
-    assert_eq!(completed.files[0].digest, Some(Digest::sha256(b"data")));
+    for (package, expected) in [
+        ("package-one", b"data".as_slice()),
+        ("loose.flac", b"top-level original".as_slice()),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/collections/{}/inboxes/Optical%20shelf/stage",
+                        collection.id
+                    ))
+                    .header("authorization", format!("Bearer {owner_token}"))
+                    .header("origin", "https://collector.example")
+                    .header("idempotency-key", format!("stage-inbox-{package}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"package":package}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let inbox: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            !String::from_utf8(body.to_vec())
+                .unwrap()
+                .contains(inbox_root.to_str().unwrap())
+        );
+        assert!(service.run_next_job("http-import-worker").unwrap());
+        let inbox_id: ImportId = inbox["import"]["id"].as_str().unwrap().parse().unwrap();
+        let completed = service.provisional_import(&actor, inbox_id).unwrap();
+        assert_eq!(completed.phase, collector_app::ImportPhase::Analyzing);
+        assert_eq!(completed.files[0].digest, Some(Digest::sha256(expected)));
+    }
 }
 
 #[tokio::test]

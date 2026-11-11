@@ -41,6 +41,141 @@ impl FileTrackManifest {
         Ok(())
     }
 }
+/// Explicit disc directories remain meaningful above or below encoding wrappers.
+pub fn path_disc_number(name: &str) -> Option<u16> {
+    name.rsplit_once('/')?
+        .0
+        .split('/')
+        .rev()
+        .find_map(super::discovery::disc_number)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MusicImportTrack {
+    pub file_name: String,
+    pub disc_position: Option<u16>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MusicImportLayout {
+    pub tracks: Vec<MusicImportTrack>,
+    pub needs_attention: bool,
+    pub notices: Vec<String>,
+}
+
+pub fn codec_priority(codec: &str) -> u8 {
+    match codec {
+        "flac" => 0,
+        "wav" => 1,
+        _ => 2,
+    }
+}
+
+/// A bounded names-only proposal. Unfamiliar branches require explicit review.
+pub fn import_layout(
+    names: &[String],
+    reviewed: Option<&[MusicImportTrack]>,
+) -> ModuleResult<MusicImportLayout> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let audio = names
+        .iter()
+        .filter(|name| is_audio_name(name))
+        .collect::<Vec<_>>();
+    let paths = audio
+        .iter()
+        .map(|name| name.split('/').collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let mut common = paths.first().map_or(0, |parts| parts.len() - 1);
+    for parts in &paths {
+        common = (0..common.min(parts.len() - 1))
+            .take_while(|index| parts[*index] == paths[0][*index])
+            .count();
+    }
+    let mut counts = BTreeMap::<u16, BTreeMap<String, usize>>::new();
+    let mut notices = BTreeSet::new();
+    for (name, parts) in audio.iter().zip(&paths) {
+        let codec = name.rsplit('.').next().unwrap().to_ascii_lowercase();
+        *counts
+            .entry(path_disc_number(name).unwrap_or(1))
+            .or_default()
+            .entry(codec)
+            .or_default() += 1;
+        if parts[common..parts.len() - 1].iter().any(|part| {
+            super::discovery::disc_number(part).is_none()
+                && !matches!(part.to_ascii_lowercase().as_str(), "flac" | "wav" | "mp3")
+        }) {
+            notices.insert("Named audio sections may contain overlapping editions or bonus tracks. Choose the main album files and disc assignments.".into());
+        }
+    }
+    if counts
+        .values()
+        .any(|formats| formats.values().collect::<BTreeSet<_>>().len() > 1)
+    {
+        notices.insert(
+            "Audio formats have different track counts. Review which files make up the album."
+                .into(),
+        );
+    }
+    if counts.keys().any(|disc| *disc > 1)
+        && audio.iter().any(|name| path_disc_number(name).is_none())
+    {
+        notices.insert(
+            "Some audio files lack a disc folder in a multi-disc layout. Assign their album discs."
+                .into(),
+        );
+    }
+    let tracks = if let Some(reviewed) = reviewed {
+        let known = audio
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut selected = BTreeSet::new();
+        if reviewed.is_empty()
+            || reviewed.len() > audio.len()
+            || reviewed.iter().any(|track| {
+                !known.contains(track.file_name.as_str())
+                    || !selected.insert(track.file_name.as_str())
+                    || track.disc_position == Some(0)
+            })
+        {
+            return Err(ModuleError::Invalid(
+                "Choose distinct audio files and positive disc numbers for album playback.".into(),
+            ));
+        }
+        reviewed.to_vec()
+    } else {
+        let preferred = counts
+            .iter()
+            .map(|(disc, formats)| {
+                (
+                    *disc,
+                    formats
+                        .keys()
+                        .min_by_key(|codec| codec_priority(codec))
+                        .unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        audio
+            .into_iter()
+            .filter(|name| {
+                preferred[&path_disc_number(name).unwrap_or(1)]
+                    .eq_ignore_ascii_case(name.rsplit('.').next().unwrap())
+            })
+            .map(|name| MusicImportTrack {
+                file_name: name.clone(),
+                disc_position: path_disc_number(name),
+            })
+            .collect()
+    };
+    Ok(MusicImportLayout {
+        tracks,
+        needs_attention: reviewed.is_none() && !notices.is_empty(),
+        notices: notices.into_iter().collect(),
+    })
+}
+
 pub fn is_audio_name(name: &str) -> bool {
     name.rsplit('.').next().is_some_and(|ext| {
         ext.eq_ignore_ascii_case("flac")
@@ -234,4 +369,96 @@ pub fn metadata_candidate(
         .validate()
         .map_err(|e| ModuleError::Invalid(e.to_string()))?;
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn loose_alternate_formats_choose_one_complete_copy_without_tag_guesses() {
+        let names = [
+            "Album/01.flac",
+            "Album/02.flac",
+            "Album/a.mp3",
+            "Album/b.mp3",
+            "Album/a.wav",
+            "Album/b.wav",
+        ]
+        .map(str::to_owned);
+        let layout = import_layout(&names, None).unwrap();
+        assert!(!layout.needs_attention);
+        assert_eq!(
+            layout
+                .tracks
+                .iter()
+                .map(|track| track.file_name.as_str())
+                .collect::<Vec<_>>(),
+            ["Album/01.flac", "Album/02.flac"]
+        );
+    }
+
+    #[test]
+    fn both_disc_layouts_keep_numbers_and_choose_lossless_per_disc() {
+        for names in [
+            [
+                "Album/FLAC/Disc 1/01.flac",
+                "Album/WAV/Disc 1/01.wav",
+                "Album/WAV/CD_2/01.wav",
+                "Album/MP3/CD_2/01.mp3",
+            ],
+            [
+                "Album/Disc 1/FLAC/01.flac",
+                "Album/Disc 1/WAV/01.wav",
+                "Album/CD_2/WAV/01.wav",
+                "Album/CD_2/MP3/01.mp3",
+            ],
+        ] {
+            let layout = import_layout(&names.map(str::to_owned), None).unwrap();
+            assert!(!layout.needs_attention);
+            assert_eq!(
+                layout
+                    .tracks
+                    .iter()
+                    .map(|track| (
+                        track.file_name.rsplit_once('.').unwrap().1,
+                        track.disc_position
+                    ))
+                    .collect::<Vec<_>>(),
+                [("flac", Some(1)), ("wav", Some(2))]
+            );
+        }
+    }
+
+    #[test]
+    fn overlapping_sections_and_unequal_counts_require_a_reviewed_selection() {
+        let names = [
+            "Album/All FLAC/01.flac",
+            "Album/All FLAC/02.flac",
+            "Album/DLC MP3/01.mp3",
+        ]
+        .map(str::to_owned);
+        assert!(import_layout(&names, None).unwrap().needs_attention);
+        let selected = [MusicImportTrack {
+            file_name: names[0].clone(),
+            disc_position: Some(3),
+        }];
+        let layout = import_layout(&names, Some(&selected)).unwrap();
+        assert!(!layout.needs_attention);
+        assert_eq!(layout.tracks, selected);
+        for tracks in [
+            vec![],
+            vec![selected[0].clone(), selected[0].clone()],
+            vec![MusicImportTrack {
+                file_name: "missing.flac".into(),
+                disc_position: Some(1),
+            }],
+            vec![MusicImportTrack {
+                file_name: names[0].clone(),
+                disc_position: Some(0),
+            }],
+        ] {
+            assert!(import_layout(&names, Some(&tracks)).is_err());
+        }
+    }
 }

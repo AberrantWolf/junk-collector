@@ -102,6 +102,7 @@ async fn isolated_media_enforces_grants_exact_bytes_and_socket_revocation() {
             PlanIngestCommand {
                 collection_id: collection.id,
                 packages: vec![IngestPackageSelection {
+                    album_tracks: None,
                     purchase: Some(DigitalPurchase::default()),
                     source: ImportSourceSummary {
                         kind: ImportSourceKind::Browser,

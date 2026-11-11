@@ -3,123 +3,54 @@ use crate::import_discovery::DiscoveredImportPackage;
 use collector_core::PackageFileName;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Default)]
-struct Group<'a> {
-    format_scopes: BTreeSet<&'a str>,
-    files: Vec<usize>,
-}
-
-fn parent(path: &str) -> (&str, &str) {
-    path.rsplit_once('/').unwrap_or(("", path))
-}
-
-fn disc(name: &str) -> bool {
+pub(super) fn disc_number(name: &str) -> Option<u16> {
     let lower = name.to_ascii_lowercase();
     lower
         .strip_prefix("disc")
         .or_else(|| lower.strip_prefix("cd"))
         .map(|suffix| suffix.trim_start_matches([' ', '_', '-']))
-        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()))
-}
-
-fn format(name: &str) -> Option<&'static str> {
-    match name.to_ascii_lowercase().as_str() {
-        "flac" => Some("FLAC"),
-        "mp3" => Some("MP3"),
-        "wav" => Some("WAV"),
-        _ => None,
-    }
-}
-
-fn contains(directory: &str, path: &str) -> bool {
-    directory.is_empty()
-        || path
-            .strip_prefix(directory)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+        .filter(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()))
+        .and_then(|suffix| suffix.parse().ok())
+        .filter(|number| *number > 0)
 }
 
 pub(super) fn discover(names: &[PackageFileName]) -> Vec<DiscoveredImportPackage> {
+    // Raw-disc anchors retain their established package ownership and analysis.
     let mut packages = crate::import_discovery::discover(names, false);
     let mut used = packages
         .iter()
-        .flat_map(|package| package.file_indices.iter().copied())
+        .flat_map(|p| p.file_indices.iter().copied())
         .collect::<BTreeSet<_>>();
-    // The album root and explicit encoding are independent: both FLAC/Disc 1
-    // and Disc 1/FLAC belong to the same FLAC version, never to its MP3 sibling.
-    let mut groups: BTreeMap<(&str, Option<&str>), Group<'_>> = BTreeMap::new();
+    let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, name) in names.iter().enumerate() {
         if used.contains(&index) || !super::files::is_audio_name(name.as_str()) {
             continue;
         }
-        let mut root = parent(name.as_str()).0;
-        let mut encoding = None;
-        let mut scope = None;
-        let mut saw_disc = false;
-        while !root.is_empty() {
-            let (up, leaf) = parent(root);
-            if !saw_disc && disc(leaf) {
-                saw_disc = true;
-            } else if encoding.is_none() && format(leaf).is_some() {
-                encoding = format(leaf);
-                scope = Some(root);
-            } else {
-                break;
-            }
-            root = up;
-        }
-        let group = groups.entry((root, encoding)).or_default();
-        group.files.push(index);
-        group.format_scopes.extend(scope);
+        let root = match name.as_str().split_once('/') {
+            Some((first, _)) => first,
+            None => name.as_str(),
+        };
+        groups.entry(root).or_default().push(index);
         used.insert(index);
     }
-    // Assign companions to the deepest independent album. A companion within
-    // an encoding folder stays with that encoding. Shared parent companions
-    // belong once to the first encoding in stable key order (FLAC before MP3),
-    // independent of file enumeration; the intake contract forbids overlap.
     for (index, name) in names.iter().enumerate() {
         if used.contains(&index) {
             continue;
         }
-        let owner = groups
-            .iter()
-            .filter(|((root, _), _)| contains(root, name.as_str()))
-            .max_by_key(|((root, encoding), group)| {
-                (
-                    root.len(),
-                    group
-                        .format_scopes
-                        .iter()
-                        .filter(|scope| contains(scope, name.as_str()))
-                        .map(|scope| scope.len())
-                        .max()
-                        .unwrap_or(0),
-                    // max_by_key otherwise chooses the *last* equal key.
-                    std::cmp::Reverse(*encoding),
-                )
-            })
-            .map(|(key, _)| *key);
-        if let Some(owner) = owner {
-            groups.get_mut(&owner).unwrap().files.push(index);
+        if let Some((root, _)) = name.as_str().split_once('/')
+            && let Some(files) = groups.get_mut(root)
+        {
+            files.push(index);
         }
     }
-    for ((root, encoding), group) in &groups {
-        let album = if root.is_empty() {
-            encoding.unwrap_or("Digital purchase")
-        } else {
-            parent(root).1
-        };
-        let alternatives = groups.keys().filter(|(other, _)| other == root).count() > 1;
-        let label = match encoding {
-            Some(encoding) if alternatives && !root.is_empty() => format!("{album} ({encoding})"),
-            _ => album.to_owned(),
-        };
-        let mut file_indices = group.files.clone();
+    for (root, mut file_indices) in groups {
         file_indices.sort_unstable();
         packages.push(DiscoveredImportPackage {
-            label,
+            label: root.into(),
             file_indices,
         });
     }
+    packages.sort_by_key(|package| package.file_indices[0]);
     packages
 }
 
@@ -174,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn alternate_encodings_and_both_disc_layouts_stay_distinct() {
+    fn top_level_albums_keep_all_formats_discs_and_named_sections() {
         for (first, second) in [
             ("Album/flac/Disc 1/01.flac", "Album/flac/CD_2/01.flac"),
             ("Album/Disc 1/flac/01.flac", "Album/CD_2/FLAC/01.flac"),
@@ -187,55 +118,43 @@ mod tests {
                 "Album/cover.png",
                 "Album/Booklet/booklet.pdf",
                 "Album/DLC OST/WAV/01.wav",
-                "Album/DLC OST/cover.jpg",
                 "Album/Main OST/01.mp3",
-                "Album/Main OST/booklet.pdf",
+                "Other Album/01.wav",
             ];
             let packages = discovered(&paths);
-            assert_eq!(packages.len(), 4);
-            let flac = &packages["Album (FLAC)"];
-            assert_eq!(flac.len(), 4);
-            assert!(flac.contains(&first.into()) && flac.contains(&second.into()));
-            assert!(flac.contains(&"Album/cover.png".into()));
-            assert!(flac.contains(&"Album/Booklet/booklet.pdf".into()));
-            assert_eq!(packages["Album (MP3)"].len(), 2);
-            assert_eq!(packages["DLC OST"].len(), 2);
-            assert_eq!(packages["Main OST"].len(), 2);
-            let reversed = paths.into_iter().rev().collect::<Vec<_>>();
+            assert_eq!(packages.len(), 2);
+            assert_eq!(packages["Album"].len(), 8);
+            assert_eq!(packages["Other Album"], ["Other Album/01.wav"]);
             assert_eq!(
-                discovered(&reversed),
-                packages,
-                "ownership must not depend on enumeration"
+                discovered(&paths.into_iter().rev().collect::<Vec<_>>()),
+                packages
             );
         }
     }
 
     #[test]
-    fn direct_tracks_and_named_folders_are_not_encoding_aliases() {
+    fn loose_formats_and_decorated_subdirectories_stay_with_the_top_level_item() {
         let packages = discovered(&[
             "Album/01.mp3",
-            "Album/FLAC/01.flac",
+            "Album/01.flac",
             "Album/cover.jpg",
-            "Album/Bonus/01.mp3",
-            "Album/Bonus/cover.jpg",
-            "Album/FLAC Extras/01.flac",
-            "Album/FLAC Extras/cover.jpg",
-            "FLAC/Separate Album/01.flac",
+            "Album/Bonus/02.mp3",
+            "Album/FLAC 24-bit/01.flac",
+            "Separate disc/CD1/01.wav",
         ]);
-        assert_eq!(packages.len(), 5);
-        assert_eq!(packages["Album"].len(), 2);
-        assert_eq!(packages["Album (FLAC)"], ["Album/FLAC/01.flac"]);
-        assert_eq!(packages["Bonus"].len(), 2);
-        assert_eq!(packages["FLAC Extras"].len(), 2);
-        assert_eq!(packages["Separate Album"], ["FLAC/Separate Album/01.flac"]);
+        assert_eq!(packages.len(), 2);
+        assert_eq!(packages["Album"].len(), 5);
+        assert_eq!(packages["Separate disc"], ["Separate disc/CD1/01.wav"]);
+        // Direct loose files in an import volume are individual media items.
+        assert_eq!(discovered(&["a.flac", "b.mp3"]).len(), 2);
     }
 
     #[test]
-    fn root_format_and_disc_folders_work_without_inventing_album_names() {
-        let packages = discovered(&["FLAC/CD1/01.flac", "FLAC/CD2/01.flac", "cover.jpg"]);
-        assert_eq!(packages["FLAC"].len(), 3);
-        let packages = discovered(&["Disc 1/01.flac", "Disc 2/01.mp3", "cover.jpg"]);
-        assert_eq!(packages["Digital purchase"].len(), 3);
+    fn top_level_format_and_disc_names_are_independent_items() {
+        let packages = discovered(&["FLAC/CD1/01.flac", "FLAC/CD2/01.flac", "WAV/CD1/01.wav"]);
+        assert_eq!(packages["FLAC"].len(), 2);
+        assert_eq!(packages["WAV"].len(), 1);
+        assert_eq!(discovered(&["Disc 1/01.flac", "Disc 2/01.mp3"]).len(), 2);
     }
 
     #[test]
