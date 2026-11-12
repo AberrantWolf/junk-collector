@@ -1,5 +1,5 @@
 import ImportFileTree from './import-file-tree';
-import {audioFormat,compareImportFiles} from './import-file-order';
+import {audioFormat,compareImportFiles,freezeTrackOrder} from './import-file-order';
 import MoreButton from './more-button';
 import ImportAlbumEditor,{type AlbumTarget} from './import-album-editor';
 import {ImportPreparation,importPreparation,type ImportPreparationChoice} from './audio-profiles';
@@ -297,8 +297,15 @@ export default function Imports({userId,collection,itemId,collections,onQuery,on
  function groupTitle(key:string,title:string){setPackages(current=>current.map(p=>p.destination.destination==='album_group'&&p.destination.key===key?{...p,destination:{...p.destination,title:title.trim()?title:null}}:p));}
  const missingAlbumSelection=packages.some((entry,index)=>entry.package.album_tracks?!entry.package.album_tracks.length:plans[index]?.music_layout?.needs_attention);
  const missingCopy=packages.some(p=>p.destination.destination!=='separate'&&!p.destination.copy_key.trim());
+ function reviewedPackage(entry:Package,index:number):S['IntakePackage']{
+  const {package:selection,destination,manualFileGroups}=entry;
+  const tracks=selection.album_tracks??plans[index]?.music_layout?.tracks;
+  if(!tracks?.length)return {package:selection,destination};
+  const ordered=freezeTrackOrder(selection.files,tracks,manualFileGroups??[]);
+  return {package:ordered===tracks?selection:{...selection,album_tracks:ordered},destination};
+ }
  async function start(){const signal=scope.current.signal;await mutate(async()=>{
-  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages:packages.map(({package:selection,destination})=>({package:selection,destination})),automatic,prepare:audioChoice==='flac'&&musicCollection,audio_preparation:musicCollection?importPreparation(audioChoice):undefined,reviewed_opus_import:musicCollection&&audioChoice==='default'?opusDefault:undefined};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);}
+  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages:packages.map(reviewedPackage),automatic,prepare:audioChoice==='flac'&&musicCollection,audio_preparation:musicCollection?importPreparation(audioChoice):undefined,reviewed_opus_import:musicCollection&&audioChoice==='default'?opusDefault:undefined};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);}
   let saved:Session=intent.id?await api<Session>(`/intakes/${intent.id}`,{signal}):await api<Session>('/intakes',{method:'POST',signal,headers:{'Idempotency-Key':intent.key},body:JSON.stringify({collection_id:collection,automatic_metadata:intent.automatic,prepare_music:intent.prepare,audio_preparation:intent.audio_preparation,reviewed_opus_import:intent.reviewed_opus_import,expected_packages:intent.packages.length,expected_files:intent.packages.reduce((n,p)=>n+p.package.files.length,0)})});
   intent={...intent,id:saved.id};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);onQuery({item:saved.id});signal.throwIfAborted();setSession(saved);
   if(saved.state==='draft'){for(let i=saved.package_count;i<intent.packages.length;){let end=i;let count=0;let size=0;while(end<intent.packages.length&&end-i<64){const p=intent.packages[end];const length=JSON.stringify(p).length;if(end>i&&(count+p.package.files.length>10000||size+length>12*1024*1024))break;count+=p.package.files.length;size+=length;end++;}saved=await api<Session>(`/intakes/${saved.id}/members`,{method:'POST',signal,headers:{'Idempotency-Key':intent.key+':'+i},body:JSON.stringify({expected_revision:saved.revision,packages:intent.packages.slice(i,end)})});signal.throwIfAborted();setSession(saved);i=end;}

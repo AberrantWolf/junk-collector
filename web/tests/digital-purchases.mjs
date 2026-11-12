@@ -404,13 +404,19 @@ try{
  await expect(largeDisc('0099')).toHaveValue('3');
  // Steam-style format wrappers: real folder discovery, review and publication.
  const steam=path.join(scratch,'Steam soundtracks');
- for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/FLAC','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
+ for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/FLAC/Disc 2','Other Album/Bonus/Disc 2','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
  await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Game Name OST/FLAC/Disc 1/01.flac'));
  await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Game Name OST/MP3/Disc 1/01.mp3'));
  const untaggedFlac=path.join(steam,'Other Album/FLAC/01.flac');
  const encoded=spawnSync(flac,['--silent','--output-name',untaggedFlac,path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03.wav')],{encoding:'utf8'});
  assert.equal(encoded.status,0,encoded.stderr);
- await copyFile(untaggedFlac,path.join(steam,'Other Album/FLAC/02.flac'));
+ for(let track=2;track<=10;track++){
+  await copyFile(untaggedFlac,path.join(steam,'Other Album/FLAC',`${String(track).padStart(2,'0')}.flac`));
+ }
+ // This file has an embedded track number of 1. The folder move puts it last.
+ await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Other Album/Bonus/11.flac'));
+ await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Other Album/Bonus/Disc 2/02.flac'));
+ await copyFile(untaggedFlac,path.join(steam,'Other Album/FLAC/Disc 2/01.flac'));
  await copyFile(wavFile,path.join(steam,'Game Name OST/WAV/Disc 1/01.wav'));
  for(const name of ['01.flac','02.flac'])await copyFile(untaggedFlac,path.join(steam,'Wild Album/All FLAC',name));
  await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Wild Album/DLC MP3/01.mp3'));
@@ -434,14 +440,29 @@ try{
  await wildRow.getByLabel(/Disc for .*All FLAC\/02.flac$/).selectOption('2');
  await expect(wildRow.getByLabel(/Track number for .*All FLAC\/02.flac$/)).toHaveAttribute('placeholder','1');
  await openFileTree(otherRow);
- const otherNumbers=otherRow.getByRole('spinbutton',{name:/^Track number for /});
- assert.deepEqual(await otherNumbers.evaluateAll(inputs=>inputs.map(input=>input.placeholder).sort()),['1','2']);
+ const otherTrack=name=>otherRow.getByRole('spinbutton',{name:new RegExp(`^Track number for .*/Other Album/${name}\\.flac$`)});
+ const moveBonusDown=otherRow.getByRole('button',{name:/^Move folder .*Other Album\/Bonus down$/});
+ const moveBonusUp=otherRow.getByRole('button',{name:/^Move folder .*Other Album\/Bonus up$/});
+ await moveBonusDown.click();
+ await expect(moveBonusUp).toBeFocused();
+ await expect(otherTrack('FLAC/01')).toHaveAttribute('placeholder','1');
+ await expect(otherTrack('Bonus/11')).toHaveAttribute('placeholder','11');
+ await otherTrack('FLAC/01').fill('10');
+ await otherTrack('FLAC/01').press('Enter');
+ await expect(otherTrack('FLAC/01')).toBeFocused();
+ await expect(otherTrack('FLAC/02')).toHaveAttribute('placeholder','1');
+ await expect(otherTrack('FLAC/10')).toHaveAttribute('placeholder','9');
+ await expect(otherTrack('Bonus/11')).toHaveAttribute('placeholder','11');
  // A saved draft restores choices independently of the browser's file handles.
  await expect(steamImports.getByRole('status').filter({hasText:'Import review saved'})).toBeVisible();
  await page.reload();await expect(packageRows).toHaveCount(3);
  await openFileTree(wildRow);
  await expect(wildRow.getByLabel(/Use for album playback: .*All FLAC\/01.flac$/)).not.toBeChecked();
  await expect(wildRow.getByLabel(/Disc for .*All FLAC\/02.flac$/)).toHaveValue('2');
+ await openFileTree(otherRow);
+ await expect(moveBonusDown).toBeDisabled();
+ await expect(otherTrack('FLAC/01')).toHaveValue('10');
+ await expect(otherTrack('FLAC/02')).toHaveAttribute('placeholder','1');
  await chooseFolder(page,steamImports.getByLabel('Reselect folder for reviewed import',{exact:true}),steam);
  await openFileTree(flacRow);
  await expect(flacRow.getByLabel(/Curators only: .*Booklet\/booklet.txt/)).toBeChecked();
@@ -467,7 +488,17 @@ try{
  assert.equal(selectedWild[0].display_position,1);
  const otherMember=steamMembers.find(m=>m.plan.default_title==='Other Album');
  const selectedOther=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,otherMember.import.target_item_id);
- assert.deepEqual(selectedOther.map(track=>track.display_position),[1,2]);
+ const otherAlbum=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),otherMember.import.target_item_id);
+ const otherFiles=otherAlbum.captures[0].representations[0].files;
+ const otherDiscOne=selectedOther.filter(track=>(track.disc_position??1)===1);
+ const otherDiscTwo=selectedOther.filter(track=>track.disc_position===2);
+ assert.deepEqual(selectedOther.map(track=>track.disc_position),[...Array(11).fill(1),2,2]);
+ assert.deepEqual(otherDiscOne.map(track=>track.display_position),[1,2,3,4,5,6,7,8,9,10,11]);
+ assert.deepEqual(otherDiscOne.map(track=>otherFiles[track.state.file_index].name.split('/').slice(-2).join('/')),
+  ['FLAC/02.flac','FLAC/03.flac','FLAC/04.flac','FLAC/05.flac','FLAC/06.flac','FLAC/07.flac',
+   'FLAC/08.flac','FLAC/09.flac','FLAC/10.flac','FLAC/01.flac','Bonus/11.flac']);
+ assert.deepEqual(otherDiscTwo.map(track=>[track.display_position,otherFiles[track.state.file_index].name.split('/').slice(-3).join('/')]),
+  [[1,'FLAC/Disc 2/01.flac'],[2,'Bonus/Disc 2/02.flac']]);
  assert.ok(steamFiles.some(file=>file.name.endsWith('/Booklet/booklet.txt')&&file.visibility==='curators'));
  assert.ok(steamFiles.some(file=>file.name.endsWith('/cover.png')&&(file.visibility??'shared')==='shared'));
  assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');

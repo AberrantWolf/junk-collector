@@ -162,3 +162,19 @@ collector-app tests and strict Clippy, web type checks, bundle build, and web
 models passed. The debug server SHA-256 was
 `0e2ed762d31ddbe7a3fea97f1a22ac438e41b2a17353c2d011bb6158af5e04dd`.
 This source change has no release or deployment acceptance.
+
+## Folder and track ordering — 2026-11-12
+
+The earlier build failed the purchase regression at the missing folder
+move control. The corrected Chrome 156.0.8078.74 journey moved an
+alphabetically earlier audio folder below its sibling and entered 10
+for track 1. The other automatic numbers filled positions 1–9 and 11.
+The saved review restored the folder order and manual number after reload.
+The published album used the reviewed file sequence on disc 1 and the
+folder-only order on disc 2, including files with conflicting embedded track
+numbers. The 390 px review had no page overflow.
+
+The short browser smoke, inbox review journey, web type checks, bundle build, web models and
+architecture checks passed. The tested debug server SHA-256 was
+`4c242901c054ab94f1077bf200b22a4828a17d44253723ca146bb0191cb52324`.
+This source change has no release or deployment acceptance.
