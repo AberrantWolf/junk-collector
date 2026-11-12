@@ -8,7 +8,7 @@ No production deployment is authorized by this document.
 
 ## Release and source state
 
-[Beta.26 qualification, publication and split-host deployment](validation/container-beta26-publication-2026-11-11.md)
+[Beta.27 qualification, publication and split-host deployment](validation/container-beta27-publication-2026-11-12.md)
 are complete. The deployment used a paired recovery point under the
 [installed-stack procedure](../deploy/container/beta-update.md).
 
