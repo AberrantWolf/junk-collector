@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "collector-api-types"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "chrono",
  "collector-core",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "collector-app"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "collector-cd-identity"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "junk-libs-disc 0.1.0 (git+https://github.com/AberrantWolf/junk-libs?rev=317517c430744e4f1196e30850b37b3f13c10560)",
  "junk-libs-disc-id",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "collector-client"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "chrono",
  "collector-api-types",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "collector-core"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "chrono",
  "hex",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "collector-media"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "anyhow",
  "axum",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "collector-modules"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "collector-core",
  "junk-libs-accuraterip",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "collector-providers"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "collector-app",
  "collector-core",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "collector-server"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "anyhow",
  "axum",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "collector-store"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1933,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "junk-libs-pcm"
-version = "0.1.0-beta.26"
+version = "0.1.0-beta.27"
 dependencies = [
  "chromaprint-next",
  "claxon",

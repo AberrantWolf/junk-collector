@@ -295,8 +295,15 @@ impl CollectionService {
                 else {
                     continue;
                 };
-                let rows =
-                    self.file_track_rows(item, capture, source, manifest.clone(), actor.user_id)?;
+                // Ordinals for playback are not source metadata for matching.
+                let rows = self.file_track_rows(
+                    item,
+                    capture,
+                    source,
+                    manifest.clone(),
+                    actor.user_id,
+                    false,
+                )?;
                 let mut files = Vec::new();
                 for row in rows
                     .into_iter()
@@ -437,7 +444,7 @@ impl CollectionService {
                     continue;
                 };
                 for row in self
-                    .file_track_rows(item, capture, source, manifest, user)?
+                    .file_track_rows(item, capture, source, manifest, user, false)?
                     .into_iter()
                     .filter(MusicTrackAvailability::primary_playback)
                 {

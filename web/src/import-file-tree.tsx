@@ -289,12 +289,21 @@ export default function ImportFileTree({layout,reviewed,manualGroups=defaultOrde
   onTracks(tracks.map(track=>(audioOrder?.get(track.file_name)??-1)>=start
    ?{...track,disc_position:disc}:track));
  }
+ const selected=React.useMemo(()=>new Map(tracks.map(track=>[track.file_name,track])),[tracks]);
  const sourceNumbers=React.useMemo(()=>{
   const numbers=new Map<string,number>();
-  for(const file of files)if(audioFormat(file.name))numbers.set(file.name,numbers.size+1);
+  const discCounts=new Map<number,number>();
+  if(!open)return numbers;
+  for(const file of files){
+   const track=selected.get(file.name);
+   if(!track)continue;
+   const disc=track.disc_position??1;
+   const number=(discCounts.get(disc)??0)+1;
+   discCounts.set(disc,number);
+   numbers.set(file.name,number);
+  }
   return numbers;
- },[files]);
- const selected=React.useMemo(()=>new Map(tracks.map(track=>[track.file_name,track])),[tracks]);
+ },[files,open,selected]);
  const highestDisc=tracks.reduce((highest,track)=>Math.max(highest,track.disc_position??1),1);
  const [extraDiscs,setExtraDiscs]=useState<number>();
  const discCount=Math.max(highestDisc,extraDiscs??1);
@@ -313,7 +322,7 @@ export default function ImportFileTree({layout,reviewed,manualGroups=defaultOrde
   onTracks(files.filter(file=>audioFormat(file.name)===format).map(file=>selected.get(file.name)??{file_name:file.name,disc_position:guesses.get(file.name)??pathDisc(file.name)}));
  }
  return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>Files and album playback · {tracks.length} tracks {reviewed?'selected':'suggested'}{layout.needs_attention&&!reviewed?' · Needs attention':''}</summary>
-  {open&&<><p>All {files.length} originals will be preserved. Check the audio files you want for album playback. Track number placeholders show file order. Embedded tags can set the final number unless you enter one.</p>
+  {open&&<><p>All {files.length} originals will be preserved. Check the audio files you want for album playback. Suggested track numbers start at 1 on each disc. Embedded tags can set the final number unless you enter one.</p>
    {layout.notices.map(notice=><p key={notice} className="notice">{notice}</p>)}
    <div className="import-format-actions" role="group" aria-label="Choose playback format">{formats.length>1&&formats.map(format=><button key={format} disabled={disabled} onClick={()=>selectFormat(format)}>Select {format.toUpperCase()}</button>)}{layout.needs_attention&&!reviewed&&<button disabled={disabled||!tracks.length} onClick={()=>onTracks(tracks)}>Confirm playback selection</button>}</div>
    <div className="import-disc-setup">

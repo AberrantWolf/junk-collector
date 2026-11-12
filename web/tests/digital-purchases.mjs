@@ -140,6 +140,7 @@ try{
  await imports.getByRole('button',{name:'Select MP3',exact:true}).click();
  await expect(playbackBox('01.flac')).not.toBeChecked();
  await expect(playbackBox('02.mp3')).toBeChecked();
+ await expect(imports.getByLabel('Track number for 01.mp3',{exact:true})).toHaveAttribute('placeholder','1');
  await imports.getByRole('button',{name:'Select FLAC',exact:true}).click();
  const discFor=name=>imports.getByLabel(`Disc for ${name}`,{exact:true});
  const discCount=imports.getByLabel('Number of discs',{exact:true});
@@ -390,6 +391,7 @@ try{
  const largeDisc=name=>steamImports.getByLabel(`Disc for Large review/${name}.flac`,{exact:true});
  await largeDisc('0048').selectOption('1');
  await largeDisc('0049').selectOption({label:'New disc (2)'});
+ await expect(steamImports.getByLabel('Track number for Large review/0049.flac',{exact:true})).toHaveAttribute('placeholder','1');
  await steamImports.getByRole('button',{name:'Apply to below: Disc 2 from Large review/0049.flac',exact:true}).click();
  await expect(largeDisc('0048')).toHaveValue('1');
  await steamImports.getByRole('button',{name:'Next entries',exact:true}).click();
@@ -402,12 +404,15 @@ try{
  await expect(largeDisc('0099')).toHaveValue('3');
  // Steam-style format wrappers: real folder discovery, review and publication.
  const steam=path.join(scratch,'Steam soundtracks');
- for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/WAV','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
+ for(const folder of ['Game Name OST/FLAC/Disc 1','Game Name OST/MP3/Disc 1','Game Name OST/WAV/Disc 1','Game Name OST/Booklet','Other Album/FLAC','Wild Album/All FLAC','Wild Album/DLC MP3'])await mkdir(path.join(steam,folder),{recursive:true});
  await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Game Name OST/FLAC/Disc 1/01.flac'));
  await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Game Name OST/MP3/Disc 1/01.mp3'));
- await copyFile(wavFile,path.join(steam,'Other Album/WAV/01.wav'));
+ const untaggedFlac=path.join(steam,'Other Album/FLAC/01.flac');
+ const encoded=spawnSync(flac,['--silent','--output-name',untaggedFlac,path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03.wav')],{encoding:'utf8'});
+ assert.equal(encoded.status,0,encoded.stderr);
+ await copyFile(untaggedFlac,path.join(steam,'Other Album/FLAC/02.flac'));
  await copyFile(wavFile,path.join(steam,'Game Name OST/WAV/Disc 1/01.wav'));
- for(const name of ['01.flac','02.flac'])await copyFile(path.join(fixture,'01.flac'),path.join(steam,'Wild Album/All FLAC',name));
+ for(const name of ['01.flac','02.flac'])await copyFile(untaggedFlac,path.join(steam,'Wild Album/All FLAC',name));
  await copyFile(path.join(fixture,'02.mp3'),path.join(steam,'Wild Album/DLC MP3/01.mp3'));
  await copyFile(path.join(fixture,'cover.png'),path.join(steam,'Game Name OST/cover.png'));
  await writeFile(path.join(steam,'Game Name OST/Booklet/booklet.txt'),'PRIVATE STEAM BOOKLET');
@@ -423,16 +428,20 @@ try{
  await expect(wildRow).toContainText('Needs attention');
  await openFileTree(wildRow);
  await wildRow.getByRole('button',{name:'Select FLAC',exact:true}).click();
- await wildRow.getByLabel(/Use for album playback: .*All FLAC\/02.flac$/).uncheck();
+ await wildRow.getByLabel(/Use for album playback: .*All FLAC\/01.flac$/).uncheck();
  await wildRow.getByLabel('Number of discs',{exact:true}).fill('2');
  await wildRow.getByRole('button',{name:'Apply disc count'}).click();
- await wildRow.getByLabel(/Disc for .*All FLAC\/01.flac$/).selectOption('2');
+ await wildRow.getByLabel(/Disc for .*All FLAC\/02.flac$/).selectOption('2');
+ await expect(wildRow.getByLabel(/Track number for .*All FLAC\/02.flac$/)).toHaveAttribute('placeholder','1');
+ await openFileTree(otherRow);
+ const otherNumbers=otherRow.getByRole('spinbutton',{name:/^Track number for /});
+ assert.deepEqual(await otherNumbers.evaluateAll(inputs=>inputs.map(input=>input.placeholder).sort()),['1','2']);
  // A saved draft restores choices independently of the browser's file handles.
  await expect(steamImports.getByRole('status').filter({hasText:'Import review saved'})).toBeVisible();
  await page.reload();await expect(packageRows).toHaveCount(3);
  await openFileTree(wildRow);
- await expect(wildRow.getByLabel(/Use for album playback: .*All FLAC\/02.flac$/)).not.toBeChecked();
- await expect(wildRow.getByLabel(/Disc for .*All FLAC\/01.flac$/)).toHaveValue('2');
+ await expect(wildRow.getByLabel(/Use for album playback: .*All FLAC\/01.flac$/)).not.toBeChecked();
+ await expect(wildRow.getByLabel(/Disc for .*All FLAC\/02.flac$/)).toHaveValue('2');
  await chooseFolder(page,steamImports.getByLabel('Reselect folder for reviewed import',{exact:true}),steam);
  await openFileTree(flacRow);
  await expect(flacRow.getByLabel(/Curators only: .*Booklet\/booklet.txt/)).toBeChecked();
@@ -455,6 +464,10 @@ try{
  const wildMember=steamMembers.find(m=>m.plan.default_title==='Wild Album');
  const selectedWild=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,wildMember.import.target_item_id);
  assert.equal(selectedWild.length,1);assert.equal(selectedWild[0].disc_position,2);
+ assert.equal(selectedWild[0].display_position,1);
+ const otherMember=steamMembers.find(m=>m.plan.default_title==='Other Album');
+ const selectedOther=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,otherMember.import.target_item_id);
+ assert.deepEqual(selectedOther.map(track=>track.display_position),[1,2]);
  assert.ok(steamFiles.some(file=>file.name.endsWith('/Booklet/booklet.txt')&&file.visibility==='curators'));
  assert.ok(steamFiles.some(file=>file.name.endsWith('/cover.png')&&(file.visibility??'shared')==='shared'));
  assert.ok(steamAlbum.primary_artwork,'cover enrichment completes for the imported package');

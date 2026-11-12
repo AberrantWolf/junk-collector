@@ -1360,7 +1360,9 @@ impl CollectionService {
                 )
             }) {
                 if let Some(manifest) = self.recorded_file_tracks(item.collection_id, source.id)? {
-                    rows.extend(self.file_track_rows(item, capture, source, manifest, user_id)?);
+                    rows.extend(
+                        self.file_track_rows(item, capture, source, manifest, user_id, true)?,
+                    );
                     continue;
                 }
                 let mut tracks = Vec::<ConversionTrack>::new();

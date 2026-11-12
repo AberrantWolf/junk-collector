@@ -196,6 +196,9 @@ hierarchy to 32 levels, displaying deeper path suffixes intact at the leaf. File
 and folder checkboxes, format shortcuts, disc dropdowns and track number inputs
 edit the signed plan. An explicit track number must populate the source-bound
 display override without changing the immutable source track identity.
+Track number suggestions must count selected tracks in package file order and
+start at one for each disc in each package. Playback uses the same numbering
+fallback for analyzed files without a manual number or embedded track number.
 Optional selections survive existing durable file declarations and publish through
 an idempotent, cancellation-fenced command into ordinary source-bound track
 metadata authority. Later manual edits must survive reconciliation and reindex.

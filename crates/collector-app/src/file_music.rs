@@ -259,6 +259,7 @@ impl CollectionService {
         source: &Representation,
         manifest: FileTrackManifest,
         user: UserId,
+        use_playback_numbers: bool,
     ) -> Result<Vec<MusicTrackAvailability>> {
         let role = self.reader.role(user, item.collection_id)?;
         let manual = item
@@ -296,16 +297,35 @@ impl CollectionService {
             }
         }
         let mut rows = Vec::new();
+        let mut disc_counts = std::collections::BTreeMap::<u16, u16>::new();
         let selections = file_album_selections(&manifest, &source.files, role);
         for (track, default_selection) in manifest.tracks.iter().zip(selections) {
+            use collector_api_types::MusicAlbumSelection;
             let edit = edits.get(&track.position);
             let file = source.files.get(track.file_index).ok_or(Error::Conflict)?;
+            let audio = &track.audio;
+            let album_selection = match edit.and_then(|e| e.album_selected) {
+                Some(true) => MusicAlbumSelection::Included,
+                Some(false) => MusicAlbumSelection::Excluded,
+                None => default_selection,
+            };
+            let disc_position = edit
+                .and_then(|edit| edit.disc_position)
+                .or_else(|| recorded_file_disc(&file.name, audio.tag("disc_number")));
+            // Number the album's tracks in source order. Count private members
+            // too so the same shared track keeps its number across roles.
+            let playback_number = (use_playback_numbers
+                && album_selection != MusicAlbumSelection::Excluded)
+                .then(|| {
+                    let count = disc_counts.entry(disc_position.unwrap_or(1)).or_default();
+                    *count += 1;
+                    *count
+                });
             // Curation access can play a private original; listener views never
             // receive its tags or media target.
             if file.visibility == Visibility::Curators && role == Role::Viewer {
                 continue;
             }
-            let audio = &track.audio;
             let title = edit
                 .and_then(|e| e.title.clone())
                 .or_else(|| {
@@ -315,11 +335,6 @@ impl CollectionService {
                 })
                 .or_else(|| audio.tag("title").map(str::to_owned))
                 .unwrap_or_else(|| file.name.rsplit('/').next().unwrap_or("Track").to_owned());
-            let album_selection = match edit.and_then(|e| e.album_selected) {
-                Some(true) => collector_api_types::MusicAlbumSelection::Included,
-                Some(false) => collector_api_types::MusicAlbumSelection::Excluded,
-                None => default_selection,
-            };
             let wav = audio.codec == "wav";
             let encoder = self.encoder_availability(&ConversionProfile::Flac);
             let can_prepare =
@@ -380,11 +395,14 @@ impl CollectionService {
             rows.push(MusicTrackAvailability {
                 can_stream_original: true,
                 album_selection,
-                display_position: edit.and_then(|e| e.display_position).or_else(|| {
-                    audio
-                        .tag("track_number")
-                        .and_then(|value| value.split('/').next()?.parse().ok())
-                }),
+                display_position: edit
+                    .and_then(|e| e.display_position)
+                    .or_else(|| {
+                        audio
+                            .tag("track_number")
+                            .and_then(|value| value.split('/').next()?.parse().ok())
+                    })
+                    .or(playback_number),
                 audio_format: Some(collector_api_types::MusicAudioFormat {
                     codec: if wav {
                         "flac".into()
@@ -399,9 +417,7 @@ impl CollectionService {
                 }),
                 capture_id: capture.id,
                 source_label: "Digital original".into(),
-                disc_position: edit
-                    .and_then(|edit| edit.disc_position)
-                    .or_else(|| recorded_file_disc(&file.name, audio.tag("disc_number"))),
+                disc_position,
                 source_representation_id: source.id,
                 track_position: track.position,
                 start_frame: PcmFrame(0),

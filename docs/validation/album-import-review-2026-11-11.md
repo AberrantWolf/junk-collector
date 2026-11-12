@@ -146,3 +146,19 @@ macros enabled through its provider dependency. Strict Clippy for the affected
 crates, web type checks, bundle build, web models, API contract matching,
 formatting and documentation checks passed. Tested debug server SHA-256
 `3076dceba282c642470d5dded1cd68091c83a9d638b90d2a5a02e18d5d654429`.
+
+## Selected-track numbering — 2026-11-12
+
+The Chrome purchase journey reproduced a numbering gap on beta.26. After
+switching a mixed package to MP3, the first checked MP3 showed track 2. The
+corrected journey showed track 1, verified that a new disc starts at 1, and
+imported a batch with independent untagged albums. Playback returned 1 and 2
+for one album and 1 for the selected track on disc 2 of another album. The
+existing manual-number and embedded-tag checks also passed.
+
+Chrome 156.0.8078.74 passed the purchase journey. Digital album matching,
+the short browser smoke,
+collector-app tests and strict Clippy, web type checks, bundle build, and web
+models passed. The debug server SHA-256 was
+`0e2ed762d31ddbe7a3fea97f1a22ac438e41b2a17353c2d011bb6158af5e04dd`.
+This source change has no release or deployment acceptance.
