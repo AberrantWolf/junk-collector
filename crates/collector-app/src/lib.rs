@@ -4433,7 +4433,6 @@ impl CollectionService {
                 let selection = RawJson::from_value(serde_json::json!({
                     "import_id": id,
                     "representation_id": record.view.representation_id,
-                    "files": record.view.files,
                     "snapshot_id": snapshot_id,
                     "system": null,
                     "domain": domain,

@@ -134,6 +134,7 @@ struct MusicImportAnalysisInput {
     _representation_id: Option<collector_core::RepresentationId>,
     #[serde(default)]
     files: Vec<MusicImportAnalysisFile>,
+    album_selection: Option<Vec<Option<bool>>>,
     #[serde(default, rename = "snapshot_id")]
     _snapshot_id: Option<collector_core::SnapshotId>,
     #[serde(default, rename = "system")]
@@ -2362,8 +2363,20 @@ impl CollectionModule for Music {
                             .collect::<Vec<_>>(),
                     )
                 {
-                    let (manifest, limitations) =
-                        files::analyze_files(host, access, &inventory, &input.files)?;
+                    if input.album_selection.as_ref().is_some_and(|selection| {
+                        selection.len() != inventory.files.len() || !input.files.is_empty()
+                    }) {
+                        return Err(ModuleError::Invalid(
+                            "Album choices must correspond to the frozen inventory".into(),
+                        ));
+                    }
+                    let (manifest, limitations) = files::analyze_files(
+                        host,
+                        access,
+                        &inventory,
+                        &input.files,
+                        input.album_selection.as_deref(),
+                    )?;
                     return Ok(OperationOutput {
                         value: RawJson::from_value(
                             serde_json::to_value(MusicImportAnalysisOutput {

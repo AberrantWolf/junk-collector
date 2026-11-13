@@ -81,6 +81,9 @@ file by name. A failed alternate outside the reviewed selection, or outside the
 default playback selection when there is no review, must retain its original
 and record a warning. Successful file tracks must keep their source positions
 even when an alternate has no analysis record.
+Guided analysis must carry reviewed playback choices by position in the frozen
+inventory. It must use the inventory for filenames and the source fingerprint
+for byte validation, keeping analysis admission independent of filename length.
 
 32-bit IEEE-float WAV supports mono/stereo at 8–192 kHz in the same bounded
 RIFF layout. Analysis must reject non-finite samples. Live FLAC and Opus and

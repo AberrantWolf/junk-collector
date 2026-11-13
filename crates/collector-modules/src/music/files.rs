@@ -201,6 +201,7 @@ pub(super) fn analyze_files(
     access: PackageAccess,
     inventory: &PackageInventory,
     reviewed: &[MusicImportAnalysisFile],
+    album_selection: Option<&[Option<bool>]>,
 ) -> ModuleResult<(FileTrackManifest, Vec<String>)> {
     let names = inventory
         .files
@@ -229,9 +230,9 @@ pub(super) fn analyze_files(
     {
         host.checkpoint()?;
         let name = file.display_name.as_str();
-        let required = choices
-            .get(name)
-            .copied()
+        let required = album_selection
+            .and_then(|selection| selection[index])
+            .or_else(|| choices.get(name).copied())
             .unwrap_or_else(|| defaults.contains(name));
         match analyze_file(host, access, file) {
             Ok((mut audio, wav_trailing_bytes)) => {

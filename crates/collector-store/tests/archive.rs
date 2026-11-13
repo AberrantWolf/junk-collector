@@ -31901,3 +31901,53 @@ fn float_wav_import_keeps_playback_coordinates_when_an_alternate_fails() {
             .any(|warning| warning.contains(names[0]))
     );
 }
+
+#[test]
+fn large_reviewed_music_package_admits_analysis_without_copying_its_inventory() {
+    let (_root, store, actor, service, collection) = setup();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let names = (1..=310)
+        .map(|index| {
+            format!(
+                "MP3/{index:03} - {}.mp3",
+                "Long soundtrack filename ".repeat(7)
+            )
+        })
+        .collect::<Vec<_>>();
+    let names_ref = names.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut files: Vec<&[u8]> = vec![b"invalid alternate MP3"; names.len()];
+    files[309] = mp3;
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &names_ref,
+        &files,
+        |_| None,
+        Some(vec![collector_modules::music::files::MusicImportTrack {
+            file_name: names[309].clone(),
+            disc_position: None,
+            display_position: None,
+        }]),
+    );
+    let job = detail
+        .import
+        .analysis_job_id
+        .expect("analysis job was admitted");
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let item = detail.summary.target_item_id.unwrap();
+    let saved = store.item(item).unwrap();
+    assert_eq!(
+        saved.captures[0].representations[0].files.len(),
+        names.len()
+    );
+    let album = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(album.tracks.len(), 1);
+    assert!(matches!(
+        album.tracks[0].state,
+        collector_app::MusicTrackAvailabilityState::Available {
+            file_index: 309,
+            ..
+        }
+    ));
+}

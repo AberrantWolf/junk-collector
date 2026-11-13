@@ -1109,8 +1109,26 @@ impl CollectionService {
         );
         let mut selection = serde_json::json!({
             "import_id":record.view.id,"representation_id":record.view.representation_id,
-            "files":record.view.files,"snapshot_id":snapshot_id,"system":null,"domain":null
+            "snapshot_id":snapshot_id,"system":null,"domain":null
         });
+        // The ordered inventory supplies names. Its fingerprint binds file IDs and bytes.
+        // Only explicit playback choices need to be carried into the worker.
+        if eligibility.owner.0 == "org.junk.music"
+            && record
+                .view
+                .files
+                .iter()
+                .any(|file| file.album_selected.is_some())
+        {
+            selection["album_selection"] = serde_json::json!(
+                record
+                    .view
+                    .files
+                    .iter()
+                    .map(|file| file.album_selected)
+                    .collect::<Vec<_>>()
+            );
+        }
         if let Some(anchor_file_index) = intent.anchor_file_index {
             selection
                 .as_object_mut()
