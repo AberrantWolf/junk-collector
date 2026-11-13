@@ -13,7 +13,7 @@ Use [implementation status](implementation-status.md) for availability and
 | Withdrawn-publication recovery | [Withdrawn-publication cleanup](validation/cancelled-publication-2026-11-03.md); not part of the published beta.20 image |
 | Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md) |
 | Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
-| Library and media | [Layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
+| Library and media | [Library access during music imports](validation/import-time-library-2026-11-13.md), [layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
 | Security and recovery | [Repository exposure review](validation/repository-exposure-2026-11-11.md), [dependency review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
 | Audio and game support | [Audio matrix](audio-preparation.md), [game matrix](game-identification.md) |
 | Testing and packaging | [Change-based delivery](validation/testing-and-packaging-2026-10-26.md) |

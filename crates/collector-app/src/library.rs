@@ -22,6 +22,7 @@ pub struct LibraryPage {
     pub next_cursor: Option<String>,
     pub summary_state: LibrarySummaryState,
     pub catalog_revision: String,
+    pub membership_revision: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -245,14 +246,15 @@ impl CollectionService {
             )?;
         }
         query.cursor = None;
-        let revision = self.care.library_revision()?;
+        let (revision, membership) = self.care.library_read_revisions(query.filter)?;
         let total = self.care.library_count(
             actor.user_id,
             query.clone(),
             &self.library_namespace()?,
             &self.metadata_language(actor.user_id)?,
         )?;
-        if revision != self.care.library_revision()? {
+        let (current, current_membership) = self.care.library_read_revisions(query.filter)?;
+        if revision != current || membership != current_membership {
             return Err(Error::Conflict);
         }
         Ok(collector_api_types::CatalogSummary {
@@ -263,7 +265,33 @@ impl CollectionService {
     }
 
     pub fn library_entries(&self, actor: &Principal, query: BrowseQuery) -> Result<LibraryPage> {
-        let revision = self.care.library_revision()?;
+        self.library_page(actor, query, None, None)
+    }
+
+    pub fn refresh_library_rows(
+        &self,
+        actor: &Principal,
+        mut query: BrowseQuery,
+        ids: Vec<ItemId>,
+        membership_revision: &str,
+    ) -> Result<LibraryPage> {
+        if ids.is_empty() || ids.len() > 50 || query.cursor.is_some() {
+            return Err(Error::Invalid(
+                "row refresh requires 1–50 IDs without a cursor".into(),
+            ));
+        }
+        query.limit = Some(ids.len() as u16);
+        self.library_page(actor, query, Some(&ids), Some(membership_revision))
+    }
+
+    fn library_page(
+        &self,
+        actor: &Principal,
+        query: BrowseQuery,
+        ids: Option<&[ItemId]>,
+        expected_membership: Option<&str>,
+    ) -> Result<LibraryPage> {
+        let (revision, cursor_revision) = self.care.library_read_revisions(query.filter)?;
         if query
             .revision
             .as_ref()
@@ -271,6 +299,10 @@ impl CollectionService {
         {
             return Err(Error::Conflict);
         }
+        if expected_membership.is_some_and(|expected| expected != cursor_revision) {
+            return Err(Error::Conflict);
+        }
+        let strict_revision = query.revision.is_some();
         let budget = query.max_bytes.unwrap_or(64 * 1024).clamp(4096, 128 * 1024) as usize;
         let mut encoded_bytes = 0usize;
         let mut last_cursor = query.cursor.clone();
@@ -301,6 +333,7 @@ impl CollectionService {
                 query.clone(),
                 &namespace,
                 &language,
+                ids,
             )?;
             examined += page.items.len();
             let active = self.provisional_imports.items_with_active_ingest(
@@ -366,6 +399,7 @@ impl CollectionService {
                         next_cursor: Some(source.cursor.clone()),
                         summary_state,
                         catalog_revision: revision.clone(),
+                        membership_revision: cursor_revision.clone(),
                     };
                     let overhead = serde_json::to_vec(&envelope)
                         .map_err(|e| Error::Storage(e.to_string()))?
@@ -388,7 +422,8 @@ impl CollectionService {
             }
             query.cursor = page.next_cursor;
         };
-        if revision != self.care.library_revision()? {
+        let (current, current_membership) = self.care.library_read_revisions(query.filter)?;
+        if cursor_revision != current_membership || (strict_revision && revision != current) {
             return Err(Error::Conflict);
         }
         let page = LibraryPage {
@@ -396,6 +431,7 @@ impl CollectionService {
             next_cursor,
             summary_state,
             catalog_revision: revision,
+            membership_revision: cursor_revision,
         };
         if serde_json::to_vec(&page)
             .map_err(|e| Error::Storage(e.to_string()))?

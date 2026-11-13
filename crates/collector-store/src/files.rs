@@ -611,11 +611,10 @@ impl Store {
         before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<Item> {
         let _guard = lock(&self.uploads)?;
-        let _writer = lock(&self.writer)?;
         self.ensure_job_continues(id, claim_token)?;
         let mut upload = self.upload_record(id)?;
-        let mut item = self.item(upload.item_id)?;
-        let existing_capture = item
+        let initial_item = self.item(upload.item_id)?;
+        let existing_capture = initial_item
             .captures
             .iter()
             .find(|capture| {
@@ -628,18 +627,18 @@ impl Store {
         let evidence_id = EvidenceId(upload.id.0);
         if existing_capture.is_some()
             && self
-                .evidence(item.id)?
+                .evidence(initial_item.id)?
                 .iter()
                 .any(|evidence| evidence.id == evidence_id)
         {
             upload.state = JobState::Completed;
             self.persist_upload(&upload)?;
-            return Ok(item);
+            return Ok(initial_item);
         }
         if upload.state == JobState::Cancelled {
             return Err(Error::Conflict);
         }
-        if item.revision != upload.expected_revision && existing_capture.is_none() {
+        if initial_item.revision != upload.expected_revision && existing_capture.is_none() {
             return Err(Error::Conflict);
         }
         let total = upload.files.iter().map(|f| f.bytes.0).sum::<u64>();
@@ -655,7 +654,9 @@ impl Store {
             if file.bytes.0 == 0 && !source.try_exists().map_err(storage)? {
                 write_new(&source, b"")?;
             }
-            let (length, digest) = hash_file(&source)?;
+            let (length, digest) = hash_file_checked(&source, file.bytes.0, &mut || {
+                self.ensure_job_continues(id, claim_token)
+            })?;
             if length != file.bytes
                 || file
                     .sha256
@@ -672,6 +673,33 @@ impl Store {
                 bytes: length,
                 digest,
             });
+        }
+        let prepared = if existing_capture.is_none() {
+            let sources = (0..files.len())
+                .map(|index| self.upload_directory(id).join(format!("{index}.part")))
+                .collect::<Vec<_>>();
+            Some(self.stage_capture_payloads(id, claim_token, &files, &sources)?)
+        } else {
+            None
+        };
+        let _writer = lock(&self.writer)?;
+        self.ensure_job_continues(id, claim_token)?;
+        let mut item = self.item(upload.item_id)?;
+        if item.revision != upload.expected_revision && existing_capture.is_none() {
+            return Err(Error::Conflict);
+        }
+        let current_capture = item.captures.iter().find(|capture| {
+            capture
+                .representations
+                .iter()
+                .any(|representation| representation.id == upload.representation_id)
+        });
+        if current_capture.map(|capture| (capture.id, capture.revision))
+            != existing_capture
+                .as_ref()
+                .map(|capture| (capture.id, capture.revision))
+        {
+            return Err(Error::Conflict);
         }
         let item_root = self.item_path(item.id)?;
         let collection_root = item_root
@@ -701,20 +729,11 @@ impl Store {
                         profile: None,
                     }],
                 };
-                let sources = upload
-                    .files
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| {
-                        self.upload_directory(upload.id)
-                            .join(format!("{index}.part"))
-                    })
-                    .collect::<Vec<_>>();
                 self.publish_capture_payloads(
                     upload.id,
                     collection_root,
                     capture,
-                    &sources,
+                    prepared.as_ref().ok_or(Error::Conflict)?.path(),
                     claim_token,
                     before_publish,
                 )?
@@ -743,21 +762,63 @@ impl Store {
         Ok(result)
     }
 
+    /// Verify the exact bytes that will be promoted on the archive filesystem.
+    /// Each attempt owns its scratch and may prepare concurrently with a publisher.
+    pub(crate) fn stage_capture_payloads(
+        &self,
+        job_id: JobId,
+        claim_token: Option<&str>,
+        files: &[StoredFile],
+        sources: &[PathBuf],
+    ) -> Result<tempfile::TempDir> {
+        if sources.len() != files.len() {
+            return Err(Error::Storage(
+                "Capture payload source inventory changed".into(),
+            ));
+        }
+        self.archive_guard.check()?;
+        let stage = tempfile::Builder::new()
+            .prefix("capture-preparation-")
+            .tempdir_in(self.archive.join(".staging"))
+            .map_err(storage)?;
+        let payload = stage.path().join("payload");
+        fs::create_dir(&payload).map_err(storage)?;
+        let mut check = || self.ensure_job_continues(job_id, claim_token);
+        for (file, source) in files.iter().zip(sources) {
+            safe_name(&file.name)?;
+            check()?;
+            let target = payload.join(&file.name);
+            let parent = target.parent().ok_or(Error::Conflict)?;
+            fs::create_dir_all(parent).map_err(storage)?;
+            copy_publication_file(source, &target, file.bytes.0, &mut check)?;
+            if hash_file_checked(&target, file.bytes.0, &mut check)?
+                != (file.bytes, file.digest.clone())
+            {
+                return Err(Error::Storage("destination verification failed".into()));
+            }
+            // A nested payload must survive renaming the prepared tree.
+            let mut directory = parent;
+            loop {
+                sync_directory(directory)?;
+                if directory == stage.path() {
+                    break;
+                }
+                directory = directory.parent().ok_or(Error::Conflict)?;
+            }
+        }
+        Ok(stage)
+    }
+
     pub(crate) fn publish_capture_payloads(
         &self,
         job_id: JobId,
         collection_root: &Path,
         capture: Capture,
-        sources: &[PathBuf],
+        prepared: &Path,
         claim_token: Option<&str>,
         before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<Capture> {
         let transaction_id = TransactionId(job_id.0);
-        if sources.len() != capture.representations[0].files.len() {
-            return Err(Error::Storage(
-                "Capture payload source inventory changed".into(),
-            ));
-        }
         let record = archive_v3::CaptureRecordV3 {
             capture: capture.clone(),
             legacy_root: None,
@@ -826,22 +887,9 @@ impl Store {
         let stage = self.archive.join(&stage_relative);
         let payload_stage = stage.join("payload");
         let revision_stage = stage.join("revision");
-        fs::create_dir_all(&payload_stage).map_err(storage)?;
         fs::create_dir_all(&revision_stage).map_err(storage)?;
-        for (index, file) in capture.representations[0].files.iter().enumerate() {
-            self.ensure_job_continues(job_id, claim_token)?;
-            let source = &sources[index];
-            let target = payload_stage.join(&file.name);
-            fs::create_dir_all(target.parent().unwrap()).map_err(storage)?;
-            fs::copy(source, &target).map_err(storage)?;
-            File::open(&target)
-                .and_then(|file| file.sync_all())
-                .map_err(storage)?;
-            if hash_file(&target)? != (file.bytes, file.digest.clone()) {
-                return Err(Error::Storage("destination verification failed".into()));
-            }
-            sync_directory(target.parent().unwrap())?;
-        }
+        fs::rename(prepared.join("payload"), &payload_stage).map_err(storage)?;
+        sync_directory(&self.archive.join(".staging"))?;
         write_new(&revision_stage.join("record.v3.json"), &record_bytes)?;
         write_new(&revision_stage.join("manifest.v3.toml"), &manifest_bytes)?;
         sync_directory(&revision_stage)?;
@@ -874,8 +922,10 @@ impl Store {
 
         {
             let _publication_gate = lock(&self.job_publication_gate)?;
-            self.ensure_job_continues(job_id, claim_token)?;
-            if let Err(error) = before_publish() {
+            if let Err(error) = self
+                .ensure_job_continues(job_id, claim_token)
+                .and_then(|()| before_publish())
+            {
                 // Payload copies are still provisional. Retain upload sources while
                 // clearing this uncommitted attempt so an authorized retry can resume.
                 journals.abort(transaction_id)?;
@@ -922,6 +972,8 @@ impl Store {
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         project_capture(&tx, &capture)?;
+        self.publication_fault
+            .check(PublicationFaultPoint::ProjectionWriting)?;
         tx.commit().map_err(storage)?;
         drop(db);
         finish_v3_publication(self, transaction_id)?;
@@ -937,7 +989,7 @@ impl Store {
         Ok(())
     }
     pub(crate) fn jobs_for_user(&self, user: UserId) -> Result<Vec<Job>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt = db
             .prepare("SELECT id,user_id,item_id,kind,state,completed_units,total_units,error FROM private.jobs WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 500")
             .map_err(storage)?;
@@ -1017,7 +1069,8 @@ impl Store {
             .clone();
         safe_name(&file.name)?;
         let item_root = self.item_path(item.id)?;
-        let legacy_locator: Option<(String, String)> = lock(&self.db)?
+        let legacy_locator: Option<(String, String)> = self
+            .read_db()?
             .query_row(
                 "SELECT item_id,relative_path FROM legacy_payload_locators WHERE capture_id=?",
                 [capture.id.to_string()],
@@ -1027,7 +1080,8 @@ impl Store {
             .map_err(storage)?;
         // New derivatives of migrated masters use the canonical Capture path.
         // Existing legacy representations retain their original locator.
-        let canonical_derivative: bool = lock(&self.db)?
+        let canonical_derivative: bool = self
+            .read_db()?
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM conversion_recipes WHERE id=? AND collection_id=?)",
                 params![representation.to_string(), item.collection_id.to_string()],
@@ -1059,6 +1113,7 @@ impl Store {
                 .join("payload")
                 .join(representation.to_string())
         };
+        self.archive_guard.check()?;
         let path = fs::canonicalize(root.join(&file.name)).map_err(|error| {
             if canonical_derivative {
                 tracing::error!(%error, representation = %representation, "prepared media path unavailable");
@@ -1073,7 +1128,8 @@ impl Store {
         Ok((path, file, canonical_derivative))
     }
     pub(crate) fn asset_state_record(&self, asset_id: AssetId) -> Result<AssetState> {
-        let record: String = lock(&self.db)?
+        let record: String = self
+            .read_db()?
             .query_row(
                 "SELECT record FROM assets WHERE id=?",
                 [asset_id.to_string()],
@@ -1099,7 +1155,7 @@ impl Store {
             ItemIdentityLink::Edition { edition_id } => self.edition(edition_id)?.work_id,
             ItemIdentityLink::None => None,
         };
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db
             .prepare("SELECT record FROM assets WHERE collection_id=? ORDER BY id")
             .map_err(storage)?;
@@ -1449,7 +1505,8 @@ impl Store {
     }
 
     fn asset_record_v3(&self, asset_id: AssetId) -> Result<archive_v3::AssetRecordV3> {
-        let record: String = lock(&self.db)?
+        let record: String = self
+            .read_db()?
             .query_row(
                 "SELECT record FROM assets WHERE id=?",
                 [asset_id.to_string()],
@@ -1543,6 +1600,7 @@ impl Store {
             .iter()
             .find(|locator| locator.role == role)
             .ok_or_else(|| Error::Storage("Asset payload locator is missing".into()))?;
+        self.archive_guard.check()?;
         let path = fs::canonicalize(self.archive.join(&locator.relative_path)).map_err(storage)?;
         if !path.starts_with(fs::canonicalize(&self.archive).map_err(storage)?) {
             return Err(Error::Forbidden);

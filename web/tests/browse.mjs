@@ -49,11 +49,20 @@ while True:
 `,path.join(scratch,'state/catalog.sqlite'),seed.music],{encoding:'utf8',timeout:18000});
  assert.equal(prepared.status,0,prepared.stderr);assert.equal(prepared.stdout.trim(),'62');
  // A pending response must render basic rows immediately and poll to readiness.
- let holdSummary=true;const pendingSummaryRoute=async route=>{const response=await route.fetch();if(!holdSummary){await route.fulfill({response});return;}const body=await response.json();await route.fulfill({response,json:{...body,summary_state:'pending',items:body.items.map(item=>({...item,summary_state:'pending',artwork:null,accuraterip:null,album_playback:null,can_edit:false}))}});};
+ let holdSummary=true;let refreshedRows=false;const pendingSummaryRoute=async route=>{
+  if(new URL(route.request().url()).searchParams.has('row_ids'))refreshedRows=true;
+  const response=await route.fetch();if(!holdSummary){await route.fulfill({response});return;}const body=await response.json();await route.fulfill({response,json:{...body,summary_state:'pending',items:body.items.map(item=>({...item,summary_state:'pending',artwork:null,accuraterip:null,album_playback:null,can_edit:false}))}});};
  await page.route('**/api/v1/library?*',pendingSummaryRoute);
- // A short busy response must recover without requiring manual Retry.
- await page.route('**/api/v1/library/summary?*',route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'catalog is busy; retry shortly'}}}),{times:1});
- await page.reload();await page.locator('.collection-row').first().waitFor();
+ // Hold the count until an independently fetched first page renders.
+ let releaseCount;
+ const countGate=new Promise(resolve=>{releaseCount=resolve;});
+ await page.route('**/api/v1/library/summary?*',async route=>{
+  await countGate;
+  await route.continue();
+ },{times:1});
+ try{
+  await page.reload();await page.locator('.collection-row').first().waitFor();
+ }finally{releaseCount();}
  await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toBeVisible();
  await expect(page.locator('.collection-row').first().getByLabel('Artwork summary updating')).toBeVisible();
  assert.equal(await page.getByText('No originals',{exact:true}).count(),0,'pending summary claimed missing originals');
@@ -61,6 +70,7 @@ while True:
  holdSummary=false;
  await expect(page.locator('.collection-row').first()).toContainText('Alpha');
  await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toHaveCount(0);
+ assert.ok(refreshedRows,'pending summaries did not refresh through the visible-row read path');
  await page.unroute('**/api/v1/library?*',pendingSummaryRoute);
  await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  assert.equal(await page.locator('.collection-row').count(),50);assert.match(await page.locator('.collection-row').first().innerText(),/Album 000/);

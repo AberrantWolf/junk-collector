@@ -30,12 +30,27 @@ retain the existing source-selection snapshot policy; library refresh does not c
 that detailed route. JSON cache validation uses opaque revisions; thumbnail/media
 responses additionally support private ETag validation.
 
-The existing archive guard remains fail-closed. New catalog-query lock acquisition
-has a 200 ms contention bound; general command admission retains its existing
-serialization/recovery policy. This delivery does not introduce a new read pool,
-probe subprocess or a guarantee against a kernel-blocked filesystem call. Healthy
-local response measurements and pending/failed outcomes are recorded separately;
-actual NAS/phone latency still requires its actual installation.
+Catalog queries lease bounded read-only SQLite connections. The local catalog
+and attached private state must use WAL so a query can read committed rows while
+an import writes. Library SQL page selection and cursor validation use one short
+snapshot. The service rechecks current authorization and the membership fence
+before returning rows. Native clients that submit a full catalog revision retain
+that stronger refresh fence.
+
+On a configured remote archive, local-state requests must use the bounded-freshness
+mount health result. The archive guard must still check the live mount for
+archive access and publication. A failed probe must latch unavailable, and an
+overdue probe must make local guarded requests fail promptly. Archive access
+itself remains subject to the host's filesystem behavior.
+
+The web first page and count are independent requests. The web client must use a
+count only with matching catalog revision. It may refresh up to 50 already
+visible rows per request through the ordinary Library projection using IDs and
+the current membership revision. Cursor fences must cover ordering, membership
+and authorization. Updates to a derived summary may leave ordinary cursors
+usable. Filters whose membership depends on workflow or readiness must fence
+those changes as well. A changed membership revision requires a fresh page.
+The server retains no client refresh session.
 
 Trash Amp owns a complete manifest, transient pages and per-album caches locally.
 It re-queries counts/pages for changed generations or pending details, with bounded
@@ -50,8 +65,9 @@ is client state; Collector owns only its shared derived projections.
    the library. Show connected, authentication required, forbidden, unreachable or
    identity mismatch distinctly. A reachable control server does not prove that
    its media route or archive is available.
-2. Fetch an authorized album count and catalog revision. Show this before fetching
-   every title. An empty library is a successful result, distinct from a failure.
+2. Fetch an authorized count independently when the client needs a total. Render
+   the first page as soon as it arrives. An empty library is a successful result,
+   distinct from a failure.
 3. Fetch compact album title/artist rows in bounded pages; render each page as it
    arrives. Rows include small artwork and row revision descriptors, never
    track arrays, media payloads, provider responses or full item graphs.

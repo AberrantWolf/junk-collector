@@ -37,6 +37,7 @@ pub enum PublicationFaultPoint {
     BytesStaged,
     PayloadPublished,
     RevisionCommitted,
+    ProjectionWriting,
     ProjectionApplied,
     Completed,
 }
@@ -780,6 +781,7 @@ mod tests {
                     assert_eq!(report.pending, vec![transaction]);
                 }
                 PublicationFaultPoint::RevisionCommitted
+                | PublicationFaultPoint::ProjectionWriting
                 | PublicationFaultPoint::ProjectionApplied => {
                     assert_eq!(report.committed, vec![transaction]);
                 }

@@ -48,8 +48,8 @@ It follows the normal media-access policy, checks source bytes, supports cancell
 and admits two concurrent exports per server state with an 8 GiB output bound.
 MP3 originals remain unchanged and need no conversion.
 
-Float/compressed WAV, multichannel, RF64 and continuous-image/CUE splitting remain
-unsupported codec/layout forms, rather than inherent limitations of WAV. The
+Compressed WAV, multichannel, RF64 and continuous-image/CUE splitting remain
+unsupported codec/layout forms. The
 supported integer PCM matrix above is the delivered boundary. See
 [current completion validation](validation/wav-digital-completion-2026-11-01.md)
 and the [initial delivery](validation/wav-digital-originals-2026-10-31.md).
@@ -71,8 +71,22 @@ open **Review import** and choose **Retry this step** after updating the server.
 The same Job validates the archived originals against its original frozen file
 fingerprints and runs retained-audio analysis. Preservation is not repeated and
 no original bytes or existing manual metadata are replaced. Unsupported or damaged
-sources still fail visibly. This change does not add float/multichannel WAV or new
-codecs. See [delivery and validation](validation/audio-compatibility-2026-11-01.md).
+sources still fail visibly. The November 1 delivery did not add float WAV. See [delivery and validation](validation/audio-compatibility-2026-11-01.md).
+
+## Mixed-format import compatibility — 2026-11-13
+
+Analysis must recognize FLAC after a bounded ID3v2 prefix and accept the
+supported APEv2 suffix layouts on MP3. Analysis must report a failing playback
+file by name. A failed alternate outside the reviewed selection, or outside the
+default playback selection when there is no review, must retain its original
+and record a warning. Successful file tracks must keep their source positions
+even when an alternate has no analysis record.
+
+32-bit IEEE-float WAV supports mono/stereo at 8–192 kHz in the same bounded
+RIFF layout. Analysis must reject non-finite samples. Live FLAC and Opus and
+saved Opus use signed 24-bit PCM rounded and clipped to the representable
+range. Lossless FLAC preparation remains available for supported integer WAV.
+The float original remains the source for preservation and download.
 
 ## Portable ownership and listening identity
 

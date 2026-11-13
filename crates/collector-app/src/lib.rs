@@ -921,6 +921,9 @@ pub trait ProvisionalImportPort: Send + Sync {
         claim_token: &str,
         source_locator: &str,
     ) -> Result<ImportRecord>;
+    fn reconcile_import_publication_stages(&self) -> Result<()>;
+    fn prepare_import_publication(&self, id: ImportId, job: JobId, claim_token: &str)
+    -> Result<()>;
     /// Recheck application policy after staging, immediately before a new Capture
     /// commits. Do not call the guard when reconciling an existing commit.
     fn publish_import_for_job(
@@ -1218,6 +1221,14 @@ fn safe_job_result(kind: &str, result: Option<&serde_json::Value>) -> Option<Job
 mod job_dispatch;
 pub use job_dispatch::{IMPORT_COPY_JOB_KIND, JobDispatchPolicy, JobSettings, PROVIDER_JOB_SLOTS};
 
+/// Runtime admission for general work and verified archive commits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JobLane {
+    Any,
+    Background,
+    Publication,
+}
+
 pub trait JobPort: Send + Sync {
     fn job_settings(&self) -> Result<JobSettings>;
     fn work_job_records(&self, user: UserId, query: &WorkJobsQuery) -> Result<Page<JobRecord>>;
@@ -1281,7 +1292,15 @@ pub trait JobPort: Send + Sync {
     ) -> Result<Option<ProviderResponseStatus>>;
     fn acquisition_committed_snapshot(&self, claim: &JobClaim) -> Result<Option<SnapshotId>>;
     fn reconcile_acquisitions(&self) -> Result<()>;
-    fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>>;
+    fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
+        self.claim_job_in_lane(worker_instance, lease_seconds, JobLane::Any)
+    }
+    fn claim_job_in_lane(
+        &self,
+        worker_instance: &str,
+        lease_seconds: i64,
+        lane: JobLane,
+    ) -> Result<Option<JobClaim>>;
     fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()>;
     fn heartbeat_job(
         &self,
@@ -5547,7 +5566,11 @@ impl CollectionService {
     }
 
     pub fn run_next_job(&self, worker_instance: &str) -> Result<bool> {
-        let Some(claim) = self.jobs.claim_job(worker_instance, 30)? else {
+        self.run_next_job_in_lane(worker_instance, JobLane::Any)
+    }
+
+    pub fn run_next_job_in_lane(&self, worker_instance: &str, lane: JobLane) -> Result<bool> {
+        let Some(claim) = self.jobs.claim_job_in_lane(worker_instance, 30, lane)? else {
             return Ok(false);
         };
         self.jobs.heartbeat_job(
@@ -5752,6 +5775,14 @@ impl CollectionService {
                         }
                     }
                 }
+                if lane == JobLane::Background {
+                    self.provisional_imports.prepare_import_publication(
+                        import_id,
+                        claim.id,
+                        &claim.claim_token,
+                    )?;
+                    return Ok(serde_json::Value::Null);
+                }
                 self.provisional_imports
                     .publish_import_for_job(import_id, claim.id, &claim.claim_token, &mut || {
                         let record = self.provisional_imports.import_record(import_id)?;
@@ -5818,6 +5849,10 @@ impl CollectionService {
         }
         match result {
             Ok(result) => {
+                if lane == JobLane::Background && claim.kind == "import_publication" {
+                    self.jobs.defer_busy_job(claim.id, &claim.claim_token)?;
+                    return Ok(true);
+                }
                 if claim.kind == "bulk_library"
                     && result.get("yielded").and_then(serde_json::Value::as_bool) == Some(true)
                 {

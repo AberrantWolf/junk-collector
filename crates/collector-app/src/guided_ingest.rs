@@ -137,6 +137,9 @@ impl CollectionService {
     /// closes the crash window between a durable transition and its next job.
     pub fn resume_guided_ingests(&self) -> Result<()> {
         self.provisional_imports.reconcile_removed_item_work()?;
+        let staging_result = self
+            .provisional_imports
+            .reconcile_import_publication_stages();
         let cleanup_result = self.provisional_imports.reconcile_guided_cleanup();
         self.jobs
             .reconcile_work_history(&mut |user, target| self.settle_work_clear(user, target))?;
@@ -153,7 +156,7 @@ impl CollectionService {
                 self.reconcile_guided_ingest(id)?;
             }
         }
-        cleanup_result
+        staging_result.and(cleanup_result)
     }
 
     pub fn resumable_guided_inbox_imports(

@@ -74,7 +74,7 @@ function App(){
  const menuToggle=useRef<HTMLButtonElement>(null);
  const [detailError,setDetailError]=useState('');const [detailLoading,setDetailLoading]=useState(false);const [detailRetry,setDetailRetry]=useState(0);const [listFailed,setListFailed]=useState(false);
  const detailsRef=useRef<HTMLElement>(null);const listScope=useRef('');
- const pageCache=useRef<{scope:string;refresh:number;items:LibraryRow[];cursor:string|null;pages:number;summaryState:Page['summary_state'];catalogRevision:string}|undefined>(undefined);
+ const pageCache=useRef<{scope:string;refresh:number;items:LibraryRow[];cursor:string|null;pages:number;summaryState:Page['summary_state'];catalogRevision:string;membershipRevision:string;poll:number}|undefined>(undefined);
  function changeScope(change:Partial<BrowseLocation>,replace=false){if(menuOpen)menuToggle.current?.focus();setMenuOpen(false);if(collectionPicker.current?.open){collectionPicker.current.open=false;collectionPicker.current.querySelector('summary')?.focus();}managementRequest.current?.abort();setSelected(undefined);setError('');navigate({...change,item:'',batch:'',group:'',...(change.collection!==undefined&&change.collection!==collection?{list:''}:{})},replace);}
  const [listAddition,setListAddition]=useState<{item:Item;source?:string;track?:number;audio?:boolean}>();
  useEffect(()=>setListAddition(undefined),[route.page,route.collection,route.item]);
@@ -85,7 +85,7 @@ function App(){
  useEffect(()=>{const user=actor?.user_id;const update=()=>setDigitalAdmissions(user?pendingDigitalSubmissions(user):[]);update();if(user)recoverDigitalSubmissions(user);window.addEventListener('collector-digital-submission',update);return()=>window.removeEventListener('collector-digital-submission',update);},[actor?.user_id]);
  const [canCurateAny,setCanCurateAny]=useState(false);const [canManageAny,setCanManageAny]=useState(false);
  const [importPoll,setImportPoll]=useState(0);const [summaryState,setSummaryState]=useState<Page['summary_state']>('ready');
- useEffect(()=>{if(!actor||route.page!=='library'||!(summaryState!=='ready'||items.some(item=>item.import_in_progress)))return;const timer=setTimeout(()=>setImportPoll(value=>value+1),2000);return()=>clearTimeout(timer);},[actor,route.page,collection,search,sort,filter,items,summaryState,importPoll]);
+ useEffect(()=>{if(!actor||route.page!=='library'||busy||!(summaryState!=='ready'||items.some(item=>item.import_in_progress)))return;const timer=setTimeout(()=>setImportPoll(value=>value+1),2000);return()=>clearTimeout(timer);},[actor,route.page,collection,search,sort,filter,items,summaryState,importPoll,busy]);
  const collectionKey=JSON.stringify([actor?.user_id,collectionSearch,collectionRevision]);const collectionReads=useOperationScope(collectionKey);const collectionCurrent=collectionPage.key===collectionKey;const collections=collectionCurrent?collectionPage.items:[];const collectionCursor=collectionCurrent?collectionPage.cursor:null;const collectionsReady=collectionCurrent&&collectionPage.ready;const collectionLoading=!collectionCurrent||collectionPage.loading;const collectionError=collectionCurrent?collectionPage.error:'';
  useEffect(()=>{function escape(event:KeyboardEvent){if(event.key!=='Escape'||document.querySelector('[role="dialog"], :popover-open'))return;if(collectionPicker.current?.open){collectionPicker.current.open=false;collectionPicker.current.querySelector('summary')?.focus();return;}if(menuOpen){setMenuOpen(false);menuToggle.current?.focus();return;}if(route.item){managementRequest.current?.abort();closeDetails();}}function outside(event:PointerEvent){const picker=collectionPicker.current;if(picker?.open&&event.target instanceof Node&&!picker.contains(event.target))picker.open=false;}document.addEventListener('keydown',escape);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',escape);document.removeEventListener('pointerdown',outside);};},[route.item,menuOpen]);
  useEffect(()=>{setMusicQueueUser(actor?.user_id);return()=>setMusicQueueUser(undefined);},[actor?.user_id]);
@@ -144,27 +144,121 @@ function App(){
  async function moreCollections(){if(!collectionCurrent||!collectionCursor||collectionLoading)return;setCollectionPage(state=>state.key===collectionKey?{...state,loading:true,error:''}:state);const query=new URLSearchParams({search:collectionSearch,limit:'50',cursor:collectionCursor});await collectionReads.run(attempt=>api<{items:Collection[];next_cursor:string|null}>(`/collection-search?${query}`,{signal:attempt.signal}),{success:page=>setCollectionPage(state=>state.key===collectionKey?{...state,items:[...state.items,...page.items.filter(value=>!state.items.some(previous=>previous.id===value.id))],cursor:page.next_cursor}:state),failure:e=>{setCollectionPage(state=>state.key===collectionKey?{...state,error:requestErrorMessage(e)}:state);if(isApiRequestError(e)&&e.code==='unauthenticated')handleFailure(e);},settled:()=>setCollectionPage(state=>state.key===collectionKey?{...state,loading:false}:state)});}
  useEffect(()=>{let active=true;if(actor)api<CollectionType[]>('/collection-types').then(value=>{if(active)setCollectionTypes(value);}).catch(e=>{if(active)handleFailure(e);});return()=>{active=false;};},[actor]);
  useEffect(()=>{
-  if(!actor||route.page!=='library')return;const current=++generation.current;const controller=new AbortController();setBusy(true);setLibraryTotal(null);setListFailed(false);const scope=JSON.stringify([actor.user_id,collection,search,sort,filter]);if(listScope.current!==scope){setItems([]);setCursor(null);setLibraryTotal(null);setSummaryState('ready');listScope.current=scope;}
-  const timer=setTimeout(async()=>{try{
-   const summaryQuery=new URLSearchParams({sort,filter});if(collection)summaryQuery.set('collection_id',collection);if(search)summaryQuery.set('search',search);
-   const summary=await api<components['schemas']['CatalogSummary']>(`/library/summary?${summaryQuery}`,{signal:controller.signal});if(controller.signal.aborted)return;
-   setLibraryTotal(summary.total_is_exact?summary.total_items:null);
-   const previous=pageCache.current;const append=previous?.scope===scope&&previous.refresh===refresh&&previous.pages<navigation.pages&&previous.catalogRevision===summary.catalog_revision;
-   setLibraryLoaded(append?previous.items.length:0);
-   let next:string|null=append?previous.cursor:null;let found:LibraryRow[]=append?previous.items:[];let pending:Page['summary_state']=append?previous.summaryState:'ready';
-   for(let pageIndex=append?previous.pages:0;pageIndex<navigation.pages;pageIndex++){
+  if(!actor||route.page!=='library')return;
+  const current=++generation.current;
+  const controller=new AbortController();
+  const scope=JSON.stringify([actor.user_id,collection,search,sort,filter]);
+  const sameScope=listScope.current===scope;
+  const previous=sameScope&&pageCache.current?.scope===scope?pageCache.current:undefined;
+  const append=previous?.refresh===refresh&&previous.poll===importPoll&&previous.pages<navigation.pages;
+  setBusy(true);setListFailed(false);
+  if(!sameScope){
+   listScope.current=scope;
+   setItems([]);setCursor(null);setLibraryTotal(null);setLibraryLoaded(0);setSummaryState('ready');
+  }
+  const isCurrent=()=>!controller.signal.aborted&&current===generation.current;
+  const scopeQuery=new URLSearchParams({sort,filter});
+  if(collection)scopeQuery.set('collection_id',collection);
+  if(search)scopeQuery.set('search',search);
+  const readCount=()=>api<components['schemas']['CatalogSummary']>(
+   `/library/summary?${scopeQuery}`,{signal:controller.signal},
+  ).catch(()=>undefined);
+
+  async function readPages(start?:NonNullable<typeof previous>){
+   let next=start?.cursor??null;
+   let found=start?.items??[];
+   let pending:Page['summary_state']=start?.summaryState??'ready';
+   let catalogRevision=start?.catalogRevision??'';
+   let membershipRevision=start?.membershipRevision??'';
+   for(let index=start?.pages??0;index<navigation.pages;index++){
     let page:Page;
     do {
-     const query=new URLSearchParams({limit:'50',sort,filter,revision:summary.catalog_revision});if(collection)query.set('collection_id',collection);if(search)query.set('search',search);if(next)query.set('cursor',next);
-     page=await api<Page>(`/library?${query}`,{signal:controller.signal});if(controller.signal.aborted)return;
+     const query=new URLSearchParams(scopeQuery);
+     query.set('limit','50');
+     if(next)query.set('cursor',next);
+     page=await api<Page>(`/library?${query}`,{signal:controller.signal});
+     controller.signal.throwIfAborted();
      if(page.summary_state==='retrying'||(page.summary_state==='pending'&&pending==='ready'))pending=page.summary_state;
      next=page.next_cursor??null;
     } while(filter==='album_playback_needs_attention'&&!page.items.length&&next);
-    found=[...found,...page.items];if(current===generation.current){setItems(found);setLibraryLoaded(found.length);setCursor(next);setSummaryState(pending);}if(!next)break;
+    catalogRevision=page.catalog_revision;membershipRevision=page.membership_revision;
+    found=[...found,...page.items];
+    if(isCurrent()&&(!previous||start)){
+     setItems(found);setLibraryLoaded(found.length);setCursor(next);setSummaryState(pending);
+    }
+    if(!next)break;
    }
-   if(current===generation.current){pageCache.current={scope,refresh,items:found,cursor:next,pages:navigation.pages,summaryState:pending,catalogRevision:summary.catalog_revision};setSummaryState(pending);setItems(found);setCursor(next);setError('');}
-  }catch(e){if(!controller.signal.aborted&&current===generation.current){pageCache.current=undefined;setCursor(null);if(isApiRequestError(e)&&['forbidden','unauthenticated'].includes(e.code)){setItems([]);setLibraryTotal(null);setLibraryLoaded(0);}if(isApiRequestError(e)&&['revision_conflict','catalog_busy'].includes(e.code)){setListFailed(e.status===503);setSummaryState('pending');setError(e.status===503?'Library is busy; retrying…':'Library is changing; refreshing…');}else{setListFailed(true);handleFailure(e);}}}
-  finally{if(!controller.signal.aborted&&current===generation.current)setBusy(false);}},180);
+   return {items:found,cursor:next,summaryState:pending,catalogRevision,membershipRevision};
+  }
+
+  async function refreshRows(start:NonNullable<typeof previous>){
+   const pendingRows=start.items.filter(row=>row.summary_state!=='ready'||row.import_in_progress);
+   if(!pendingRows.length)return;
+   const changed=new Map<string,LibraryRow>();
+   let catalogRevision=start.catalogRevision;
+   for(let index=0;index<pendingRows.length;index+=20){
+    const rows=pendingRows.slice(index,index+20);
+    const query=new URLSearchParams(scopeQuery);
+    query.set('row_ids',rows.map(row=>row.id).join(','));
+    query.set('membership_revision',start.membershipRevision);
+    query.set('max_bytes','131072');
+    const page=await api<Page>(`/library?${query}`,{signal:controller.signal});
+    if(page.next_cursor||page.items.length!==rows.length)return;
+    for(const row of page.items)changed.set(row.id,row);
+    catalogRevision=page.catalog_revision;
+   }
+   const items=start.items.map(row=>changed.get(row.id)??row);
+   const summaryState:Page['summary_state']=items.some(row=>row.summary_state==='retrying')?'retrying':
+    items.some(row=>row.summary_state==='pending')?'pending':'ready';
+   return {...start,items,summaryState,catalogRevision};
+  }
+
+  const timer=setTimeout(async()=>{
+   try{
+    const refreshVisible=previous&&previous.refresh===refresh&&previous.poll!==importPoll&&
+     previous.pages===navigation.pages&&filter!=='album_playback_needs_attention';
+    if(refreshVisible){
+     let updated;
+     try{updated=await refreshRows(previous);}
+     catch(error){
+      if(!isApiRequestError(error)||error.code!=='revision_conflict')throw error;
+     }
+     if(!isCurrent())return;
+     if(updated){
+      pageCache.current={...updated,poll:importPoll};
+      setItems(updated.items);setSummaryState(updated.summaryState);setError('');
+      return;
+     }
+    }
+    // Optional counts share the scope, but never gate the page request.
+    const count=readCount();
+    let result;
+    try{result=await readPages(append?previous:undefined);}
+    catch(error){
+     if(!isCurrent()||!isApiRequestError(error)||error.code!=='revision_conflict')throw error;
+     result=await readPages();
+    }
+    if(!isCurrent())return;
+    pageCache.current={...result,scope,refresh,poll:importPoll,pages:navigation.pages};
+    setSummaryState(result.summaryState);setItems(result.items);setCursor(result.cursor);
+    setLibraryLoaded(result.items.length);setLibraryTotal(null);setError('');
+    setBusy(false);
+    const summary=await count;
+    if(isCurrent()&&summary?.catalog_revision===result.catalogRevision&&summary.total_is_exact){
+     setLibraryTotal(summary.total_items);
+    }
+   }catch(error){
+    if(!isCurrent())return;
+    pageCache.current=undefined;setCursor(null);
+    if(isApiRequestError(error)&&['forbidden','unauthenticated'].includes(error.code)){
+     setItems([]);setLibraryTotal(null);setLibraryLoaded(0);
+    }
+    if(isApiRequestError(error)&&['revision_conflict','catalog_busy'].includes(error.code)){
+     setListFailed(error.status===503);setSummaryState('pending');
+     setError(error.status===503?'Library is busy; retrying…':'Library is changing; refreshing…');
+    }else{setListFailed(true);handleFailure(error);}
+   }finally{if(isCurrent())setBusy(false);}
+  },180);
   return()=>{clearTimeout(timer);controller.abort();generation.current++;};
  },[actor,collection,search,sort,filter,refresh,importPoll,navigation.pages,route.page]);
 

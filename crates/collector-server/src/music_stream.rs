@@ -87,7 +87,7 @@ pub(crate) async fn music_stream(
     Path((id, source)): Path<(ItemId, RepresentationId)>,
     Query(query): Query<StreamQuery>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     allowed(&state)?;
     let codec = match (query.format, query.bitrate) {
         (Format::Flac, None) => StreamCodec::Flac,
@@ -177,7 +177,7 @@ pub(crate) async fn music_stream(
                 let state = state.clone();
                 let headers = headers.clone();
                 let result = tokio::task::spawn_blocking(move || -> ApiResult<()> {
-                    let current = principal(&state, &headers)?;
+                    let current = crate::authenticate_request(&state.service, &headers)?.principal;
                     if current.user_id != user {
                         return Err(Error::Unauthenticated.into());
                     }

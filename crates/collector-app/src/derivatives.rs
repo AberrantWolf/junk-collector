@@ -2189,9 +2189,11 @@ impl CollectionService {
             .into_iter()
             .find(|t| t.position == position)
             .ok_or(Error::Conflict)?;
-        if *profile == ConversionProfile::Flac && track.audio.codec != "wav" {
+        if *profile == ConversionProfile::Flac
+            && (track.audio.codec != "wav" || track.audio.bits_per_sample == Some(32))
+        {
             return Err(Error::Invalid(
-                "Only WAV originals need FLAC preparation".into(),
+                "Lossless FLAC preparation requires a 16- or 24-bit integer WAV original".into(),
             ));
         }
         Ok(Some(track))

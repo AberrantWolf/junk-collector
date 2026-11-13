@@ -26,8 +26,10 @@ impl FileTrackManifest {
             return Err(ModuleError::Invalid("invalid file track count".into()));
         }
         let mut files = std::collections::BTreeSet::new();
-        for (i, track) in self.tracks.iter().enumerate() {
-            if usize::from(track.position) != i + 1
+        let mut previous = 0;
+        for track in &self.tracks {
+            if track.position <= previous
+                || track.position > 10_000
                 || !files.insert(track.file_id)
                 || !matches!(track.audio.codec.as_str(), "flac" | "mp3" | "wav")
                 || track.audio.sample_rate == 0
@@ -37,6 +39,7 @@ impl FileTrackManifest {
             {
                 return Err(ModuleError::Invalid("invalid file track manifest".into()));
             }
+            previous = track.position;
         }
         Ok(())
     }
@@ -193,106 +196,170 @@ pub fn is_file_package(names: &[PackageFileName]) -> bool {
             || n.as_str().to_ascii_lowercase().ends_with(".toc")
     }) && names.iter().any(|n| is_audio_name(n.as_str()))
 }
-pub fn analyze_files(
+pub(super) fn analyze_files(
     host: &dyn crate::ModuleHost,
     access: PackageAccess,
     inventory: &PackageInventory,
-) -> ModuleResult<FileTrackManifest> {
-    if inventory
+    reviewed: &[MusicImportAnalysisFile],
+) -> ModuleResult<(FileTrackManifest, Vec<String>)> {
+    let names = inventory
         .files
         .iter()
-        .filter(|file| is_audio_name(file.display_name.as_str()))
-        .count()
-        > 10_000
-    {
-        return Err(ModuleError::Invalid("too many file tracks".into()));
-    }
+        .map(|file| file.display_name.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let defaults = import_layout(&names, None)?
+        .tracks
+        .into_iter()
+        .map(|track| track.file_name)
+        .collect::<std::collections::BTreeSet<_>>();
+    let choices = reviewed
+        .iter()
+        .filter_map(|f| f.album_selected.map(|selected| (f.name.as_str(), selected)))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut tracks = Vec::new();
+    let mut warnings = Vec::new();
+    let mut skipped = 0;
     let mut tag_bytes = 0usize;
-    for (index, file) in inventory
+    for (ordinal, (index, file)) in inventory
         .files
         .iter()
         .enumerate()
         .filter(|(_, f)| is_audio_name(f.display_name.as_str()))
+        .enumerate()
     {
         host.checkpoint()?;
-        let reader = host.package_file(access, file.id)?;
-        let extension = file.display_name.as_str().rsplit('.').next();
-        let mut wav_trailing_bytes = 0;
-        let mut audio = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("wav")) {
-            use junk_libs_pcm::IntegerPcmReader;
-            let mut checkpoint_error = None;
-            let wav = junk_libs_pcm::WavReader::open(reader, &mut || {
-                host.checkpoint().map_err(|error| {
-                    checkpoint_error = Some(error.clone());
-                    std::io::Error::other(error)
-                })
-            });
-            if let Some(error) = checkpoint_error {
-                return Err(error);
+        let name = file.display_name.as_str();
+        let required = choices
+            .get(name)
+            .copied()
+            .unwrap_or_else(|| defaults.contains(name));
+        match analyze_file(host, access, file) {
+            Ok((mut audio, wav_trailing_bytes)) => {
+                tag_bytes += audio
+                    .tags
+                    .values()
+                    .flatten()
+                    .map(String::len)
+                    .sum::<usize>();
+                if tag_bytes > 8 * 1024 * 1024 {
+                    return Err(ModuleError::Invalid("package tags exceed 8 MiB".into()));
+                }
+                let embedded_artwork = !audio.pictures.is_empty();
+                audio.pictures.clear();
+                tracks.push(FileTrack {
+                    embedded_artwork,
+                    position: u16::try_from(ordinal + 1)
+                        .map_err(|_| ModuleError::Invalid("too many file tracks".into()))?,
+                    file_index: index,
+                    file_id: file.id,
+                    audio,
+                    wav_trailing_bytes,
+                });
             }
-            let mut wav = wav.map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
-            let format = wav.format();
-            wav_trailing_bytes = wav.trailing_bytes();
-            junk_libs_audio::FileAudioInfo {
-                codec: "wav".into(),
-                sample_rate: format.sample_rate,
-                channels: format.channels,
-                bits_per_sample: Some(u32::from(format.bits)),
-                decoded_frames: Some(wav.total_frames()),
-                tags: std::mem::take(&mut wav.metadata.tags),
-                pictures: std::mem::take(&mut wav.metadata.pictures),
-                ..Default::default()
+            Err(ModuleError::FailedOperation(reason) | ModuleError::Invalid(reason)) => {
+                let reason: String = reason
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(256)
+                    .collect();
+                let detail = format!("{name}: {reason}");
+                if required {
+                    return Err(ModuleError::FailedOperation(detail));
+                }
+                skipped += 1;
+                if warnings.len() < 12 {
+                    warnings.push(format!(
+                        "Alternate audio retained without track analysis: {detail}"
+                    ));
+                }
             }
-        } else {
-            let mut checkpoint_error = None;
-            let audio = junk_libs_audio::inspect_file_audio(
-                junk_libs_audio::ByteSource::new(
-                    reader,
-                    junk_libs_audio::MediaHint::new(Some(file.bytes.0), extension, None),
-                ),
-                &mut || {
-                    host.checkpoint().map_err(|error| {
-                        checkpoint_error = Some(error);
-                        junk_libs_audio::AudioDecodeError::Cancelled
-                    })
-                },
-            );
-            if let Some(error) = checkpoint_error {
-                return Err(error);
-            }
-            audio.map_err(|error| ModuleError::FailedOperation(error.to_string()))?
-        };
-        tag_bytes += audio
-            .tags
-            .values()
-            .flatten()
-            .map(String::len)
-            .sum::<usize>();
-        if tag_bytes > 8 * 1024 * 1024 {
-            return Err(ModuleError::Invalid("package tags exceed 8 MiB".into()));
+            Err(error) => return Err(error),
         }
-        let expected = extension.unwrap().to_ascii_lowercase();
-        if audio.codec != expected {
-            return Err(ModuleError::Invalid(
-                "audio contents disagree with selected file format".into(),
-            ));
-        }
-        let embedded_artwork = !audio.pictures.is_empty();
-        audio.pictures.clear();
-        tracks.push(FileTrack {
-            embedded_artwork,
-            position: u16::try_from(tracks.len() + 1)
-                .map_err(|_| ModuleError::Invalid("too many file tracks".into()))?,
-            file_index: index,
-            file_id: file.id,
-            audio,
-            wav_trailing_bytes,
-        });
     }
-    let result = FileTrackManifest { tracks };
-    result.validate()?;
-    Ok(result)
+    let manifest = FileTrackManifest { tracks };
+    manifest.validate()?;
+    if skipped > warnings.len() {
+        warnings.push(format!(
+            "{} additional alternate audio files were retained without track analysis.",
+            skipped - warnings.len()
+        ));
+    }
+    warnings.extend(limitations(&manifest));
+    Ok((manifest, warnings))
+}
+
+fn analyze_file(
+    host: &dyn crate::ModuleHost,
+    access: PackageAccess,
+    file: &collector_core::PackageInventoryFile,
+) -> ModuleResult<(junk_libs_audio::FileAudioInfo, u64)> {
+    let reader = host.package_file(access, file.id)?;
+    let extension = file.display_name.as_str().rsplit('.').next();
+    let mut wav_trailing_bytes = 0;
+    let audio = if extension.is_some_and(|ext| ext.eq_ignore_ascii_case("wav")) {
+        use junk_libs_pcm::IntegerPcmReader;
+        let mut checkpoint_error = None;
+        let wav = junk_libs_pcm::WavReader::open(reader, &mut || {
+            host.checkpoint().map_err(|error| {
+                checkpoint_error = Some(error.clone());
+                std::io::Error::other(error)
+            })
+        });
+        if let Some(error) = checkpoint_error {
+            return Err(error);
+        }
+        let mut wav = wav.map_err(|e| ModuleError::FailedOperation(e.to_string()))?;
+        let format = wav.format();
+        wav_trailing_bytes = wav.trailing_bytes();
+        if wav.source_bits() == 32 {
+            let mut block = vec![0; 4096 * format.frame_bytes()];
+            loop {
+                host.checkpoint()?;
+                if wav
+                    .read_pcm(&mut block)
+                    .map_err(|e| ModuleError::FailedOperation(e.to_string()))?
+                    == 0
+                {
+                    break;
+                }
+            }
+        }
+        junk_libs_audio::FileAudioInfo {
+            codec: "wav".into(),
+            sample_rate: format.sample_rate,
+            channels: format.channels,
+            bits_per_sample: Some(u32::from(wav.source_bits())),
+            decoded_frames: Some(wav.total_frames()),
+            tags: std::mem::take(&mut wav.metadata.tags),
+            pictures: std::mem::take(&mut wav.metadata.pictures),
+            ..Default::default()
+        }
+    } else {
+        let mut checkpoint_error = None;
+        let audio = junk_libs_audio::inspect_file_audio(
+            junk_libs_audio::ByteSource::new(
+                reader,
+                junk_libs_audio::MediaHint::new(Some(file.bytes.0), extension, None),
+            ),
+            &mut || {
+                host.checkpoint().map_err(|error| {
+                    checkpoint_error = Some(error);
+                    junk_libs_audio::AudioDecodeError::Cancelled
+                })
+            },
+        );
+        if let Some(error) = checkpoint_error {
+            return Err(error);
+        }
+        audio.map_err(|error| ModuleError::FailedOperation(error.to_string()))?
+    };
+    let expected = extension.unwrap().to_ascii_lowercase();
+    if audio.codec != expected {
+        return Err(ModuleError::Invalid(
+            "audio contents disagree with selected file format".into(),
+        ));
+    }
+    Ok((audio, wav_trailing_bytes))
 }
 
 pub fn limitations(manifest: &FileTrackManifest) -> Vec<String> {

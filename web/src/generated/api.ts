@@ -4399,6 +4399,7 @@ export interface components {
         LibraryPage: {
             catalog_revision: string;
             items: components["schemas"]["LibraryEntry"][];
+            membership_revision: string;
             next_cursor?: string | null;
             summary_state: components["schemas"]["LibrarySummaryState"];
         };
@@ -13051,6 +13052,10 @@ export interface operations {
                 limit?: number;
                 revision?: string;
                 max_bytes?: number;
+                /** @description Comma-separated IDs for refreshing up to 50 visible rows */
+                row_ids?: string;
+                /** @description Required when refreshing visible rows */
+                membership_revision?: string;
             };
             header?: never;
             path?: never;
@@ -13069,6 +13074,13 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

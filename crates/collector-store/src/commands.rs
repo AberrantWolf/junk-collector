@@ -27,27 +27,16 @@ impl Store {
         sha256: &str,
         result: &impl Serialize,
     ) -> Result<()> {
-        let mut db = Connection::open_in_memory().map_err(storage)?;
-        db.execute(
-            "ATTACH DATABASE ? AS private",
-            [self.state.join("private.sqlite").to_string_lossy().as_ref()],
-        )
-        .map_err(storage)?;
-        db.busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(storage)?;
-        let tx = db
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(storage)?;
-        // Archive publishers hold the writer lock. Settle a failed reservation
-        // before another attempt can claim the same immutable revision path.
-        if root == "archive" {
-            release_absent_metadata_outcomes(
-                &tx,
-                &self.archive,
-                Some(path),
-                self.receipt.as_ref(),
-            )?;
-        }
+        // Archive publishers hold the archive writer while determining whether
+        // a previous reservation has any recoverable filesystem effect.
+        let absent = if root == "archive" {
+            self.absent_metadata_outcomes(Some(path), self.receipt.as_ref())?
+        } else {
+            Vec::new()
+        };
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        release_absent_metadata_outcomes(&tx, absent)?;
         let Some(receipt) = &self.receipt else {
             return tx.commit().map_err(storage);
         };
@@ -55,55 +44,102 @@ impl Store {
             params![receipt.user.to_string(),receipt.api_major,receipt.operation,receipt.key,root,path,sha256,serde_json::to_string(result).map_err(storage)?]).map_err(storage)?;
         tx.commit().map_err(storage)
     }
+
+    pub(super) fn absent_metadata_outcomes(
+        &self,
+        target: Option<&str>,
+        active: Option<&CommandReceipt>,
+    ) -> Result<Vec<MetadataOutcome>> {
+        let rows = {
+            let db = self.read_db()?;
+            let mut statement = db.prepare("SELECT r.user_id,r.api_major,r.operation,r.idempotency_key,r.request_sha256,o.path FROM private.command_receipts r JOIN private.command_outcomes o USING(user_id,api_major,operation,idempotency_key) WHERE r.state='in_progress' AND r.operation='metadata.authority.update' AND o.root='archive' AND (? IS NULL OR o.path=?)").map_err(storage)?;
+            statement
+                .query_map(params![target, target], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, u16>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                })
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        let mut absent = Vec::new();
+        for (user, major, operation, key, digest, path) in rows {
+            if active.is_some_and(|r| {
+                r.user.to_string() == user
+                    && r.api_major == major
+                    && r.operation == operation
+                    && r.key == key
+            }) {
+                continue;
+            }
+            publication::validate_relative_path(&path)?;
+            if self.archive.join(&path).try_exists().map_err(storage)? {
+                continue;
+            }
+            if fs::read_dir(self.archive.join(".transactions"))
+                .map_err(storage)?
+                .next()
+                .is_some()
+            {
+                return Err(Error::Unavailable(
+                    "unfinished archive publication; restart to settle recovery before retrying"
+                        .into(),
+                ));
+            }
+            absent.push(MetadataOutcome {
+                user,
+                major,
+                operation,
+                key,
+                digest,
+                path,
+            });
+        }
+        Ok(absent)
+    }
+}
+
+pub(super) struct MetadataOutcome {
+    user: String,
+    major: u16,
+    operation: String,
+    key: String,
+    digest: String,
+    path: String,
 }
 
 pub(super) fn release_absent_metadata_outcomes(
     db: &Connection,
-    archive: &Path,
-    target: Option<&str>,
-    active: Option<&CommandReceipt>,
+    absent: Vec<MetadataOutcome>,
 ) -> Result<()> {
-    let rows = {
-        let mut statement = db.prepare("SELECT r.user_id,r.api_major,r.operation,r.idempotency_key,r.request_sha256,o.path FROM private.command_receipts r JOIN private.command_outcomes o USING(user_id,api_major,operation,idempotency_key) WHERE r.state='in_progress' AND r.operation='metadata.authority.update' AND o.root='archive' AND (? IS NULL OR o.path=?)").map_err(storage)?;
-        statement
-            .query_map(params![target, target], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, u16>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                ))
-            })
-            .map_err(storage)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(storage)?
-    };
-    for (user, major, operation, key, digest, path) in rows {
-        if active.is_some_and(|r| {
-            r.user.to_string() == user
-                && r.api_major == major
-                && r.operation == operation
-                && r.key == key
-        }) {
-            continue;
+    for MetadataOutcome {
+        user,
+        major,
+        operation,
+        key,
+        digest,
+        path,
+    } in absent
+    {
+        let changed = db
+            .execute(
+                "DELETE FROM private.command_outcomes WHERE user_id=?1 AND api_major=?2
+               AND operation=?3 AND idempotency_key=?4 AND root='archive' AND path=?6
+               AND EXISTS(SELECT 1 FROM private.command_receipts WHERE user_id=?1
+                 AND api_major=?2 AND operation=?3 AND idempotency_key=?4
+                 AND request_sha256=?5 AND state='in_progress')",
+                params![user, major, operation, key, digest, path],
+            )
+            .map_err(storage)?;
+        if changed == 1 {
+            db.execute("DELETE FROM private.command_receipts WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=? AND request_sha256=? AND state='in_progress'",params![user,major,operation,key,digest]).map_err(storage)?;
         }
-        publication::validate_relative_path(&path)?;
-        if archive.join(&path).try_exists().map_err(storage)? {
-            continue;
-        }
-        if fs::read_dir(archive.join(".transactions"))
-            .map_err(storage)?
-            .next()
-            .is_some()
-        {
-            return Err(Error::Unavailable(
-                "unfinished archive publication; restart to settle recovery before retrying".into(),
-            ));
-        }
-        db.execute("DELETE FROM private.command_outcomes WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=?",params![user,major,operation,key]).map_err(storage)?;
-        db.execute("DELETE FROM private.command_receipts WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=? AND request_sha256=? AND state='in_progress'",params![user,major,operation,key,digest]).map_err(storage)?;
     }
     Ok(())
 }

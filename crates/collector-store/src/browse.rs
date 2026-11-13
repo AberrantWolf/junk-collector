@@ -11,6 +11,8 @@ pub(crate) const LISTENING: &str = "(json_extract(i.record,'$.domain.module')='o
 #[serde(deny_unknown_fields)]
 struct Cursor {
     scope: String,
+    #[serde(default)]
+    revision: Option<String>,
     key: String,
     title: String,
     id: String,
@@ -88,7 +90,7 @@ pub(super) fn first_record_time(
 }
 
 pub(super) fn browse(db: &Connection, user: UserId, query: BrowseQuery) -> Result<Page<Item>> {
-    let page = rows(db, user, query, None)?;
+    let page = rows(db, user, query, None, None)?;
     let mut items = page
         .items
         .into_iter()
@@ -125,8 +127,15 @@ pub(crate) fn rows(
     user: UserId,
     query: BrowseQuery,
     cache: Option<(&str, &str)>,
+    ids: Option<&[ItemId]>,
 ) -> Result<Page<BrowseRow>> {
-    let (sql, values, limit, scope) = query_parts(db, user, query, cache)?;
+    let QueryParts {
+        sql,
+        values,
+        limit,
+        scope,
+        revision,
+    } = query_parts(db, user, query, cache, ids)?;
     let mut stmt = db.prepare(&sql).map_err(storage)?;
     let mut rows = stmt
         .query(rusqlite::params_from_iter(values))
@@ -158,6 +167,7 @@ pub(crate) fn rows(
             cursor: hex::encode(
                 serde_json::to_vec(&Cursor {
                     scope: scope.clone(),
+                    revision: revision.clone(),
                     key: row.get(2).map_err(storage)?,
                     title: row.get(3).map_err(storage)?,
                     id: row.get(4).map_err(storage)?,
@@ -167,6 +177,7 @@ pub(crate) fn rows(
         };
         next = Some(Cursor {
             scope: scope.clone(),
+            revision: revision.clone(),
             key: row.get(2).map_err(storage)?,
             title: row.get(3).map_err(storage)?,
             id: item.id.to_string(),
@@ -185,17 +196,29 @@ pub(crate) fn rows(
     Ok(Page { items, next_cursor })
 }
 
+struct QueryParts {
+    sql: String,
+    values: Vec<rusqlite::types::Value>,
+    limit: usize,
+    scope: String,
+    revision: Option<String>,
+}
+
 fn query_parts(
     db: &Connection,
     user: UserId,
     query: BrowseQuery,
     cache: Option<(&str, &str)>,
-) -> Result<(String, Vec<rusqlite::types::Value>, usize, String)> {
+    ids: Option<&[ItemId]>,
+) -> Result<QueryParts> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200) as usize;
     let search = query.search.as_deref().unwrap_or("").trim();
     if search.len() > 256 {
         return Err(Error::Invalid("search is too long".into()));
     }
+    let revision = cache
+        .map(|_| crate::library::cursor_revision(db, query.filter))
+        .transpose()?;
     let scope = Digest::sha256(
         &serde_json::to_vec(&(
             user,
@@ -205,11 +228,8 @@ fn query_parts(
             query.filter,
             query.listening_only,
             cache,
-            if cache.is_some() {
-                Some(crate::library::revision(db)?)
-            } else {
-                None
-            },
+            // Keep the ordinary browse cursor scope compatible.
+            Option::<String>::None,
         ))
         .map_err(storage)?,
     )
@@ -220,10 +240,16 @@ fn query_parts(
                 hex::decode(raw).map_err(|_| Error::Invalid("invalid browse cursor".into()))?;
             let value: Cursor = serde_json::from_slice(&bytes)
                 .map_err(|_| Error::Invalid("invalid browse cursor".into()))?;
+            if cache.is_some() && value.revision.is_none() {
+                return Err(Error::Conflict);
+            }
             if value.scope != scope || value.id.parse::<ItemId>().is_err() {
                 return Err(Error::Invalid(
                     "browse cursor belongs to different results".into(),
                 ));
+            }
+            if value.revision != revision {
+                return Err(Error::Conflict);
             }
             Some(value)
         }
@@ -306,8 +332,13 @@ fn query_parts(
     } else {
         "'',0"
     };
+    let ids_filter = if ids.is_some() {
+        " AND i.id IN (SELECT value FROM json_each(?11))"
+    } else {
+        ""
+    };
     let sql = format!(
-        "SELECT {selected},{key},b.title_key,i.id,i.collection_id,g.role,{basics} FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1{joins} WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts} ORDER BY {key},b.title_key,i.id LIMIT ?6",
+        "SELECT {selected},{key},b.title_key,i.id,i.collection_id,g.role,{basics} FROM browse_items b JOIN items i ON i.id=b.id JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1{joins} WHERE i.deleted={} AND {} AND (?2 IS NULL OR i.collection_id=?2) AND ({filter}) AND ({listening}) AND (?8=0 OR ({key},b.title_key,i.id)>(?3,?4,?5)){fts}{ids_filter} ORDER BY {key},b.title_key,i.id LIMIT ?6",
         i64::from(query.filter == BrowseFilter::Removed),
         if query.filter == BrowseFilter::Removed {
             "g.role>=1"
@@ -335,7 +366,16 @@ fn query_parts(
             Value::from(language.to_owned()),
         ]);
     }
-    Ok((sql, values, limit, scope))
+    if let Some(ids) = ids {
+        values.push(Value::from(serde_json::to_string(ids).map_err(storage)?));
+    }
+    Ok(QueryParts {
+        sql,
+        values,
+        limit,
+        scope,
+        revision,
+    })
 }
 
 pub(crate) fn count(
@@ -346,7 +386,8 @@ pub(crate) fn count(
     language: &str,
 ) -> Result<u64> {
     query.cursor = None;
-    let (sql, values, _, _) = query_parts(db, user, query, Some((namespace, language)))?;
+    let QueryParts { sql, values, .. } =
+        query_parts(db, user, query, Some((namespace, language)), None)?;
     let from = sql
         .find(" FROM browse_items")
         .ok_or_else(|| Error::Storage("browse query missing source".into()))?;

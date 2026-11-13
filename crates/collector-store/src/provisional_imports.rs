@@ -464,9 +464,27 @@ impl Store {
     }
 }
 
+fn import_publication_files(initial: &ImportRecord) -> Result<Vec<StoredFile>> {
+    initial
+        .view
+        .files
+        .iter()
+        .map(|file| {
+            Ok(StoredFile {
+                visibility: file.visibility,
+                name: file.name.clone(),
+                bytes: file.bytes,
+                digest: file.digest.clone().ok_or_else(|| {
+                    Error::Invalid("staged bytes do not match the durable Import inventory".into())
+                })?,
+            })
+        })
+        .collect()
+}
+
 impl ProvisionalImportPort for Store {
     fn items_with_active_ingest(&self, items: &[ItemId]) -> Result<Vec<ItemId>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement=db.prepare("SELECT DISTINCT g.target_item_id FROM private.guided_ingest_intents g
                 JOIN private.imports i ON i.id=g.import_id
                 WHERE g.target_item_id IN (SELECT value FROM json_each(?1)) AND g.settled=0 AND g.cancelled=0
@@ -524,7 +542,8 @@ impl ProvisionalImportPort for Store {
 
     fn import_record(&self, id: ImportId) -> Result<ImportRecord> {
         let sql = format!("{SELECT} WHERE id=?");
-        let row = lock(&self.db)?
+        let row = self
+            .read_db()?
             .query_row(&sql, [id.to_string()], read)
             .optional()
             .map_err(storage)?
@@ -719,6 +738,118 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }
         Ok(record)
+    }
+
+    fn reconcile_import_publication_stages(&self) -> Result<()> {
+        let jobs = {
+            let db = self.read_db()?;
+            let mut stmt = db.prepare(
+                "SELECT j.id FROM private.import_publication_stages s JOIN private.jobs j ON j.id=s.job_id
+                 WHERE j.state IN ('completed','cancelled','failed') ORDER BY j.id LIMIT 128",
+            ).map_err(storage)?;
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for job in jobs {
+            self.retire_import_publication_stage(job.parse().map_err(storage)?, None)?;
+        }
+        let directories = {
+            let db = self.read_db()?;
+            let mut stmt = db.prepare(
+                "SELECT directory FROM private.retired_capture_stages ORDER BY directory LIMIT 128",
+            ).map_err(storage)?;
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        if !directories.is_empty() {
+            self.archive_guard.check()?;
+        }
+        for directory in directories {
+            let path = self.capture_stage_path(&directory)?;
+            match fs::remove_dir_all(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage(error)),
+            }
+            sync_directory(&self.archive.join(".staging"))?;
+            lock(&self.db)?
+                .execute(
+                    "DELETE FROM private.retired_capture_stages WHERE directory=?",
+                    [directory],
+                )
+                .map_err(storage)?;
+        }
+        Ok(())
+    }
+
+    fn prepare_import_publication(
+        &self,
+        id: ImportId,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<()> {
+        self.ensure_job_continues(job, Some(claim_token))?;
+        let record = self.import_record(id)?;
+        let stage = self.stage_import_publication(&record, job, claim_token)?;
+        let directory = stage
+            .as_ref()
+            .map(|stage| {
+                stage
+                    .path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or(Error::Conflict)
+            })
+            .transpose()?;
+        if stage.is_some() {
+            sync_directory(&self.archive.join(".staging"))?;
+        }
+        let stamps = stage
+            .as_ref()
+            .map(|stage| {
+                import_publication_files(&record)?
+                    .iter()
+                    .map(|file| {
+                        index_checkpoint::stamp(&stage.path().join("payload").join(&file.name))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let stamps = serde_json::to_string(&stamps).map_err(storage)?;
+        let db = lock(&self.db)?;
+        let now = self.clock.now().timestamp();
+        let inserted = db
+            .execute(
+                "INSERT INTO private.import_publication_stages(job_id,import_revision,directory,stamps)
+             SELECT j.id,p.revision,?1,?7 FROM private.jobs j JOIN private.imports p ON p.id=?2
+             WHERE j.id=?3 AND j.kind='import_publication' AND j.claim_token=?4
+               AND j.state='running' AND j.cancellation_requested=0 AND j.lease_expires>?5
+               AND json_extract(j.request,'$.import_id')=p.id AND p.revision=?6",
+                params![
+                    directory,
+                    id.to_string(),
+                    job.to_string(),
+                    claim_token,
+                    now,
+                    record.view.revision,
+                    stamps
+                ],
+            )
+            .map_err(storage)?;
+        drop(db);
+        if inserted != 1 {
+            self.ensure_job_continues(job, Some(claim_token))?;
+            return Err(Error::Conflict);
+        }
+        if let Some(stage) = stage {
+            let _path = stage.keep();
+        }
+        Ok(())
     }
 
     fn publish_import_for_job(
@@ -1386,6 +1517,90 @@ impl Store {
         )
     }
 
+    fn capture_stage_path(&self, name: &str) -> Result<PathBuf> {
+        if !name.starts_with("capture-preparation-")
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Err(Error::Storage("invalid Capture preparation path".into()));
+        }
+        Ok(self.archive.join(".staging").join(name))
+    }
+
+    fn retire_import_publication_stage(&self, job: JobId, claim: Option<&str>) -> Result<()> {
+        let mut db = lock(&self.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        let directory: Option<Option<String>> = tx
+            .query_row(
+                "DELETE FROM private.import_publication_stages WHERE job_id=?1 AND EXISTS(
+               SELECT 1 FROM private.jobs j WHERE j.id=?1 AND (
+                 (?2 IS NULL AND j.state IN ('completed','cancelled','failed')) OR
+                 (j.claim_token=?2 AND j.lease_expires>?3)
+               )
+             ) RETURNING directory",
+                params![job.to_string(), claim, self.clock.now().timestamp()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage)?;
+        if let Some(Some(directory)) = directory {
+            tx.execute(
+                "INSERT OR IGNORE INTO private.retired_capture_stages(directory) VALUES(?)",
+                [directory],
+            )
+            .map_err(storage)?;
+        }
+        tx.commit().map_err(storage)
+    }
+
+    fn stage_import_publication(
+        &self,
+        initial: &ImportRecord,
+        job: JobId,
+        claim_token: &str,
+    ) -> Result<Option<tempfile::TempDir>> {
+        if initial.view.phase == ImportPhase::Published {
+            return Ok(None);
+        }
+        if !matches!(
+            initial.view.phase,
+            ImportPhase::AwaitingReview | ImportPhase::Publishing
+        ) || initial.view.review.is_none()
+        {
+            return Err(Error::Conflict);
+        }
+        let id = initial.view.id;
+        let files = import_publication_files(initial)?;
+        let total = files.iter().map(|file| file.bytes.0).sum::<u64>();
+        match self.capture(initial.view.capture_id) {
+            Ok(_) => Ok(None),
+            Err(Error::NotFound) => {
+                self.ensure_import_not_clearing(id)?;
+                self.archive_guard.check()?;
+                if fs2::available_space(&self.archive).map_err(storage)?
+                    < total.saturating_add(64 * 1024 * 1024)
+                {
+                    return Err(Error::Unavailable("insufficient archive space".into()));
+                }
+                let scratch = self.state.join("imports").join(id.to_string());
+                let mut sources = Vec::with_capacity(files.len());
+                for (index, file) in files.iter().enumerate() {
+                    self.ensure_job_continues(job, Some(claim_token))?;
+                    let source = scratch.join(format!("{index}.part"));
+                    if file.bytes.0 == 0 && !source.try_exists().map_err(storage)? {
+                        fs::create_dir_all(&scratch).map_err(storage)?;
+                        write_new(&source, b"")?;
+                    }
+                    sources.push(source);
+                }
+                self.stage_capture_payloads(job, Some(claim_token), &files, &sources)
+                    .map(Some)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn publish_import_inner(
         &self,
         id: ImportId,
@@ -1394,19 +1609,58 @@ impl Store {
         before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord> {
         self.ensure_job_continues(job, Some(claim_token))?;
-        let _writer = lock(&self.writer)?;
-        let mut record = self.import_record(id)?;
-        if self.capture(record.view.capture_id).is_err() {
-            self.ensure_import_not_clearing(id)?;
+        let initial = self.import_record(id)?;
+        if initial.view.phase == ImportPhase::Published {
+            return Ok(initial);
         }
+        let files = import_publication_files(&initial)?;
+        let total = files.iter().map(|file| file.bytes.0).sum::<u64>();
+        let receipt: Option<(u64, Option<String>, String)> = self.read_db()?.query_row(
+            "SELECT import_revision,directory,stamps FROM private.import_publication_stages WHERE job_id=?",
+            [job.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional().map_err(storage)?;
+        let mut transient_stage = None;
+        let mut prepared = None;
+        match self.capture(initial.view.capture_id) {
+            Ok(_) => {}
+            Err(Error::NotFound) => {
+                if let Some((revision, directory, stamps)) = receipt {
+                    prepared = directory
+                        .as_deref()
+                        .map(|name| self.capture_stage_path(name))
+                        .transpose()?;
+                    let current = prepared.as_ref().map(|path| {
+                        files
+                            .iter()
+                            .map(|file| {
+                                index_checkpoint::stamp(&path.join("payload").join(&file.name))
+                            })
+                            .collect::<Result<Vec<_>>>()
+                    });
+                    let expected: Vec<String> = serde_json::from_str(&stamps).map_err(storage)?;
+                    if revision != initial.view.revision
+                        || !matches!(current, Some(Ok(stamps)) if stamps == expected)
+                    {
+                        self.retire_import_publication_stage(job, Some(claim_token))?;
+                        return Err(Error::CatalogBusy);
+                    }
+                } else {
+                    transient_stage = self.stage_import_publication(&initial, job, claim_token)?;
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        let prepared = prepared
+            .as_deref()
+            .or_else(|| transient_stage.as_ref().map(tempfile::TempDir::path));
+        let _writer = lock(&self.writer)?;
+        self.ensure_job_continues(job, Some(claim_token))?;
+        let mut record = self.import_record(id)?;
         if record.view.phase == ImportPhase::Published {
             return Ok(record);
         }
-        if !matches!(
-            record.view.phase,
-            ImportPhase::AwaitingReview | ImportPhase::Publishing
-        ) || record.view.review.is_none()
-        {
+        if record.view.revision != initial.view.revision {
             return Err(Error::Conflict);
         }
         // Revision checks guard a new publication, not completion of an
@@ -1416,6 +1670,9 @@ impl Store {
             Err(Error::NotFound) => None,
             Err(error) => return Err(error),
         };
+        if committed_capture.is_none() {
+            self.ensure_import_not_clearing(id)?;
+        }
         if committed_capture.is_none()
             && let Some(item_id) = record.view.association.item_id
             && self.item(item_id)?.deleted
@@ -1452,43 +1709,6 @@ impl Store {
             record.view.phase = ImportPhase::Publishing;
             let revision = record.view.revision;
             record = self.save_import(record, revision)?;
-        }
-        let total = record
-            .view
-            .files
-            .iter()
-            .map(|file| file.bytes.0)
-            .sum::<u64>();
-        if committed_capture.is_none()
-            && fs2::available_space(&self.archive).map_err(storage)?
-                < total.saturating_add(64 * 1024 * 1024)
-        {
-            return Err(Error::Unavailable("insufficient archive space".into()));
-        }
-        let scratch = self.state.join("imports").join(id.to_string());
-        fs::create_dir_all(&scratch).map_err(storage)?;
-        let mut files = Vec::new();
-        let mut sources = Vec::new();
-        for (index, declared) in record.view.files.iter().enumerate() {
-            self.ensure_job_continues(job, Some(claim_token))?;
-            let source = scratch.join(format!("{index}.part"));
-            if declared.bytes.0 == 0 && !source.exists() {
-                let file = File::create(&source).map_err(storage)?;
-                file.sync_all().map_err(storage)?;
-            }
-            let (bytes, digest) = crate::files::hash_file(&source)?;
-            if bytes != declared.bytes || declared.digest.as_ref() != Some(&digest) {
-                return Err(Error::Invalid(
-                    "staged bytes do not match the durable Import inventory".into(),
-                ));
-            }
-            files.push(StoredFile {
-                visibility: declared.visibility,
-                name: declared.name.clone(),
-                bytes,
-                digest,
-            });
-            sources.push(source);
         }
         let provisional = self.provisional_observations(id)?;
         for observation in &provisional {
@@ -1562,7 +1782,7 @@ impl Store {
                     job,
                     &collection,
                     capture.clone(),
-                    &sources,
+                    prepared.ok_or(Error::Conflict)?,
                     Some(claim_token),
                     before_publish,
                 )?;

@@ -417,6 +417,7 @@ impl AlbumGroupingPort for Store {
             decision,
             &mut || guard(),
         )?;
+        let checkpoint = index_checkpoint::PublishedCheckpoint::observe(&self.archive, &paths)?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         for root in &roots {
@@ -466,7 +467,7 @@ impl AlbumGroupingPort for Store {
             }
         }
         self.record_command(&tx, &publication.result)?;
-        index_checkpoint::published_in_transaction(&tx, &self.archive, &paths)?;
+        checkpoint.apply(&tx)?;
         tx.commit().map_err(storage)?;
         drop(db);
         finish_v3_publication(self, publication.result.group_id)?;

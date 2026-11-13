@@ -9,7 +9,7 @@ pub(super) async fn mail_setup(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<MailSetupStatus>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.mail_setup_status(&actor)).await?,
     ))
@@ -20,7 +20,7 @@ pub(super) async fn connect_bridge(
     headers: HeaderMap,
     Json(command): Json<ConnectBridge>,
 ) -> ApiResult<Json<MailProfile>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.connect_mail_bridge(&actor, command, &context)).await?,
@@ -32,7 +32,7 @@ pub(super) async fn discover_bridge_folders(
     headers: HeaderMap,
     Json(credentials): Json<DiscoverBridgeFolders>,
 ) -> ApiResult<Json<Vec<String>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -48,7 +48,7 @@ pub(super) async fn discover_profile_folders(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<String>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.discover_mail_profile_folders(&actor, &id)).await?,
     ))
@@ -65,7 +65,7 @@ pub(super) async fn mail_profiles(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<MailProfile>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.mail_profiles(&actor)).await?,
     ))
@@ -75,7 +75,7 @@ pub(super) async fn mail_connections(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<MailConnection>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.mail_connections(&actor)).await?,
     ))
@@ -87,7 +87,7 @@ pub(super) async fn configure_mail(
     Path(id): Path<String>,
     Json(command): Json<ConfigureMail>,
 ) -> ApiResult<Json<MailConnection>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.configure_mail(&actor, &id, command, &context)).await?,
@@ -100,7 +100,7 @@ pub(super) async fn purchase_inbox(
     Path(id): Path<CollectionId>,
     Query(query): Query<InboxQuery>,
 ) -> ApiResult<Json<PurchaseInbox>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -117,7 +117,7 @@ pub(super) async fn review_purchase(
     Path(id): Path<String>,
     Json(command): Json<ReviewPurchase>,
 ) -> ApiResult<Json<Item>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -135,7 +135,7 @@ pub(super) async fn dismiss_purchase(
     Path(id): Path<String>,
     Json(expected): Json<collector_core::Revision>,
 ) -> ApiResult<Json<()>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || {
         state
@@ -159,7 +159,7 @@ pub(super) async fn repair_bridge(
     Path(id): Path<String>,
     Json(command): Json<RepairBridge>,
 ) -> ApiResult<Json<MailProfile>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -177,7 +177,7 @@ pub(super) async fn reopen_purchase(
     Path(id): Path<String>,
     Json(command): Json<ReopenPurchase>,
 ) -> ApiResult<Json<Item>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -195,7 +195,7 @@ pub(super) async fn restore_purchase(
     Path(id): Path<String>,
     Json(expected): Json<collector_core::Revision>,
 ) -> ApiResult<Json<()>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || {
         state

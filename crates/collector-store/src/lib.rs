@@ -33,9 +33,11 @@ mod inbox_cleanup;
 mod processing;
 mod provisional_imports;
 mod publication;
+mod read_pool;
 mod reference_index;
 mod storage_guard;
 mod work_history;
+mod write_admission;
 use chrono::Utc;
 use collector_app::{
     AccessPort, AccountView, ActiveDerivativeJob, AdministrationPort, AssetState,
@@ -58,7 +60,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex as StdMutex, MutexGuard},
+    sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard},
 };
 pub use storage_guard::{ArchiveMount, validate_remote_archive_target};
 
@@ -72,48 +74,104 @@ pub(crate) fn storage(e: impl std::fmt::Display) -> Error {
 pub(crate) struct Mutex<T> {
     inner: StdMutex<T>,
     guard: Arc<storage_guard::ArchiveGuard>,
+    archive_io: bool,
+    admission: Option<write_admission::WriteAdmission>,
 }
 impl<T> Mutex<T> {
     fn guarded(value: T, guard: &Arc<storage_guard::ArchiveGuard>) -> Self {
         Self {
             inner: StdMutex::new(value),
             guard: guard.clone(),
+            archive_io: false,
+            admission: None,
         }
     }
-    /// Interactive catalog reads never wait indefinitely behind publication.
-    fn read_lock(&self) -> Result<MutexGuard<'_, T>> {
-        self.guard.check()?;
-        let started = std::time::Instant::now();
-        loop {
-            match self.inner.try_lock() {
-                Ok(value) => {
-                    self.guard.check()?;
-                    return Ok(value);
-                }
-                Err(std::sync::TryLockError::Poisoned(_)) => {
-                    return Err(Error::Unavailable(
-                        "storage lock poisoned; restart required".into(),
-                    ));
-                }
-                Err(std::sync::TryLockError::WouldBlock) => {
-                    if started.elapsed() >= std::time::Duration::from_millis(200) {
-                        return Err(Error::CatalogBusy);
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                }
-            }
-        }
+    fn with_archive_io(mut self) -> Self {
+        self.archive_io = true;
+        self
     }
+
+    fn with_write_admission(mut self) -> Self {
+        self.admission = Some(write_admission::WriteAdmission::default());
+        self
+    }
+
     fn lock(&self) -> Result<MutexGuard<'_, T>> {
-        self.guard.check()?;
+        self.lock_with_priority(false)
+    }
+
+    fn lock_urgent(&self) -> Result<MutexGuard<'_, T>> {
+        self.lock_with_priority(true)
+    }
+
+    fn lock_with_priority(&self, urgent: bool) -> Result<MutexGuard<'_, T>> {
+        if self.archive_io {
+            self.guard.check_latched()?;
+        } else {
+            self.guard.check_local_operation()?;
+        }
+        let started = std::time::Instant::now();
+        let admitted = self
+            .admission
+            .as_ref()
+            .map(|lane| lane.enter(urgent))
+            .transpose()?;
         let value = self
             .inner
             .lock()
             .map_err(|_| Error::Unavailable("storage lock poisoned; restart required".into()))?;
-        self.guard.check()?;
-        Ok(value)
+        if started.elapsed() >= std::time::Duration::from_millis(50) {
+            tracing::debug!(
+                archive_io = self.archive_io,
+                wait_ms = started.elapsed().as_millis(),
+                "store lock wait"
+            );
+        }
+        if self.archive_io {
+            self.guard.check()?;
+        } else {
+            self.guard.check_freshness()?;
+        }
+        Ok(MutexGuard {
+            value,
+            _admitted: admitted,
+            acquired: std::time::Instant::now(),
+            trace_hold: self.archive_io || self.admission.is_some(),
+        })
     }
 }
+pub(crate) struct MutexGuard<'a, T> {
+    value: StdMutexGuard<'a, T>,
+    _admitted: Option<write_admission::WritePermit<'a>>,
+    acquired: std::time::Instant,
+    trace_hold: bool,
+}
+
+impl<T> std::ops::Deref for MutexGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> std::ops::DerefMut for MutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        if self.trace_hold && self.acquired.elapsed() >= std::time::Duration::from_millis(50) {
+            tracing::debug!(
+                sql = self._admitted.is_some(),
+                held_ms = self.acquired.elapsed().as_millis(),
+                "store lock held"
+            );
+        }
+    }
+}
+
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
     mutex.lock()
 }
@@ -122,6 +180,8 @@ pub struct Store {
     pub(crate) archive: PathBuf,
     archive_guard: Arc<storage_guard::ArchiveGuard>,
     pub(crate) state: PathBuf,
+    // Drop the readers before the final writer so SQLite can close the WAL.
+    readers: Arc<read_pool::ReadPool>,
     pub(crate) db: Arc<Mutex<Connection>>,
     pub(crate) writer: Arc<Mutex<()>>,
     pub(crate) uploads: Arc<Mutex<()>>,
@@ -442,7 +502,7 @@ impl Store {
         }
         let journal_store = publication::PublicationJournalStore::new(&archive);
         journal_store.initialize()?;
-        let recovery_report = journal_store.inspect_and_reconcile()?;
+        let mut recovery_report = journal_store.inspect_and_reconcile()?;
         for transaction_id in &recovery_report.pending {
             journal_store.abort(*transaction_id)?;
         }
@@ -451,8 +511,6 @@ impl Store {
         let mut db = index_checkpoint::open_catalog(&state)?;
         db.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(storage)?;
-        db.pragma_update(None, "journal_mode", "WAL")
-            .map_err(storage)?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(storage)?;
         db.execute(
@@ -460,7 +518,33 @@ impl Store {
             [state.join("private.sqlite").to_string_lossy().as_ref()],
         )
         .map_err(storage)?;
+        for schema in ["main", "private"] {
+            let mode: String = db
+                .query_row(&format!("PRAGMA {schema}.journal_mode=WAL"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(storage)?;
+            if !mode.eq_ignore_ascii_case("wal") {
+                return Err(Error::Storage(format!(
+                    "{schema} SQLite database could not enter WAL mode"
+                )));
+            }
+        }
         migrate_databases(&mut db)?;
+        if !recovery_report.unknown_staging.is_empty() {
+            let mut statement = db.prepare(
+                "SELECT directory FROM private.import_publication_stages WHERE directory IS NOT NULL
+                 UNION SELECT directory FROM private.retired_capture_stages"
+            ).map_err(storage)?;
+            let known = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(storage)?
+                .collect::<std::result::Result<std::collections::HashSet<_>, _>>()
+                .map_err(storage)?;
+            recovery_report
+                .unknown_staging
+                .retain(|name| !known.contains(name));
+        }
         reconcile_collection_creations(&mut db, &archive)?;
         commands::recover(&mut db, &archive, &state)?;
         let (reusable, metadata_files) = index_checkpoint::reusable(&db, &archive)?;
@@ -476,11 +560,15 @@ impl Store {
             elapsed_ms = startup.elapsed().as_millis(),
             "startup recovery and migrations complete"
         );
+        let readers = Arc::new(read_pool::ReadPool::open(&state)?);
+        archive_guard.check()?;
+        archive_guard.start_probe()?;
         let mut store = Self {
             archive,
+            readers,
             state,
-            db: Arc::new(Mutex::guarded(db, &archive_guard)),
-            writer: Arc::new(Mutex::guarded((), &archive_guard)),
+            db: Arc::new(Mutex::guarded(db, &archive_guard).with_write_admission()),
+            writer: Arc::new(Mutex::guarded((), &archive_guard).with_archive_io()),
             uploads: Arc::new(Mutex::guarded((), &archive_guard)),
             job_publication_gate: Arc::new(Mutex::guarded((), &archive_guard)),
             job_dispatch: Arc::new(Mutex::guarded(
@@ -539,6 +627,13 @@ impl Store {
         storage_guard::finish_initialization(&store.state)?;
         Ok(store)
     }
+    fn read_db(&self) -> Result<read_pool::ReadLease<'_>> {
+        self.archive_guard.check_local_operation()?;
+        let db = self.readers.acquire()?;
+        self.archive_guard.check_freshness()?;
+        Ok(db)
+    }
+
     /// Whether startup reused the already maintained projection after metadata checks.
     pub fn catalog_reused_at_startup(&self) -> bool {
         self.catalog_reused
@@ -957,7 +1052,8 @@ impl Store {
         Ok(())
     }
     pub(crate) fn item_path(&self, id: ItemId) -> Result<PathBuf> {
-        let path: String = lock(&self.db)?
+        let path: String = self
+            .read_db()?
             .query_row("SELECT path FROM items WHERE id=?", [id.to_string()], |r| {
                 r.get(0)
             })
@@ -1830,8 +1926,13 @@ impl JobPort for Store {
         Ok(())
     }
 
-    fn claim_job(&self, worker_instance: &str, lease_seconds: i64) -> Result<Option<JobClaim>> {
-        self.claim_job_record(worker_instance, lease_seconds)
+    fn claim_job_in_lane(
+        &self,
+        worker_instance: &str,
+        lease_seconds: i64,
+        lane: collector_app::JobLane,
+    ) -> Result<Option<JobClaim>> {
+        self.claim_job_record(worker_instance, lease_seconds, lane)
     }
 
     fn renew_job_lease(&self, id: JobId, claim_token: &str, lease_seconds: i64) -> Result<()> {
@@ -1921,7 +2022,7 @@ impl AdministrationPort for Store {
         &self,
         default_allowed: bool,
     ) -> Result<collector_app::AudioConnectionSettings> {
-        library_settings::read_audio_connection(&*lock(&self.db)?, default_allowed)
+        library_settings::read_audio_connection(&*self.read_db()?, default_allowed)
     }
     fn save_audio_connection_settings(
         &self,
@@ -2059,7 +2160,8 @@ impl AuthenticationPort for Store {
             }
             collector_app::CredentialKind::TestLocal => return Err(Error::Unauthenticated),
         };
-        let row: Option<(bool, i64, i64)> = lock(&self.db)?
+        let row: Option<(bool, i64, i64)> = self
+            .read_db()?
             .query_row(
                 sql,
                 params![
@@ -2367,13 +2469,16 @@ impl IdempotencyPort for Store {
         } else {
             None
         };
+        // Only provably absent archive effects can be released. Observe them
+        // under the archive writer before taking the SQL writer.
+        let absent = if operation == "metadata.authority.update" {
+            self.absent_metadata_outcomes(None, None)?
+        } else {
+            Vec::new()
+        };
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
-        // Only provably absent archive effects can be released. Committed or
-        // journal-backed effects retain their receipt for normal crash recovery.
-        if operation == "metadata.authority.update" {
-            commands::release_absent_metadata_outcomes(&tx, &self.archive, None, None)?;
-        }
+        commands::release_absent_metadata_outcomes(&tx, absent)?;
         tx.execute(
                 "DELETE FROM private.command_receipts WHERE user_id=? AND api_major=? AND operation=? AND idempotency_key=? AND request_sha256=? AND state='in_progress' AND NOT EXISTS(SELECT 1 FROM private.command_outcomes o WHERE o.user_id=command_receipts.user_id AND o.api_major=command_receipts.api_major AND o.operation=command_receipts.operation AND o.idempotency_key=command_receipts.idempotency_key)",
                 params![user.to_string(), api_major, operation, key, request_sha256],
@@ -3042,6 +3147,14 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     collection_lists::install(db)?;
     music_search::install(db)?;
     reference_index::install(db)?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS private.import_publication_stages(
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id), import_revision INTEGER NOT NULL,
+        directory TEXT, stamps TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS private.retired_capture_stages(directory TEXT PRIMARY KEY);",
+    )
+    .map_err(storage)?;
     library::install(db)?;
     library_care::install_read_clock(db)?;
     index_checkpoint::install(db)?;
@@ -3416,11 +3529,11 @@ impl Catalog for Store {
         user: UserId,
         query: collector_app::MusicSearchQuery,
     ) -> Result<Page<collector_app::MusicSearchRecord>> {
-        music_search::search(&*lock(&self.db)?, collection, user, query)
+        music_search::search(&*self.read_db()?, collection, user, query)
     }
 
     fn collections(&self, user: UserId) -> Result<Vec<Collection>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt = db.prepare("SELECT c.record FROM collections c JOIN private.grants g ON c.id=g.collection_id WHERE g.user_id=? ORDER BY c.id").map_err(storage)?;
         let values = stmt
             .query_map([user.to_string()], |r| r.get::<_, String>(0))
@@ -3438,7 +3551,7 @@ impl Catalog for Store {
         min_role: Option<u8>,
         module: Option<&str>,
     ) -> Result<Page<Collection>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt = db.prepare("SELECT c.record FROM collections c JOIN private.grants g ON c.id=g.collection_id WHERE g.user_id=?1 AND c.id>?2 AND instr(lower(json_extract(c.record,'$.name')),lower(?3))>0 AND (?4 IS NULL OR g.role>=?4) AND (?5 IS NULL OR json_extract(c.record,'$.binding.module')=?5) ORDER BY c.id LIMIT ?6").map_err(storage)?;
         let rows = stmt
             .query_map(
@@ -3465,7 +3578,8 @@ impl Catalog for Store {
         Ok(Page { items, next_cursor })
     }
     fn collection(&self, id: CollectionId) -> Result<Collection> {
-        let record: Option<String> = lock(&self.db)?
+        let record: Option<String> = self
+            .read_db()?
             .query_row(
                 "SELECT record FROM collections WHERE id=?",
                 [id.to_string()],
@@ -3579,6 +3693,10 @@ impl Catalog for Store {
         sync_directory(dir.parent().unwrap())?;
         self.publication_fault
             .check(PublicationFaultPoint::RevisionCommitted)?;
+        let checkpoint = index_checkpoint::PublishedCheckpoint::observe(
+            &self.archive,
+            &[format!("{}/collection.toml", recovery.relative_path)],
+        )?;
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute(
@@ -3600,12 +3718,9 @@ impl Catalog for Store {
             [collection.id.to_string()],
         )
         .map_err(storage)?;
+        checkpoint.apply(&tx)?;
         tx.commit().map_err(storage)?;
-        index_checkpoint::published(
-            &mut db,
-            &self.archive,
-            &[format!("{}/collection.toml", recovery.relative_path)],
-        )?;
+        drop(db);
         self.publication_fault
             .check(PublicationFaultPoint::ProjectionApplied)?;
         self.publication_fault
@@ -3613,7 +3728,8 @@ impl Catalog for Store {
         Ok(collection)
     }
     fn role(&self, user: UserId, collection: CollectionId) -> Result<Role> {
-        let value: Option<i64> = lock(&self.db)?
+        let value: Option<i64> = self
+            .read_db()?
             .query_row(
                 "SELECT role FROM private.grants WHERE user_id=? AND collection_id=?",
                 params![user.to_string(), collection.to_string()],
@@ -3636,10 +3752,12 @@ impl Catalog for Store {
         Ok(())
     }
     fn browse(&self, user: UserId, query: BrowseQuery) -> Result<Page<Item>> {
-        browse::browse(&*lock(&self.db)?, user, query)
+        browse::browse(&*self.read_db()?, user, query)
     }
     fn item(&self, id: ItemId) -> Result<Item> {
-        let record: String = lock(&self.db)?
+        let db = self.read_db()?;
+        let tx = db.unchecked_transaction().map_err(storage)?;
+        let record: String = tx
             .query_row(
                 "SELECT record FROM items WHERE id=?",
                 [id.to_string()],
@@ -3649,7 +3767,7 @@ impl Catalog for Store {
             .map_err(storage)?
             .ok_or(Error::NotFound)?;
         let mut item: Item = serde_json::from_str(&record).map_err(storage)?;
-        hydrate_captures(&*lock(&self.db)?, &mut item)?;
+        hydrate_captures(&tx, &mut item)?;
         Ok(item)
     }
     fn save(&self, item: Item, expected: Revision) -> Result<Item> {
@@ -3685,12 +3803,12 @@ impl Catalog for Store {
     }
 
     fn work(&self, id: WorkId) -> Result<Work> {
-        projected_record(&*lock(&self.db)?, "works", &id.to_string())
+        projected_record(&*self.read_db()?, "works", &id.to_string())
     }
     fn save_work(&self, mut work: Work, expected: Revision) -> Result<Work> {
         work.validate()?;
         let _writer = lock(&self.writer)?;
-        let mut db = lock(&self.db)?;
+        let db = self.read_db()?;
         let current = projected_revision(&db, "works", &work.id.to_string(), work.collection_id)?;
         if current != expected.0 {
             return Err(Error::Conflict);
@@ -3709,6 +3827,7 @@ impl Catalog for Store {
             work.collection_id,
         )?;
         let collection = collection_path(&db, &self.archive, work.collection_id)?;
+        drop(db);
         let publication = publish_v3_revision(
             &self.with_command_result(&work)?,
             V3RevisionTarget {
@@ -3722,6 +3841,7 @@ impl Catalog for Store {
             work.clone(),
             vec![],
         )?;
+        let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute(
             "INSERT INTO works VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection_id=excluded.collection_id,revision=excluded.revision,record=excluded.record",
@@ -3733,12 +3853,12 @@ impl Catalog for Store {
         Ok(work)
     }
     fn edition(&self, id: EditionId) -> Result<Edition> {
-        projected_record(&*lock(&self.db)?, "editions", &id.to_string())
+        projected_record(&*self.read_db()?, "editions", &id.to_string())
     }
     fn save_edition(&self, mut edition: Edition, expected: Revision) -> Result<Edition> {
         edition.validate()?;
         let _writer = lock(&self.writer)?;
-        let mut db = lock(&self.db)?;
+        let db = self.read_db()?;
         let current = projected_revision(
             &db,
             "editions",
@@ -3762,6 +3882,7 @@ impl Catalog for Store {
             edition.collection_id,
         )?;
         let collection = collection_path(&db, &self.archive, edition.collection_id)?;
+        drop(db);
         let publication = publish_v3_revision(
             &self.with_command_result(&edition)?,
             V3RevisionTarget {
@@ -3775,6 +3896,7 @@ impl Catalog for Store {
             edition.clone(),
             vec![],
         )?;
+        let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         tx.execute(
             "INSERT INTO editions VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection_id=excluded.collection_id,revision=excluded.revision,work_id=excluded.work_id,record=excluded.record",
@@ -3786,7 +3908,8 @@ impl Catalog for Store {
         Ok(edition)
     }
     fn capture(&self, id: CaptureId) -> Result<Capture> {
-        let record: String = lock(&self.db)?
+        let record: String = self
+            .read_db()?
             .query_row(
                 "SELECT record FROM captures WHERE id=?",
                 [id.to_string()],
@@ -3800,7 +3923,7 @@ impl Catalog for Store {
     fn save_capture(&self, mut capture: Capture, expected: Revision) -> Result<Capture> {
         capture.validate()?;
         let _writer = lock(&self.writer)?;
-        let mut db = lock(&self.db)?;
+        let db = self.read_db()?;
         let current = projected_revision(
             &db,
             "captures",
@@ -3843,6 +3966,7 @@ impl Catalog for Store {
             capture: capture.clone(),
             legacy_root,
         };
+        drop(db);
         let publication = publish_v3_revision(
             &self.with_command_result(&capture)?,
             V3RevisionTarget {
@@ -3856,6 +3980,7 @@ impl Catalog for Store {
             record,
             vec![],
         )?;
+        let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;
         project_capture(&tx, &capture)?;
         tx.commit().map_err(storage)?;
@@ -3864,7 +3989,7 @@ impl Catalog for Store {
         Ok(capture)
     }
     fn evidence(&self, id: ItemId) -> Result<Vec<Evidence>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt = db
             .prepare("SELECT record FROM evidence WHERE item_id=? ORDER BY id")
             .map_err(storage)?;
@@ -4004,6 +4129,7 @@ impl Store {
         expected: Revision,
         role: Option<Role>,
     ) -> Result<Option<GrantView>> {
+        let _authority = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -4745,8 +4871,12 @@ fn publish_v3_revision_controlled<T: Serialize>(
         fs::create_dir(&payload_stage).map_err(storage)?;
         for (index, payload) in payloads.iter().enumerate() {
             let target = payload_stage.join(index.to_string());
-            copy_publication_file(&payload.source, &target, checkpoint)?;
-            if hash_publication_file(&target, checkpoint)?.hex != payload.sha256 {
+            copy_publication_file(&payload.source, &target, u64::MAX, checkpoint)?;
+            if files::hash_file_checked(&target, u64::MAX, checkpoint)?
+                .1
+                .hex
+                != payload.sha256
+            {
                 return Err(Error::Storage(
                     "staged Asset payload digest mismatch".into(),
                 ));
@@ -4771,7 +4901,11 @@ fn publish_v3_revision_controlled<T: Serialize>(
             .ok_or_else(|| Error::Storage("Asset payload has no parent".into()))?;
         fs::create_dir_all(parent).map_err(storage)?;
         if published.try_exists().map_err(storage)? {
-            if hash_publication_file(&published, checkpoint)?.hex != payload.sha256 {
+            if files::hash_file_checked(&published, u64::MAX, checkpoint)?
+                .1
+                .hex
+                != payload.sha256
+            {
                 return Err(Error::Storage(
                     "published Asset payload conflicts with retry".into(),
                 ));
@@ -4855,8 +4989,7 @@ fn finish_v3_publication(store: &Store, transaction_id: TransactionId) -> Result
         .publication_fault
         .check(PublicationFaultPoint::Completed)?;
     let journal = journals.read_transaction(transaction_id)?;
-    index_checkpoint::published(
-        &mut *lock(&store.db)?,
+    let checkpoint = index_checkpoint::PublishedCheckpoint::observe(
         &store.archive,
         &journal
             .artifacts
@@ -4864,6 +4997,12 @@ fn finish_v3_publication(store: &Store, transaction_id: TransactionId) -> Result
             .map(|artifact| artifact.published_path.clone())
             .collect::<Vec<_>>(),
     )?;
+    {
+        let mut db = lock(&store.db)?;
+        let tx = db.transaction().map_err(storage)?;
+        checkpoint.apply(&tx)?;
+        tx.commit().map_err(storage)?;
+    }
     journals.finish(transaction_id)
 }
 
@@ -5081,6 +5220,7 @@ fn slug(value: &str) -> String {
 fn copy_publication_file(
     source: &Path,
     target: &Path,
+    mut remaining: u64,
     checkpoint: &mut dyn FnMut() -> Result<()>,
 ) -> Result<()> {
     use std::io::Read;
@@ -5097,26 +5237,10 @@ fn copy_publication_file(
         if count == 0 {
             break;
         }
+        remaining = remaining
+            .checked_sub(count as u64)
+            .ok_or_else(|| Error::Invalid("staged file exceeds its declared length".into()))?;
         target.write_all(&buffer[..count]).map_err(storage)?;
     }
     target.sync_all().map_err(storage)
-}
-fn hash_publication_file(
-    path: &Path,
-    checkpoint: &mut dyn FnMut() -> Result<()>,
-) -> Result<Digest> {
-    use sha2::Digest as _;
-    use std::io::Read;
-    let mut reader = File::open(path).map_err(storage)?;
-    let mut hasher = sha2::Sha256::new();
-    let mut buffer = vec![0; 1024 * 1024];
-    loop {
-        checkpoint()?;
-        let count = reader.read(&mut buffer).map_err(storage)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Digest::new(HashAlgorithm::Sha256, hex::encode(hasher.finalize()))
 }

@@ -201,14 +201,22 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
             }
         }
     }));
-    for worker_index in 0..(8 + collector_app::PROVIDER_JOB_SLOTS) {
+    let lanes = std::iter::once(collector_app::JobLane::Publication).chain(std::iter::repeat_n(
+        collector_app::JobLane::Background,
+        (8 + collector_app::PROVIDER_JOB_SLOTS) as usize,
+    ));
+    for (worker_index, lane) in lanes.enumerate() {
         let service = state.service.clone();
         let worker_instance = worker_instance.clone();
         workers.push(tokio::spawn(async move {
             loop {
                 let service = service.clone();
                 let instance = worker_instance.clone();
-                match tokio::task::spawn_blocking(move || service.run_next_job(&instance)).await {
+                match tokio::task::spawn_blocking(move || {
+                    service.run_next_job_in_lane(&instance, lane)
+                })
+                .await
+                {
                     Ok(Ok(true)) => continue,
                     Ok(Ok(false)) => {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await
@@ -508,20 +516,27 @@ type ApiResult<T> = std::result::Result<T, ApiError>;
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> collector_core::Result<T> + Send + 'static,
 ) -> ApiResult<T> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "blocking request worker failed");
-            ApiError(Error::Unavailable(
-                if error.is_panic() {
-                    "Request worker failed; check the server log"
-                } else {
-                    "Request worker was cancelled"
-                }
-                .into(),
-            ))
-        })?
-        .map_err(Into::into)
+    let enqueued = Instant::now();
+    tokio::task::spawn_blocking(move || {
+        let wait = enqueued.elapsed();
+        if wait >= std::time::Duration::from_millis(50) {
+            tracing::debug!(wait_ms = wait.as_millis(), "blocking request queue wait");
+        }
+        f()
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "blocking request worker failed");
+        ApiError(Error::Unavailable(
+            if error.is_panic() {
+                "Request worker failed; check the server log"
+            } else {
+                "Request worker was cancelled"
+            }
+            .into(),
+        ))
+    })?
+    .map_err(Into::into)
 }
 fn browser_session_cookie(headers: &HeaderMap) -> Option<&str> {
     headers
@@ -533,18 +548,27 @@ fn browser_session_cookie(headers: &HeaderMap) -> Option<&str> {
                 .find_map(|p| p.strip_prefix("collector_session="))
         })
 }
-fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthenticatedPrincipal> {
+async fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthenticatedPrincipal> {
+    let service = state.service.clone();
+    let headers = headers.clone();
+    blocking(move || authenticate_request(&service, &headers)).await
+}
+
+fn authenticate_request(
+    service: &CollectionService,
+    headers: &HeaderMap,
+) -> collector_core::Result<AuthenticatedPrincipal> {
     let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
     let cookie = browser_session_cookie(headers);
     let authenticated = if let Some(cookie) = cookie {
-        state.service.authenticate(cookie)?
+        service.authenticate(cookie)?
     } else {
         let bearer = bearer.ok_or(Error::Unauthenticated)?;
-        bearer_authentication(state.service.authenticate_native(bearer), || {
-            state.service.authenticate(bearer)
+        bearer_authentication(service.authenticate_native(bearer), || {
+            service.authenticate(bearer)
         })?
     };
     // This is a precondition, never an alternative source of authentication.
@@ -555,13 +579,13 @@ fn authenticated(state: &AppState, headers: &HeaderMap) -> ApiResult<Authenticat
             .ok()
             .and_then(|value| value.parse::<UserId>().ok());
         if expected != Some(authenticated.principal.user_id) {
-            return Err(Error::Unauthenticated.into());
+            return Err(Error::Unauthenticated);
         }
     }
     Ok(authenticated)
 }
-fn principal(state: &AppState, headers: &HeaderMap) -> ApiResult<Principal> {
-    Ok(authenticated(state, headers)?.principal)
+async fn principal(state: &AppState, headers: &HeaderMap) -> ApiResult<Principal> {
+    Ok(authenticated(state, headers).await?.principal)
 }
 
 // Reject untrusted large uploads before body extractors allocate or parse them.
@@ -571,7 +595,7 @@ async fn authenticated_api(
     request: Request,
     next: Next,
 ) -> ApiResult<Response> {
-    principal(&state, request.headers())?;
+    principal(&state, request.headers()).await?;
     Ok(next.run(request).await)
 }
 
@@ -582,7 +606,7 @@ async fn administrator_api(
 ) -> ApiResult<Response> {
     state
         .service
-        .require_administrator(&principal(&state, request.headers())?)?;
+        .require_administrator(&principal(&state, request.headers()).await?)?;
     Ok(next.run(request).await)
 }
 fn command_context(headers: &HeaderMap) -> ApiResult<CommandContext> {
@@ -1217,7 +1241,7 @@ fn session_response(
 }
 #[utoipa::path(post, path = "/api/v1/auth/logout", responses((status = 204), (status = 401)))]
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     if let Some(device) = actor.device_id {
         state.service.logout_session(&actor, device)?;
     }
@@ -1232,7 +1256,7 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<
 }
 #[utoipa::path(get, path = "/api/v1/me", responses((status = 200, body = Principal), (status = 401)))]
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Principal>> {
-    Ok(Json(principal(&state, &headers)?))
+    Ok(Json(principal(&state, &headers).await?))
 }
 #[derive(Deserialize, utoipa::ToSchema)]
 struct ProfileChange {
@@ -1246,7 +1270,7 @@ async fn update_profile(
     headers: HeaderMap,
     Json(input): Json<ProfileChange>,
 ) -> ApiResult<Json<AccountView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -1274,7 +1298,7 @@ async fn change_password(
     headers: HeaderMap,
     Json(input): Json<ChangePassword>,
 ) -> ApiResult<Json<Revision>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -1294,7 +1318,7 @@ async fn revoke_other_access(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || state.service.revoke_other_access(&actor, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -1305,7 +1329,7 @@ async fn profile(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<AccountView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(state.service.profile(&actor)?))
 }
 #[utoipa::path(get, path = "/api/v1/me/metadata-preferences", responses((status = 200, body = MetadataPreferences), (status = 401)))]
@@ -1313,7 +1337,7 @@ async fn metadata_preferences(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<MetadataPreferences>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.metadata_preferences(&actor)).await?,
     ))
@@ -1324,7 +1348,7 @@ async fn update_metadata_preferences(
     headers: HeaderMap,
     Json(command): Json<UpdateMetadataPreferences>,
 ) -> ApiResult<Json<MetadataPreferences>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -1372,7 +1396,7 @@ async fn recover(
 }
 #[utoipa::path(get, path = "/api/v1/pairing", responses((status = 200, body = Pairing), (status = 401)))]
 async fn pairing(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Pairing>> {
-    principal(&state, &headers)?;
+    principal(&state, &headers).await?;
     Ok(Json(state.pairing))
 }
 #[utoipa::path(delete, path = "/api/v1/devices/{id}", params(("id" = DeviceId, Path), ("Idempotency-Key" = String, Header)), responses((status = 204), (status = 401), (status = 409)))]
@@ -1381,7 +1405,7 @@ async fn revoke(
     headers: HeaderMap,
     Path(id): Path<DeviceId>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     state.service.revoke_session(&actor, id, &context)?;
     Ok(StatusCode::NO_CONTENT)
@@ -1398,7 +1422,7 @@ async fn sessions(
     headers: HeaderMap,
     Query(query): Query<SecurityPageQuery>,
 ) -> ApiResult<Json<Page<SessionView>>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(state.service.sessions_page(
         &actor,
         query.cursor.as_deref(),
@@ -1411,7 +1435,7 @@ async fn replace_recovery_codes(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<String>>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.replace_recovery_codes(&actor)).await?,
     ))
@@ -1423,7 +1447,7 @@ async fn list_passkeys(
     headers: HeaderMap,
     Query(query): Query<SecurityPageQuery>,
 ) -> ApiResult<Json<Page<PasskeyView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(state.service.passkeys_page(
         &actor,
         query.cursor.as_deref(),
@@ -1443,7 +1467,7 @@ async fn revoke_passkey(
     Path(id): Path<PasskeyId>,
     Query(query): Query<ExpectedRevision>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     state
         .service
@@ -1474,7 +1498,7 @@ async fn preview_enrollment(
     headers: HeaderMap,
     Json(input): Json<ApproveEnrollment>,
 ) -> ApiResult<Json<EnrollmentView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let peer = peer
         .as_ref()
         .map(|p| p.0.0.as_str())
@@ -1494,7 +1518,7 @@ async fn approve_enrollment(
     headers: HeaderMap,
     Json(input): Json<ApproveEnrollment>,
 ) -> ApiResult<Json<EnrollmentView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let peer = peer
         .as_ref()
         .map(|p| p.0.0.as_str())
@@ -1583,7 +1607,7 @@ async fn cancel_enrollment(
     headers: HeaderMap,
     Path(id): Path<EnrollmentId>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     blocking(move || state.service.cancel_enrollment(&actor, id)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1594,7 +1618,7 @@ async fn native_devices(
     headers: HeaderMap,
     Query(query): Query<SecurityPageQuery>,
 ) -> ApiResult<Json<Page<NativeDeviceView>>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(state.service.native_devices_page(
         &actor,
         query.cursor.as_deref(),
@@ -1609,7 +1633,7 @@ async fn revoke_native_device(
     Path(id): Path<NativeCredentialId>,
     Query(query): Query<ExpectedRevision>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     state
         .service
@@ -1621,7 +1645,7 @@ async fn collection_types(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<ModuleDescriptor>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(state.service.collection_type_descriptors(&actor)))
 }
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -1639,7 +1663,7 @@ async fn collection_search(
     headers: HeaderMap,
     Query(query): Query<CollectionSearchQuery>,
 ) -> ApiResult<Json<Page<PresentedCollection>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state.service.collections_page(
@@ -1661,7 +1685,7 @@ async fn collection_detail(
     headers: HeaderMap,
     Path(id): Path<CollectionId>,
 ) -> ApiResult<Json<PresentedCollection>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.presented_collection(&actor, id)).await?,
     ))
@@ -1671,7 +1695,7 @@ async fn client_collections(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<collector_api_types::ClientCollection>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let curation = state.exposure.allows(state.ingress, Surface::Curation);
     let mut values = blocking(move || state.service.listening_collections(&actor)).await?;
     for collection in &mut values {
@@ -1685,7 +1709,7 @@ async fn client_albums(
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<collector_api_types::ClientAlbumPage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.listening_albums(&actor, query)).await?,
     ))
@@ -1697,7 +1721,7 @@ async fn client_music_tracks(
     Path(item): Path<ItemId>,
     Query(query): Query<collector_api_types::TrackPageQuery>,
 ) -> ApiResult<Json<collector_api_types::TrackPage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.library_tracks(&actor, item, query)).await?,
     ))
@@ -1708,7 +1732,7 @@ async fn client_track_summary(
     headers: HeaderMap,
     Path(item): Path<ItemId>,
 ) -> ApiResult<Json<collector_api_types::TrackSummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.library_track_summary(&actor, item)).await?,
     ))
@@ -1719,7 +1743,7 @@ async fn library_summary(
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<collector_api_types::CatalogSummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.library_summary(&actor, query)).await?,
     ))
@@ -1730,7 +1754,7 @@ async fn client_library_summary(
     headers: HeaderMap,
     Query(mut query): Query<BrowseQuery>,
 ) -> ApiResult<Json<collector_api_types::CatalogSummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     query.listening_only = true;
     Ok(Json(
         blocking(move || state.service.library_summary(&actor, query)).await?,
@@ -1747,7 +1771,7 @@ async fn client_album_playback(
     Path(item): Path<ItemId>,
     Query(query): Query<AlbumPlaybackQuery>,
 ) -> ApiResult<Json<collector_api_types::AlbumPlaybackSnapshot>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -1764,20 +1788,47 @@ async fn music_search(
     Path(collection): Path<CollectionId>,
     Query(query): Query<MusicSearchQuery>,
 ) -> ApiResult<Json<Page<MusicSearchHit>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.music_search(&actor, collection, query)).await?,
     ))
 }
-#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query), ("revision"=Option<String>,Query), ("max_bytes"=Option<u32>,Query)), responses((status = 200, body = collector_app::LibraryPage), (status = 401)))]
+#[derive(Deserialize)]
+struct LibraryRefreshQuery {
+    row_ids: Option<String>,
+    membership_revision: Option<String>,
+}
+
+#[utoipa::path(get, path = "/api/v1/library", params(("sort" = inline(Option<BrowseSort>), Query), ("filter" = inline(Option<BrowseFilter>), Query), ("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query), ("revision"=Option<String>,Query), ("max_bytes"=Option<u32>,Query), ("row_ids" = Option<String>, Query, description="Comma-separated IDs for refreshing up to 50 visible rows"), ("membership_revision" = Option<String>, Query, description="Required when refreshing visible rows")), responses((status = 200, body = collector_app::LibraryPage), (status = 401), (status = 409)))]
 async fn library_entries(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
+    Query(refresh): Query<LibraryRefreshQuery>,
 ) -> ApiResult<Json<collector_app::LibraryPage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
-        blocking(move || state.service.library_entries(&actor, query)).await?,
+        blocking(
+            move || match (refresh.row_ids, refresh.membership_revision) {
+                (None, None) => state.service.library_entries(&actor, query),
+                (Some(ids), Some(revision)) if ids.len() <= 50 * 37 => {
+                    let ids = ids
+                        .split(',')
+                        .map(|id| {
+                            id.parse()
+                                .map_err(|_| Error::Invalid("invalid Library row ID".into()))
+                        })
+                        .collect::<collector_core::Result<Vec<ItemId>>>()?;
+                    state
+                        .service
+                        .refresh_library_rows(&actor, query, ids, &revision)
+                }
+                _ => Err(Error::Invalid(
+                    "row IDs and membership revision are required together".into(),
+                )),
+            },
+        )
+        .await?,
     ))
 }
 
@@ -1787,7 +1838,7 @@ async fn browse(
     headers: HeaderMap,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<Page<PresentedItem>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.browse_presented(&actor, query)).await?,
     ))
@@ -1798,7 +1849,7 @@ async fn item(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.item_presented(&actor, id)).await?,
     ))
@@ -1816,7 +1867,7 @@ async fn album_group_proposals(
     Path(id): Path<ItemId>,
     Query(query): Query<IntakePageQuery>,
 ) -> ApiResult<Json<Page<PresentedItem>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|v| v.parse())
@@ -1838,7 +1889,7 @@ async fn preview_album_group(
     headers: HeaderMap,
     Json(command): Json<collector_app::PreviewAlbumGroup>,
 ) -> ApiResult<Json<collector_app::AlbumGroupPreview>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.preview_album_group(&actor, command)).await?,
     ))
@@ -1849,7 +1900,7 @@ async fn confirm_album_group(
     headers: HeaderMap,
     Json(command): Json<collector_app::ConfirmAlbumGroup>,
 ) -> ApiResult<Json<collector_app::AlbumGroupResult>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.confirm_album_group(&actor, command, &context)).await?,
@@ -1861,7 +1912,7 @@ async fn album_group_undo(
     headers: HeaderMap,
     Path(id): Path<TransactionId>,
 ) -> ApiResult<Json<collector_app::AlbumGroupUndo>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.album_group_undo(&actor, id)).await?,
     ))
@@ -1872,7 +1923,7 @@ async fn undo_album_group(
     headers: HeaderMap,
     Path(id): Path<TransactionId>,
 ) -> ApiResult<Json<collector_app::AlbumGroupResult>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.undo_album_group(&actor, id, &context)).await?,
@@ -1885,7 +1936,7 @@ async fn metadata_care(
     headers: HeaderMap,
     Query(query): Query<MetadataCareQuery>,
 ) -> ApiResult<Json<Page<collector_app::MetadataCareEntry>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.metadata_care(&actor, query)).await?,
     ))
@@ -1898,7 +1949,7 @@ async fn digital_album_matches(
     Path(id): Path<ItemId>,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<collector_app::DigitalMatchingStatus>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state.service.digital_album_matches(
@@ -1917,7 +1968,7 @@ async fn find_digital_albums(
     Path(id): Path<ItemId>,
     Json(command): Json<collector_app::FindDigitalAlbums>,
 ) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -1934,7 +1985,7 @@ async fn metadata_resolutions(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<Vec<MetadataResolutionView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.metadata_resolutions(&actor, id)).await?,
     ))
@@ -1947,7 +1998,7 @@ async fn resolve_metadata(
     Path(id): Path<ItemId>,
     Json(command): Json<ResolveMetadataCommand>,
 ) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -1964,7 +2015,7 @@ async fn metadata_summary(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<collector_app::MetadataReadRevision>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.metadata_read_revision(&actor, id)).await?,
     ))
@@ -1976,7 +2027,7 @@ async fn metadata_review(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<MetadataReviewView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.metadata_review(&actor, id)).await?,
     ))
@@ -1989,7 +2040,7 @@ async fn update_metadata_authority(
     Path(id): Path<ItemId>,
     Json(command): Json<UpdateMetadataAuthorityCommand>,
 ) -> ApiResult<Json<MetadataReviewView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2009,7 +2060,7 @@ async fn acquire_metadata(
     Path(id): Path<ItemId>,
     Json(command): Json<AcquireMetadataCommand>,
 ) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -2027,7 +2078,7 @@ async fn complete_metadata_acquisition(
     Path(id): Path<ItemId>,
     Json(command): Json<collector_app::CompleteMetadataAcquisitionCommand>,
 ) -> ApiResult<Json<collector_app::CompletedMetadataAcquisition>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2046,7 +2097,7 @@ async fn apply_metadata_snapshot(
     Path(id): Path<ItemId>,
     Json(command): Json<ApplyMetadataSnapshotCommand>,
 ) -> ApiResult<Json<MetadataReviewView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2070,7 +2121,7 @@ async fn metadata_artwork_options(
     Path(id): Path<ItemId>,
     Query(query): Query<MetadataArtworkQuery>,
 ) -> ApiResult<Json<Vec<MetadataArtworkOption>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -2087,7 +2138,7 @@ async fn metadata_artwork_preview(
     headers: HeaderMap,
     Path((id, snapshot_id, image_id)): Path<(ItemId, SnapshotId, String)>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     struct CancelOnDrop(Arc<std::sync::atomic::AtomicBool>);
     impl Drop for CancelOnDrop {
         fn drop(&mut self) {
@@ -2131,7 +2182,7 @@ async fn publish_metadata_artwork(
     Path(id): Path<ItemId>,
     Json(command): Json<PublishProviderArtworkCommand>,
 ) -> ApiResult<Json<PresentedAsset>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2207,7 +2258,7 @@ async fn save_item(
     Path(id): Path<ItemId>,
     Json(input): Json<SaveItemEnvelope>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2261,7 +2312,7 @@ async fn remove_item(
     Path(id): Path<ItemId>,
     Json(input): Json<ItemLifecycleCommand>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2280,7 +2331,7 @@ async fn restore_item(
     Path(id): Path<ItemId>,
     Json(input): Json<ItemLifecycleCommand>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2334,7 +2385,7 @@ async fn create_specimen(
     Path(id): Path<ItemId>,
     Json(input): Json<SpecimenChange>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2358,7 +2409,7 @@ async fn update_specimen(
     Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
     Json(input): Json<SpecimenChange>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2383,7 +2434,7 @@ async fn create_component(
     Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
     Json(input): Json<ComponentChange>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2408,7 +2459,7 @@ async fn update_component(
     Path((id, specimen_id, component_id)): Path<(ItemId, SpecimenId, ComponentId)>,
     Json(input): Json<ComponentChange>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2432,7 +2483,7 @@ async fn remove_component(
     Path((id, specimen_id, component_id)): Path<(ItemId, SpecimenId, ComponentId)>,
     Query(query): Query<ExpectedRevision>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2457,7 +2508,7 @@ async fn start_loan(
     Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
     Json(input): Json<StartLoan>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2482,7 +2533,7 @@ async fn return_loan(
     Path((id, specimen_id, loan_id)): Path<(ItemId, SpecimenId, LoanId)>,
     Json(input): Json<ReturnLoan>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2506,7 +2557,7 @@ async fn dispose_specimen(
     Path((id, specimen_id)): Path<(ItemId, SpecimenId)>,
     Json(input): Json<DisposeSpecimen>,
 ) -> ApiResult<Json<PresentedItem>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -2529,7 +2580,7 @@ async fn evidence(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<Vec<PresentedEvidence>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.evidence(&actor, id)).await?,
     ))
@@ -2540,7 +2591,7 @@ async fn activity(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.activity(&actor, id)).await?,
     ))
@@ -2552,7 +2603,7 @@ async fn save_activity(
     Path(id): Path<ItemId>,
     Json(value): Json<serde_json::Value>,
 ) -> ApiResult<StatusCode> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || state.service.save_activity(&actor, id, value, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -2569,7 +2620,7 @@ async fn item_asset(
     Path((id, asset)): Path<(ItemId, AssetId)>,
     Query(query): Query<AssetQuery>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let resource =
         blocking(move || state.service.asset(&actor, id, asset, query.thumbnail)).await?;
     file_response(resource, headers).await
@@ -2581,7 +2632,7 @@ async fn asset_metadata(
     headers: HeaderMap,
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
 ) -> ApiResult<Json<PresentedAsset>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.asset_presented(&actor, collection, asset)).await?,
     ))
@@ -2593,7 +2644,7 @@ async fn asset_original(
     headers: HeaderMap,
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let resource = blocking(move || {
         state
             .service
@@ -2609,7 +2660,7 @@ async fn asset_text_preview(
     headers: HeaderMap,
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
 ) -> ApiResult<Json<collector_app::DocumentTextPreview>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -2631,7 +2682,7 @@ async fn asset_thumbnail(
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
     Query(query): Query<ThumbnailQuery>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let resource = blocking(move || {
         state
             .service
@@ -2699,7 +2750,7 @@ async fn create_asset(
     Query(query): Query<CreateAssetQuery>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<PresentedAsset>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let subject = query.subject()?;
     Ok(Json(
@@ -2735,7 +2786,7 @@ async fn update_asset(
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
     Json(input): Json<UpdateAssetEnvelope>,
 ) -> ApiResult<Json<PresentedAsset>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let current = state.service.asset_presented(&actor, collection, asset)?;
     if current.visibility.is_none() {
@@ -2762,7 +2813,7 @@ async fn tombstone_asset(
     Path((collection, asset)): Path<(CollectionId, AssetId)>,
     Query(query): Query<ExpectedRevision>,
 ) -> ApiResult<Json<PresentedAsset>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let current = state.service.asset_presented(&actor, collection, asset)?;
     if current.visibility.is_none() {
@@ -2783,7 +2834,7 @@ async fn media(
     headers: HeaderMap,
     Path((id, representation, index)): Path<(ItemId, RepresentationId, usize)>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     if !state.direct_media
         && !state
             .service
@@ -2830,7 +2881,7 @@ async fn music_flac_export(
     headers: HeaderMap,
     Path((item, source, position)): Path<(ItemId, RepresentationId, u16)>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     if !state.direct_media
         && !state
             .service
@@ -2897,7 +2948,7 @@ async fn music_track_availability(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<Vec<MusicTrackAvailability>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.music_track_availability(&actor, id)).await?,
     ))
@@ -2909,7 +2960,7 @@ async fn music_album_coverage(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<MusicAlbumCoverage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.music_album_coverage(&actor, id)).await?,
     ))
@@ -2922,7 +2973,7 @@ async fn prepare_music_track(
     Path((item, capture, track)): Path<(ItemId, CaptureId, u16)>,
     Json(command): Json<PrepareMusicTrack>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -2944,7 +2995,7 @@ async fn music_album_preparation_plan(
     Path(item): Path<ItemId>,
     Query(profile): Query<PreparationProfileQuery>,
 ) -> ApiResult<Json<MusicAlbumPreparationPlan>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let profile = collector_core::ConversionProfile::from_opus_bitrate(profile.opus_bitrate_kbps)?;
     Ok(Json(
         blocking(move || {
@@ -2963,7 +3014,7 @@ async fn prepare_music_album(
     Path(item): Path<ItemId>,
     Json(command): Json<PrepareMusicAlbum>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let batch = blocking(move || {
         state
@@ -2980,7 +3031,7 @@ async fn music_preparation_batches(
     headers: HeaderMap,
     Path(item): Path<ItemId>,
 ) -> ApiResult<Json<Vec<MusicPreparationBatchView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.music_preparation_batches(&actor, item)).await?,
     ))
@@ -2992,7 +3043,7 @@ async fn music_preparation_batch(
     headers: HeaderMap,
     Path(batch): Path<JobId>,
 ) -> ApiResult<Json<MusicPreparationBatchView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.music_preparation_batch(&actor, batch)).await?,
     ))
@@ -3004,7 +3055,7 @@ async fn cancel_music_preparation_batch(
     headers: HeaderMap,
     Path(batch): Path<JobId>,
 ) -> ApiResult<Json<MusicPreparationBatchView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3022,7 +3073,7 @@ async fn retry_music_preparation_batch(
     headers: HeaderMap,
     Path(batch): Path<JobId>,
 ) -> ApiResult<Json<MusicPreparationBatchView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3372,7 +3423,7 @@ async fn cover(
     Query(query): Query<CoverQuery>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<Item>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3401,7 +3452,7 @@ async fn discover_ingest(
     headers: HeaderMap,
     Json(command): Json<collector_app::DiscoverIngestCommand>,
 ) -> ApiResult<Json<collector_app::DiscoveredIngestPlan>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.discover_ingest(&actor, command)).await?,
     ))
@@ -3429,7 +3480,7 @@ async fn preparation_care(
     headers: HeaderMap,
     Query(query): Query<PreparationCareQuery>,
 ) -> ApiResult<Json<collector_app::PreparationCarePage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let profile = collector_core::ConversionProfile::from_opus_bitrate(query.opus_bitrate_kbps)?;
     let filter = MetadataCareQuery {
         collection_id: query.collection_id,
@@ -3449,7 +3500,7 @@ async fn preparation_revision(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<String>> {
-    principal(&state, &headers)?;
+    principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.preparation_revision()).await?,
     ))
@@ -3461,7 +3512,7 @@ async fn preview_bulk_library(
     headers: HeaderMap,
     Json(command): Json<collector_app::PreviewBulkLibrary>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3478,7 +3529,7 @@ async fn start_library_preparation(
     headers: HeaderMap,
     Json(command): Json<collector_app::StartLibraryPreparation>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3495,7 +3546,7 @@ async fn bulk_library_page(
     headers: HeaderMap,
     Query(query): Query<IntakePageQuery>,
 ) -> ApiResult<Json<Page<collector_app::BulkLibrarySummary>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|v| v.parse())
@@ -3519,7 +3570,7 @@ async fn bulk_library_detail(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.bulk_library(&actor, id)).await?,
     ))
@@ -3531,7 +3582,7 @@ async fn bulk_library_members(
     Path(id): Path<JobId>,
     Query(query): Query<IntakePageQuery>,
 ) -> ApiResult<Json<Page<collector_app::BulkLibraryMemberView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|v| v.parse())
@@ -3552,7 +3603,7 @@ async fn start_bulk_library(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.start_bulk_library(&actor, id, &context)).await?,
@@ -3564,7 +3615,7 @@ async fn cancel_bulk_library(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3581,7 +3632,7 @@ async fn retry_bulk_library(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::BulkLibrarySummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3605,7 +3656,7 @@ async fn discover_bulk_intake(
     headers: HeaderMap,
     Json(command): Json<collector_app::DiscoverIngestCommand>,
 ) -> ApiResult<Json<collector_app::IntakeDiscovery>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3628,7 +3679,7 @@ async fn intake_discovery_page(
     Path(id): Path<JobId>,
     Query(q): Query<DiscoveryPageQuery>,
 ) -> ApiResult<Json<collector_app::IntakeDiscoveryPage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -3644,7 +3695,7 @@ async fn create_intake(
     headers: HeaderMap,
     Json(command): Json<collector_app::CreateIntake>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.create_intake(&actor, command, &context)).await?,
@@ -3656,7 +3707,7 @@ async fn list_intakes(
     headers: HeaderMap,
     Query(query): Query<IntakePageQuery>,
 ) -> ApiResult<Json<Page<collector_app::IntakeSession>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|v| v.parse())
@@ -3680,7 +3731,7 @@ async fn intake_detail(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.intake(&actor, id)).await?,
     ))
@@ -3692,7 +3743,7 @@ async fn append_intake(
     Path(id): Path<JobId>,
     Json(command): Json<collector_app::AppendIntake>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3720,7 +3771,7 @@ async fn intake_members(
     Path(id): Path<JobId>,
     Query(query): Query<IntakePageQuery>,
 ) -> ApiResult<Json<Page<collector_app::IntakeMemberView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|v| v.parse())
@@ -3742,7 +3793,7 @@ async fn repair_intake_destination(
     Path((id, position)): Path<(JobId, u32)>,
     Json(command): Json<collector_app::RepairIntakeDestination>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3760,7 +3811,7 @@ async fn start_intake(
     Path(id): Path<JobId>,
     Json(command): Json<collector_app::StartIntake>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.start_intake(&actor, id, command, &context)).await?,
@@ -3772,7 +3823,7 @@ async fn cancel_intake(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_app::IntakeSession>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.cancel_intake(&actor, id, &context)).await?,
@@ -3785,7 +3836,7 @@ async fn plan_ingest(
     headers: HeaderMap,
     Json(mut command): Json<PlanIngestCommand>,
 ) -> ApiResult<Json<IngestPlan>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -3815,7 +3866,7 @@ async fn start_ingest(
     headers: HeaderMap,
     Json(command): Json<StartIngestCommand>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let accepted = blocking(move || {
         let mut inbox_paths = Vec::new();
@@ -3866,7 +3917,7 @@ async fn list_ingests(
     headers: HeaderMap,
     Query(query): Query<IngestPageQuery>,
 ) -> ApiResult<Json<Page<IngestSummary>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let cursor = query
         .cursor
         .map(|value| value.parse())
@@ -3891,7 +3942,7 @@ async fn ingest_detail(
     headers: HeaderMap,
     Path(id): Path<ImportId>,
 ) -> ApiResult<Json<IngestDetail>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.ingest_detail(&actor, id)).await?,
     ))
@@ -3904,7 +3955,7 @@ async fn cleanup_ingest_inbox(
     Path(id): Path<ImportId>,
     Json(command): Json<collector_app::CleanupInboxCommand>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job = blocking(move || {
         state
@@ -3933,7 +3984,7 @@ async fn discard_ingest(
     Path(id): Path<ImportId>,
     Json(command): Json<DiscardIngestCommand>,
 ) -> ApiResult<Json<IngestDiscardResult>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3952,7 +4003,7 @@ async fn cancel_ingest(
     Path(id): Path<ImportId>,
     Json(command): Json<DiscardIngestCommand>,
 ) -> ApiResult<Json<IngestDetail>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -3971,7 +4022,7 @@ async fn retry_ingest(
     Path(id): Path<ImportId>,
     Json(command): Json<RetryIngestCommand>,
 ) -> ApiResult<Json<IngestDetail>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.retry_ingest(&actor, id, command, &context)).await?,
@@ -3985,7 +4036,7 @@ async fn correct_ingest_association(
     Path(id): Path<ImportId>,
     Json(command): Json<CorrectIngestAssociationCommand>,
 ) -> ApiResult<Json<IngestDetail>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -4011,7 +4062,7 @@ async fn create_provisional_import(
     headers: HeaderMap,
     Json(input): Json<NewProvisionalImport>,
 ) -> ApiResult<Json<ImportView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -4041,7 +4092,7 @@ async fn provisional_import(
     headers: HeaderMap,
     Path(id): Path<ImportId>,
 ) -> ApiResult<Json<ImportView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.provisional_import(&actor, id)).await?,
     ))
@@ -4060,7 +4111,7 @@ async fn processing_plan(
     Path(id): Path<CaptureId>,
     Json(input): Json<StartProcessingCommand>,
 ) -> ApiResult<Json<collector_app::ScanPlan>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.processing_plan(&actor, id, input)).await?,
     ))
@@ -4073,7 +4124,7 @@ async fn start_processing_operation(
     Path(id): Path<CaptureId>,
     Json(input): Json<StartProcessingCommand>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -4095,7 +4146,7 @@ async fn acquire_accuraterip_snapshot(
     Path(id): Path<CaptureId>,
     Json(input): Json<AcquireAccurateRipCommand>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -4124,7 +4175,7 @@ async fn capture_processing_summaries(
     Path(id): Path<CaptureId>,
     Query(query): Query<ProcessingPageQuery>,
 ) -> ApiResult<Json<Page<ProcessingSummary>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|value| value.parse())
@@ -4151,7 +4202,7 @@ async fn analyze_provisional_import(
     Path(id): Path<ImportId>,
     Json(input): Json<AnalyzeProvisionalImport>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -4173,7 +4224,7 @@ async fn review_provisional_import(
     Path(id): Path<ImportId>,
     Json(command): Json<ReviewImportCommand>,
 ) -> ApiResult<Json<ImportView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -4191,7 +4242,7 @@ async fn publish_provisional_import(
     headers: HeaderMap,
     Path(id): Path<ImportId>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -4214,7 +4265,7 @@ async fn stage_provisional_import_chunk(
     Query(query): Query<Offset>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<ImportView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -4425,7 +4476,7 @@ async fn collection_inboxes(
     Path(id): Path<CollectionId>,
     Query(query): Query<InboxListQuery>,
 ) -> ApiResult<Json<Vec<InboxSourceView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     state.service.authorize(&actor, id, Action::Curate)?;
     let inboxes = state.inboxes.clone();
     Ok(Json(
@@ -4455,7 +4506,7 @@ async fn inbox_packages(
     Path((id, label)): Path<(CollectionId, String)>,
     Query(query): Query<InboxPackagesQuery>,
 ) -> ApiResult<Json<InboxPackagePage>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     state.service.authorize(&actor, id, Action::Curate)?;
     let root = state.inboxes.get(&label).ok_or(Error::NotFound)?.clone();
     Ok(Json(
@@ -4482,7 +4533,7 @@ async fn stage_inbox_import(
     Path((collection, label)): Path<(CollectionId, String)>,
     Json(input): Json<StageInboxImport>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     state
         .service
@@ -4594,7 +4645,7 @@ async fn create_upload(
     headers: HeaderMap,
     Json(input): Json<NewUpload>,
 ) -> ApiResult<Json<collector_store::Upload>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let user_id = actor.user_id;
     Ok(Json(compatibility_upload(
@@ -4631,7 +4682,7 @@ async fn upload(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<collector_store::Upload>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let user_id = actor.user_id;
     Ok(Json(
         blocking(
@@ -4656,7 +4707,7 @@ async fn chunk(
     Query(query): Query<Offset>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<collector_store::Upload>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let user_id = actor.user_id;
     Ok(Json(
         blocking(move || {
@@ -4685,7 +4736,7 @@ async fn cancel_upload(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<StatusCode> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || {
         match state
@@ -4706,7 +4757,7 @@ async fn commit_upload(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let import_id = ImportId(id.0);
     let mut import = match state.service.provisional_import(&actor, import_id) {
@@ -4754,7 +4805,7 @@ async fn verify(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -4780,7 +4831,7 @@ async fn jobs(
     headers: HeaderMap,
     Query(query): Query<JobQuery>,
 ) -> ApiResult<Json<Page<JobView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.job_page(&actor, query.cursor, query.limit)).await?,
     ))
@@ -4792,7 +4843,7 @@ async fn job(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<JobView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(blocking(move || state.service.job(&actor, id)).await?))
 }
 
@@ -4802,7 +4853,7 @@ async fn cancel_job(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Json<JobView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking({
         let state = state.clone();
@@ -4819,7 +4870,7 @@ async fn retry_job(
     headers: HeaderMap,
     Path(id): Path<JobId>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking({
         let state = state.clone();
@@ -4845,7 +4896,7 @@ async fn settings(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<ServerSettingsView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let default_user_id = state.service.default_user_id(&actor)?;
     let reminder = if let Some(settings) = &state.backup_reminder {
         let settings = settings.clone();
@@ -4872,7 +4923,7 @@ async fn catalog_sources(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<CatalogSourceView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     state.service.require_administrator(&actor)?;
     Ok(Json(state.catalog_sources.as_ref().clone()))
 }
@@ -4890,7 +4941,7 @@ async fn curation_catalog_snapshots(
     Path(id): Path<CollectionId>,
     Query(query): Query<SnapshotPageQuery>,
 ) -> ApiResult<Json<Page<CatalogSnapshotStatus>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|value| value.parse())
@@ -4913,7 +4964,7 @@ async fn catalog_snapshots(
     Path(id): Path<CollectionId>,
     Query(query): Query<SnapshotPageQuery>,
 ) -> ApiResult<Json<Page<CatalogSnapshotStatus>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let after = query
         .cursor
         .map(|value| value.parse())
@@ -4942,7 +4993,7 @@ async fn import_catalog_snapshot(
     Path(id): Path<CollectionId>,
     Json(input): Json<CatalogImportRequest>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state.service.import_catalog_snapshot(
@@ -4971,7 +5022,7 @@ async fn upload_catalog_snapshot(
     Query(metadata): Query<collector_app::DatUploadMetadata>,
     request: Request,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     state.service.validate_dat_upload(&actor, id, &metadata)?;
     let _slot = state
@@ -5004,7 +5055,7 @@ async fn identify_game_entry(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<(StatusCode, Json<Vec<JobId>>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok((
         StatusCode::ACCEPTED,
@@ -5027,7 +5078,7 @@ async fn inspect_catalog_upload(
     Path(id): Path<CollectionId>,
     request: Request,
 ) -> ApiResult<Json<collector_app::CatalogUploadPreview>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let service = state.service.clone();
     let authorized = actor.clone();
     blocking(move || service.authorize_game_catalog_upload(&authorized, id)).await?;
@@ -5092,7 +5143,7 @@ async fn accept_catalog_upload(
     Path(id): Path<CollectionId>,
     Json(upload): Json<collector_app::UploadedDatCatalog>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job = blocking(move || {
         state
@@ -5116,7 +5167,7 @@ async fn activate_catalog_snapshot(
     if input.snapshot_id != snapshot_id {
         return Err(Error::Invalid("snapshot path and body identities differ".into()).into());
     }
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5140,7 +5191,7 @@ async fn create_user(
     headers: HeaderMap,
     Json(input): Json<NewUser>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     let id = blocking(move || {
         state.service.create_user(
@@ -5168,7 +5219,7 @@ async fn list_users(
     headers: HeaderMap,
     Query(query): Query<AccountsQuery>,
 ) -> ApiResult<Json<Page<AccountView>>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(state.service.accounts(
         &actor,
         query.search.as_deref().unwrap_or(""),
@@ -5192,7 +5243,7 @@ async fn update_user(
     Path(id): Path<UserId>,
     Json(input): Json<AccountChange>,
 ) -> ApiResult<Json<AccountView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5218,7 +5269,7 @@ async fn reassign_default_user(
     headers: HeaderMap,
     Path(id): Path<UserId>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || state.service.reassign_default(&actor, id, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -5229,7 +5280,7 @@ async fn create_collection(
     headers: HeaderMap,
     Json(input): Json<CreateCollectionCommand>,
 ) -> ApiResult<Json<Collection>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.create_collection(&actor, input, &context)).await?,
@@ -5247,7 +5298,7 @@ async fn grant(
     headers: HeaderMap,
     Json(input): Json<Grant>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || {
         state.service.grant(
@@ -5276,7 +5327,7 @@ async fn collection_grants(
     Path(id): Path<CollectionId>,
     Query(query): Query<GrantsQuery>,
 ) -> ApiResult<Json<Page<GrantView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(state.service.grants(
         &actor,
         id,
@@ -5298,7 +5349,7 @@ async fn get_collection_grant(
     headers: HeaderMap,
     Path((id, username)): Path<(CollectionId, String)>,
 ) -> ApiResult<Json<Option<GrantView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         state.service.grant_for_username(&actor, id, &username)?,
     ))
@@ -5311,7 +5362,7 @@ async fn set_collection_grant(
     Path((id, username)): Path<(CollectionId, String)>,
     Json(input): Json<GrantChange>,
 ) -> ApiResult<Json<GrantView>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     let grant = blocking(move || {
         state.service.set_grant(
@@ -5335,7 +5386,7 @@ async fn remove_collection_grant(
     Path((id, username)): Path<(CollectionId, String)>,
     Query(query): Query<ExpectedRevision>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || {
         state.service.set_grant(
@@ -5352,7 +5403,7 @@ async fn remove_collection_grant(
 }
 #[utoipa::path(post, path = "/api/v1/admin/reindex", params(("Idempotency-Key" = String, Header)), responses((status = 204), (status = 403), (status = 409)))]
 async fn reindex(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || state.service.reindex(&actor, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -5365,7 +5416,7 @@ async fn inboxes(
 ) -> ApiResult<Json<Vec<String>>> {
     state
         .service
-        .require_administrator(&principal(&state, &headers)?)?;
+        .require_administrator(&principal(&state, &headers).await?)?;
     Ok(Json(state.inboxes.keys().cloned().collect()))
 }
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -5381,7 +5432,7 @@ async fn import_inbox(
     Path(name): Path<String>,
     Json(input): Json<InboxImport>,
 ) -> ApiResult<Response> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     state
         .service
@@ -5455,7 +5506,7 @@ async fn work_history(
     headers: HeaderMap,
     Query(query): Query<WorkQuery>,
 ) -> ApiResult<Json<Page<WorkEntry>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.work_history(&actor, query)).await?,
     ))
@@ -5466,7 +5517,7 @@ async fn work_history_entry(
     headers: HeaderMap,
     Json(target): Json<WorkTarget>,
 ) -> ApiResult<Json<WorkEntry>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.work_history_entry(&actor, &target)).await?,
     ))
@@ -5477,7 +5528,7 @@ async fn change_work_history(
     headers: HeaderMap,
     Json(command): Json<WorkHistoryCommand>,
 ) -> ApiResult<StatusCode> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     blocking(move || state.service.change_work_history(&actor, command, &context)).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -5496,7 +5547,7 @@ async fn work_jobs(
     headers: HeaderMap,
     Json(query): Json<WorkJobsQuery>,
 ) -> ApiResult<Json<Page<WorkJobView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.work_jobs(&actor, query)).await?,
     ))
@@ -5509,7 +5560,7 @@ async fn collection_lists(
     Path(collection): Path<CollectionId>,
     Query(query): Query<collector_app::CollectionListsQuery>,
 ) -> ApiResult<Json<Page<collector_app::CollectionListSummary>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.collection_lists(&actor, collection, query)).await?,
     ))
@@ -5521,7 +5572,7 @@ async fn collection_list_view(
     Path((collection, list)): Path<(CollectionId, CollectionListId)>,
     Query(query): Query<collector_app::ListEntriesQuery>,
 ) -> ApiResult<Json<collector_app::CollectionListView>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -5538,7 +5589,7 @@ async fn create_collection_list(
     Path(collection): Path<CollectionId>,
     Json(command): Json<collector_app::CreateCollectionList>,
 ) -> ApiResult<Json<collector_app::CollectionListSummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5556,7 +5607,7 @@ async fn update_collection_list(
     Path((collection, list)): Path<(CollectionId, CollectionListId)>,
     Json(command): Json<collector_app::UpdateCollectionList>,
 ) -> ApiResult<Json<collector_app::CollectionListSummary>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5575,7 +5626,7 @@ async fn update_digital_purchase(
     Path((item, capture)): Path<(ItemId, CaptureId)>,
     Json(command): Json<collector_app::UpdateDigitalPurchase>,
 ) -> ApiResult<Json<collector_app::PresentedCapture>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5608,7 +5659,7 @@ async fn audio_connection_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<collector_app::AudioConnectionSettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || {
             state
@@ -5624,7 +5675,7 @@ async fn update_audio_connection_settings(
     headers: HeaderMap,
     Json(command): Json<collector_app::UpdateAudioConnectionSettings>,
 ) -> ApiResult<Json<collector_app::AudioConnectionSettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5644,7 +5695,7 @@ async fn worker_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<collector_app::WorkerSettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.worker_settings(&actor)).await?,
     ))
@@ -5655,7 +5706,7 @@ async fn update_worker_settings(
     headers: HeaderMap,
     Json(command): Json<collector_app::UpdateWorkerSettings>,
 ) -> ApiResult<Json<collector_app::WorkerSettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5672,7 +5723,7 @@ async fn cd_library_settings(
     headers: HeaderMap,
     Path(id): Path<CollectionId>,
 ) -> ApiResult<Json<collector_app::CdLibrarySettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.cd_library_settings(&actor, id)).await?,
     ))
@@ -5684,7 +5735,7 @@ async fn update_cd_library_settings(
     Path(id): Path<CollectionId>,
     Json(command): Json<collector_app::UpdateCdLibrarySettings>,
 ) -> ApiResult<Json<collector_app::CdLibrarySettings>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || {
@@ -5702,7 +5753,7 @@ async fn check_accuraterip(
     Path(id): Path<ItemId>,
     Json(command): Json<collector_app::CheckAccurateRip>,
 ) -> ApiResult<(StatusCode, Json<JobAccepted>)> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     let job_id = blocking(move || {
         state
@@ -5719,7 +5770,7 @@ async fn accuraterip_checks(
     headers: HeaderMap,
     Path(id): Path<ItemId>,
 ) -> ApiResult<Json<Vec<collector_app::AccurateRipCheckView>>> {
-    let actor = principal(&state, &headers)?;
+    let actor = principal(&state, &headers).await?;
     Ok(Json(
         blocking(move || state.service.accuraterip_checks(&actor, id)).await?,
     ))

@@ -208,6 +208,9 @@ fn state() -> (tempfile::TempDir, AppState) {
     let root = tempfile::tempdir().unwrap();
     let store =
         Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    (root, state_for_store(store))
+}
+fn state_for_store(store: Arc<Store>) -> AppState {
     let id = store.server_id().unwrap();
     let mut state = AppState::new(
         store,
@@ -222,7 +225,7 @@ fn state() -> (tempfile::TempDir, AppState) {
     // is covered by the distinct production listener tests.
     state.direct_media = true;
     state.allowed_origins = Arc::new(vec!["https://collector.example".into()]);
-    (root, state)
+    state
 }
 #[tokio::test]
 async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
@@ -576,9 +579,46 @@ async fn authenticated_descriptors_drive_third_module_create_edit_browse_and_rei
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 }
 
+struct CaptureProjectionPause {
+    reached: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl collector_store::PublicationFaultInjector for CaptureProjectionPause {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == collector_store::PublicationFaultPoint::ProjectionWriting
+            && let Some(reached) = self.reached.lock().unwrap().take()
+        {
+            reached
+                .send(())
+                .map_err(|_| Error::Unavailable("test request dropped".into()))?;
+            self.resume
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .map_err(|_| {
+                    Error::Unavailable("test request did not resume publication".into())
+                })?;
+        }
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn guided_ingest_routes_resolve_inbox_intent_replay_and_private_history() {
-    let (root, mut state) = state();
+    let root = tempfile::tempdir().unwrap();
+    let (reached, projection_writing) = tokio::sync::oneshot::channel();
+    let (resume, resume_projection) = std::sync::mpsc::channel();
+    let store = Store::open_with_publication_fault(
+        root.path().join("archive"),
+        root.path().join("state"),
+        Arc::new(CaptureProjectionPause {
+            reached: std::sync::Mutex::new(Some(reached)),
+            resume: std::sync::Mutex::new(resume_projection),
+        }),
+    )
+    .unwrap();
+    let mut state = state_for_store(Arc::new(store));
     state.exposure.public_curation = true;
     let owner = state
         .store
@@ -722,7 +762,61 @@ async fn guided_ingest_routes_resolve_inbox_intent_replay_and_private_history() 
 
     assert!(service.run_next_job("guided-http-staging").unwrap());
     assert!(service.run_next_job("guided-http-analysis").unwrap());
-    assert!(service.run_next_job("guided-http-publication").unwrap());
+    use collector_app::JobLane;
+    assert!(
+        !service
+            .run_next_job_in_lane("guided-http", JobLane::Publication)
+            .unwrap()
+    );
+    assert!(
+        service
+            .run_next_job_in_lane("guided-http", JobLane::Background)
+            .unwrap()
+    );
+    let publish = tokio::task::spawn_blocking(move || {
+        service.run_next_job_in_lane("guided-http", JobLane::Publication)
+    });
+    let deadline = std::time::Duration::from_secs(3);
+    tokio::time::timeout(deadline, projection_writing)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let library_request = |filter| {
+        Request::builder()
+            .uri(format!(
+                "/api/v1/library?collection_id={}&filter={filter}",
+                collection.id
+            ))
+            .header("authorization", format!("Bearer {owner_token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let read_page = |request: Request<Body>| async {
+        let response = tokio::time::timeout(deadline, app.clone().oneshot(request))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    };
+    let before = read_page(library_request("all")).await;
+    assert_eq!(before["items"].as_array().unwrap().len(), 1);
+    assert!(
+        read_page(library_request("files_attached")).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    resume.send(()).unwrap();
+    assert!(publish.await.unwrap().unwrap());
+    let after = read_page(library_request("files_attached")).await;
+    assert_eq!(after["items"][0]["id"], before["items"][0]["id"]);
+
     let response = app
         .clone()
         .oneshot(

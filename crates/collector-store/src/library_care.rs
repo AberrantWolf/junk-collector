@@ -38,8 +38,7 @@ const PREPARATION_ROWS: &str = "FROM items i
 impl LibraryCarePort for Store {
     fn metadata_item_scope(&self, item: ItemId) -> Result<CollectionId> {
         let raw: Option<String> = self
-            .db
-            .read_lock()?
+            .read_db()?
             .query_row(
                 "SELECT collection_id FROM items WHERE id=?",
                 [item.to_string()],
@@ -50,10 +49,10 @@ impl LibraryCarePort for Store {
         raw.ok_or(Error::NotFound)?.parse().map_err(storage)
     }
     fn metadata_read_clock(&self) -> Result<String> {
-        self.db.read_lock()?.query_row("SELECT a.token||b.token FROM main.metadata_read_clock a,private.metadata_read_clock b",[],|r|r.get(0)).map_err(storage)
+        self.read_db()?.query_row("SELECT a.token||b.token FROM main.metadata_read_clock a,private.metadata_read_clock b",[],|r|r.get(0)).map_err(storage)
     }
     fn library_item_scope(&self, item: ItemId) -> Result<CollectionId> {
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         let raw: String = db
             .query_row(
                 "SELECT collection_id FROM items WHERE id=? AND deleted=0",
@@ -72,7 +71,7 @@ impl LibraryCarePort for Store {
         language: &str,
         role: Role,
     ) -> Result<Option<(String, u64)>> {
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         db.query_row("SELECT t.token,json_array_length(t.record) FROM library_track_entries t JOIN library_entry_versions v ON v.item_id=t.item_id AND v.token=t.token WHERE t.item_id=? AND t.namespace=? AND t.language=? AND t.role=?",params![item.to_string(),namespace,language,role as u8], |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)
     }
     fn library_track_cache(
@@ -82,7 +81,7 @@ impl LibraryCarePort for Store {
         language: &str,
         role: Role,
     ) -> Result<Option<(String, Vec<collector_app::MusicTrackAvailability>)>> {
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         let row: Option<(String,String)> = db.query_row("SELECT t.token,t.record FROM library_track_entries t JOIN library_entry_versions v ON v.item_id=t.item_id AND v.token=t.token WHERE t.item_id=? AND t.namespace=? AND t.language=? AND t.role=?", params![item.to_string(),namespace,language,role as u8], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
         drop(db);
         row.map(|(token, raw)| Ok((token, serde_json::from_str(&raw).map_err(storage)?)))
@@ -108,7 +107,20 @@ impl LibraryCarePort for Store {
         Ok(())
     }
     fn library_revision(&self) -> Result<String> {
-        crate::library::revision(&*self.db.read_lock()?)
+        crate::library::revision(&*self.read_db()?)
+    }
+    fn library_read_revisions(&self, filter: BrowseFilter) -> Result<(String, String)> {
+        let db = self.read_db()?;
+        let tx = db.unchecked_transaction().map_err(storage)?;
+        let mut catalog = crate::library::revision(&tx)?;
+        let membership = crate::library::cursor_revision(&tx, filter)?;
+        if matches!(
+            filter,
+            BrowseFilter::NeedsAttention | BrowseFilter::AlbumPlaybackNeedsAttention
+        ) {
+            catalog.push_str(&membership);
+        }
+        Ok((catalog, membership))
     }
     fn library_count(
         &self,
@@ -117,7 +129,9 @@ impl LibraryCarePort for Store {
         namespace: &str,
         language: &str,
     ) -> Result<u64> {
-        crate::browse::count(&*self.db.read_lock()?, user, query, namespace, language)
+        let db = self.read_db()?;
+        let tx = db.unchecked_transaction().map_err(storage)?;
+        crate::browse::count(&tx, user, query, namespace, language)
     }
 
     fn next_library_entry_build(
@@ -144,8 +158,14 @@ impl LibraryCarePort for Store {
         query: BrowseQuery,
         namespace: &str,
         language: &str,
+        ids: Option<&[ItemId]>,
     ) -> Result<Page<collector_app::LibraryEntrySource>> {
-        crate::library::sources(&*self.db.read_lock()?, user, query, namespace, language)
+        let db = self.read_db()?;
+        let tx = db.unchecked_transaction().map_err(storage)?;
+        let page = browse::rows(&tx, user, query, Some((namespace, language)), ids)?;
+        drop(tx);
+        drop(db);
+        crate::library::sources(page)
     }
     fn cache_library_entry(
         &self,
@@ -170,7 +190,7 @@ impl LibraryCarePort for Store {
         item: ItemId,
     ) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
-            let db = lock(&self.db)?;
+            let db = self.read_db()?;
             let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='digital_album_matching' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 5").map_err(storage)?;
             stmt.query_map(params![user.to_string(), item.to_string()], |r| {
                 r.get::<_, String>(0)
@@ -185,7 +205,7 @@ impl LibraryCarePort for Store {
     }
     fn cd_check_jobs(&self, user: UserId, item: ItemId) -> Result<Vec<collector_app::JobRecord>> {
         let ids = {
-            let db = lock(&self.db)?;
+            let db = self.read_db()?;
             let mut stmt=db.prepare("SELECT id FROM private.jobs WHERE user_id=? AND item_id=? AND kind='accuraterip_check' ORDER BY CASE WHEN state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,rowid DESC LIMIT 5").map_err(storage)?;
             stmt.query_map(params![user.to_string(), item.to_string()], |r| {
                 r.get::<_, String>(0)
@@ -199,7 +219,7 @@ impl LibraryCarePort for Store {
             .collect()
     }
     fn cd_settings(&self, collection: CollectionId) -> Result<collector_app::CdLibrarySettings> {
-        crate::library_settings::read_cd_settings(&*lock(&self.db)?, collection)
+        crate::library_settings::read_cd_settings(&*self.read_db()?, collection)
     }
     fn save_cd_settings(
         &self,
@@ -214,7 +234,7 @@ impl LibraryCarePort for Store {
         item: ItemId,
     ) -> Result<Vec<collector_app::MetadataResolutionRecord>> {
         let mut rows = {
-            let db = lock(&self.db)?;
+            let db = self.read_db()?;
             // Keep active work in the bounded window; present that window in admission order.
             // Project only the lookup, never deserialize a full frozen source inventory on polling.
             let mut stmt=db.prepare("SELECT j.id,j.rowid,json_extract(p.frozen_input,'$.input.acquisition.request.provider'),json_extract(p.frozen_input,'$.input.acquisition.request.query') FROM private.jobs j JOIN private.processing_jobs p ON p.job_id=j.id WHERE j.user_id=? AND j.item_id=? AND j.kind='metadata_resolution' ORDER BY CASE WHEN j.state IN ('queued','running','cancel_requested') THEN 0 ELSE 1 END,j.rowid DESC LIMIT 25").map_err(storage)?;
@@ -299,7 +319,7 @@ impl LibraryCarePort for Store {
             Some(collector_app::MetadataReviewReason::LookupFailed) => failure,
             None => "1",
         };
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let sql = format!(
             "SELECT i.record,COALESCE(d.title_key,h.title_key) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
         );
@@ -409,7 +429,7 @@ impl LibraryCarePort for Store {
             Some(collector_app::MetadataReviewReason::LookupFailed) => failure,
             None => "1",
         };
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         let sql = format!(
             "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),COALESCE(d.title_key,h.title_key),g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
         );
@@ -494,7 +514,7 @@ impl LibraryCarePort for Store {
         if !(1..=200).contains(&page_limit) {
             return Err(Error::Invalid("Use a 1–200 proposal page.".into()));
         }
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt=db.prepare("SELECT DISTINCT i.id,i.record FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items i ON i.id=peer.item_id JOIN private.grants g ON g.user_id=?1 AND g.collection_id=i.collection_id AND g.role>=1 WHERE own.item_id=?2 AND i.deleted=0 AND (?3 IS NULL OR i.id>?3) ORDER BY i.id LIMIT ?4").map_err(storage)?;
         let mut items = stmt
             .query_map(
@@ -541,7 +561,7 @@ impl LibraryCarePort for Store {
             .position(|p| p == profile)
             .ok_or_else(|| Error::Invalid("Unsupported audio preparation profile".into()))?;
         let path = format!("$.preparation[{profile_index}]");
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         let snapshot = db.unchecked_transaction().map_err(storage)?;
         let revision = crate::library::revision(&snapshot)?;
         let scope = Digest::sha256(
@@ -652,7 +672,7 @@ impl LibraryCarePort for Store {
             .position(|p| p == profile)
             .ok_or_else(|| Error::Invalid("Unsupported audio preparation profile".into()))?;
         let path = format!("$.preparation[{profile_index}].needs_attention");
-        let db = self.db.read_lock()?;
+        let db = self.read_db()?;
         let snapshot = db.unchecked_transaction().map_err(storage)?;
         let scope = format!(
             "{PREPARATION_ROWS}
@@ -732,7 +752,7 @@ impl LibraryCarePort for Store {
         Ok(entries)
     }
     fn metadata_preferences(&self, user: UserId) -> Result<MetadataPreferences> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let exists: bool = db
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM private.users WHERE id=? AND enabled=1)",

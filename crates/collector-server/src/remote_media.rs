@@ -166,7 +166,7 @@ pub(crate) async fn remote_test(
     headers: HeaderMap,
     Json(request): Json<RemoteGrantRequest>,
 ) -> ApiResult<Json<collector_api_types::RemoteMediaTest>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let target = request.target.clone();
     let grant = issue_grant(&state, &headers, actor.clone(), request).await?;
     let samples = if let Some(target) = target {
@@ -185,7 +185,7 @@ pub(crate) async fn remote_grant(
     headers: HeaderMap,
     Json(request): Json<RemoteGrantRequest>,
 ) -> ApiResult<Json<RemoteMediaGrant>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     Ok(Json(issue_grant(&state, &headers, actor, request).await?))
 }
 async fn issue_grant(

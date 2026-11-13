@@ -80,6 +80,7 @@ fn invalid(message: &str) -> io::Error {
 pub struct WavReader<R> {
     reader: R,
     format: Format,
+    float_samples: bool,
     data: u64,
     frames: u64,
     position: u64,
@@ -87,7 +88,7 @@ pub struct WavReader<R> {
     pub metadata: junk_libs_audio::FileAudioInfo,
 }
 impl<R: Read + Seek + Send> WavReader<R> {
-    /// Checked RIFF/WAVE PCM, including WAVE_FORMAT_EXTENSIBLE integer PCM.
+    /// Checked RIFF/WAVE PCM, including 32-bit float and extensible PCM.
     /// Bytes outside the declared RIFF segment are reported, never interpreted.
     /// Chunk sizes are checked before reads/allocation; metadata is skipped in
     /// bounded seeks, never allocated. The caller supplies cooperative cancellation.
@@ -140,31 +141,38 @@ impl<R: Read + Seek + Send> WavReader<R> {
                         bits: u16_at(14),
                     };
                     if !matches!(f.channels, 1 | 2)
-                        || !matches!(f.bits, 16 | 24)
+                        || !matches!(f.bits, 16 | 24 | 32)
                         || !(8000..=192000).contains(&f.sample_rate)
                         || usize::from(u16_at(12)) != f.frame_bytes()
                         || u32_at(8) != f.sample_rate * f.frame_bytes() as u32
                     {
                         return Err(invalid("unsupported or inconsistent WAV PCM format"));
                     }
-                    match u16_at(0) {
+                    let encoding = match u16_at(0) {
                         // Some mastering tools emit a 40-byte format chunk for
                         // ordinary PCM, with an empty extension and zero padding.
-                        // Accept only that unambiguous layout, not unknown extensions.
-                        1 if size == 16 || raw[16..size as usize].iter().all(|b| *b == 0) => {}
+                        encoding @ (1 | 3)
+                            if size == 16 || raw[16..size as usize].iter().all(|b| *b == 0) =>
+                        {
+                            encoding
+                        }
                         0xfffe
                             if size == 40
                                 && u16_at(16) == 22
                                 && u16_at(18) == f.bits
                                 && (u32_at(20) == 0
                                     || u32_at(20) == if f.channels == 1 { 4 } else { 3 })
-                                && raw[24..40]
-                                    == [
-                                        1, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113,
-                                    ] => {}
-                        _ => return Err(invalid("only integer PCM WAV is supported")),
+                                && raw[26..40]
+                                    == [0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113] =>
+                        {
+                            u16_at(24)
+                        }
+                        _ => return Err(invalid("unsupported WAV PCM encoding")),
+                    };
+                    if !matches!((encoding, f.bits), (1, 16 | 24) | (3, 32)) {
+                        return Err(invalid("unsupported WAV PCM encoding or sample width"));
                     }
-                    format = Some(f);
+                    format = Some((f, encoding == 3));
                 }
                 b"data" => {
                     if data.is_some() || format.is_none() {
@@ -222,7 +230,7 @@ impl<R: Read + Seek + Send> WavReader<R> {
             reader.seek(SeekFrom::Start(offset))?;
             metadata::read_info(&mut reader, len, &mut metadata, codepage, checkpoint)?;
         }
-        let format = format.ok_or_else(|| invalid("missing WAV format"))?;
+        let (format, float_samples) = format.ok_or_else(|| invalid("missing WAV format"))?;
         let (data, size) = data.ok_or_else(|| invalid("missing WAV data"))?;
         let frame_bytes = format.frame_bytes() as u64;
         if size == 0
@@ -236,12 +244,17 @@ impl<R: Read + Seek + Send> WavReader<R> {
         Ok(Self {
             reader,
             format,
+            float_samples,
             data,
             frames: size / frame_bytes,
             position: 0,
             trailing_bytes: file_end - end,
             metadata,
         })
+    }
+
+    pub fn source_bits(&self) -> u16 {
+        self.format.bits
     }
 
     /// Uninterpreted bytes after the complete declared RIFF segment. These are
@@ -252,7 +265,14 @@ impl<R: Read + Seek + Send> WavReader<R> {
 }
 impl<R: Read + Seek + Send> IntegerPcmReader for WavReader<R> {
     fn format(&self) -> Format {
-        self.format
+        Format {
+            bits: if self.float_samples {
+                24
+            } else {
+                self.format.bits
+            },
+            ..self.format
+        }
     }
     fn total_frames(&self) -> u64 {
         self.frames
@@ -268,10 +288,31 @@ impl<R: Read + Seek + Send> IntegerPcmReader for WavReader<R> {
         Ok(())
     }
     fn read_pcm(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        let frame_bytes = self.format.frame_bytes();
+        let frame_bytes = self.format().frame_bytes();
         let count = (self.frames - self.position)
             .min((output.len() / frame_bytes).min(16384) as u64) as usize;
-        self.reader.read_exact(&mut output[..count * frame_bytes])?;
+        let output = &mut output[..count * frame_bytes];
+        if self.float_samples {
+            let mut floats = vec![0; count * self.format.frame_bytes()];
+            self.reader.read_exact(&mut floats)?;
+            for (sample, encoded) in floats
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(output.as_chunks_mut::<3>().0)
+            {
+                let value = f32::from_le_bytes(*sample);
+                if !value.is_finite() {
+                    return Err(invalid("non-finite WAV float sample"));
+                }
+                let integer = (f64::from(value) * 8_388_608.0)
+                    .round()
+                    .clamp(-8_388_608.0, 8_388_607.0) as i32;
+                encoded.copy_from_slice(&integer.to_le_bytes()[..3]);
+            }
+        } else {
+            self.reader.read_exact(output)?;
+        }
         self.position += count as u64;
         Ok(count)
     }

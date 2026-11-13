@@ -71,7 +71,7 @@ fn decode_entry(value: &str) -> Result<WorkEntry> {
 }
 impl Store {
     pub(crate) fn work_entry_record(&self, user: UserId, target: &WorkTarget) -> Result<WorkEntry> {
-        read_entry(&*lock(&self.db)?, user, target)
+        read_entry(&*self.read_db()?, user, target)
     }
     pub(crate) fn work_page_records(
         &self,
@@ -87,7 +87,7 @@ impl Store {
         let sql = format!(
             "{WORK} WHERE user_id=?1 AND (collection_id IS NULL OR EXISTS (SELECT 1 FROM private.grants g WHERE g.user_id=?1 AND g.collection_id=work.collection_id AND g.role>=1)) AND (?2 IS NULL OR collection_id=?2) AND (?3 IS NULL OR item_id=?3) AND (?4=0 OR item_id IS NULL) AND (?5='' OR instr(lower(name||' '||coalesce(item_title,'')||' '||search_files),lower(?5))>0) AND (?6='' OR status=?6) AND archived=?7 AND (?8 IS NULL OR created_at>=?8) AND (?9 IS NULL OR created_at<=?9) AND (?10 IS NULL OR created_at<?10 OR (created_at=?10 AND key<?11)) ORDER BY created_at DESC,key DESC LIMIT ?12"
         );
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db.prepare(&sql).map_err(storage)?;
         let rows = statement
             .query_map(

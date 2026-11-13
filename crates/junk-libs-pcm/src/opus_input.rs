@@ -51,7 +51,7 @@ impl OpusFileInput {
             let format = reader.format();
             if format.sample_rate != recorded.sample_rate
                 || format.channels != recorded.channels
-                || Some(u32::from(format.bits)) != recorded.bits_per_sample
+                || Some(u32::from(reader.source_bits())) != recorded.bits_per_sample
                 || reader.total_frames() != original_frames
             {
                 return Err(format_mismatch());

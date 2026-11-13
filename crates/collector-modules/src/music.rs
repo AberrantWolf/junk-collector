@@ -132,8 +132,8 @@ struct MusicImportAnalysisInput {
     _import_id: Option<collector_core::ImportId>,
     #[serde(default, rename = "representation_id")]
     _representation_id: Option<collector_core::RepresentationId>,
-    #[serde(default, rename = "files")]
-    _files: Vec<serde_json::Value>,
+    #[serde(default)]
+    files: Vec<MusicImportAnalysisFile>,
     #[serde(default, rename = "snapshot_id")]
     _snapshot_id: Option<collector_core::SnapshotId>,
     #[serde(default, rename = "system")]
@@ -142,6 +142,12 @@ struct MusicImportAnalysisInput {
     _domain: Option<ModuleData>,
     #[serde(default)]
     anchor_file_index: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct MusicImportAnalysisFile {
+    name: String,
+    album_selected: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2356,11 +2362,12 @@ impl CollectionModule for Music {
                             .collect::<Vec<_>>(),
                     )
                 {
-                    let manifest = files::analyze_files(host, access, &inventory)?;
+                    let (manifest, limitations) =
+                        files::analyze_files(host, access, &inventory, &input.files)?;
                     return Ok(OperationOutput {
                         value: RawJson::from_value(
                             serde_json::to_value(MusicImportAnalysisOutput {
-                                limitations: files::limitations(&manifest),
+                                limitations,
                                 file_tracks: Some(manifest),
                                 candidates: vec![],
                                 observations: vec![],

@@ -1,5 +1,29 @@
 # Architecture
 
+## Catalog reads and import publication — 2026-11-13
+
+The Store must use read-only local connections for catalog and private queries
+that serve browsing, authentication and progress. SQLite WAL must be active on
+both files. The SQL writer must serialize writes, giving lease renewal and
+cancellation priority over queued ordinary writes with room for ordinary
+progress. The archive writer and the authority gate retain publication and
+permission fencing. Normal publication must collect filesystem checkpoint
+observations before applying them in SQLite. Startup recovery still resolves
+interrupted archive and attached-database effects before admitting work.
+
+Guided and provisional imports must stage and verify their Capture payload on
+the archive filesystem before acquiring the archive writer. The production
+scheduler must durably hand off prepared imports to its single publication
+worker. The private handoff binds verified staging to the Job and Import
+revision. The publisher must revalidate ownership, source and permission before
+promotion. If recovery finds a missing or changed staged copy, the original
+Import sources remain the restaging authority. After the immutable revision
+commits, the existing journal and Job reconciliation own recovery. Legacy
+upload commit uses the same Capture staging and promotion mechanism.
+
+The [Library read contract](layered-library-refresh.md) defines the independent
+count, result-membership revision and bounded refresh of visible rows.
+
 ## Live playback format preference — 2026-11-10
 
 Browser preferences are local to the signed-in account on this browser. The
@@ -946,7 +970,7 @@ adds observations and derivatives. Previously preserved unanalyzed WAVs need fre
 analysis through the retained digital-audio operation to acquire file-track observations.
 
 Supported inputs are RIFF PCM or checked extensible PCM, 16/24-bit mono/stereo,
-8–192 kHz, at most 24 hours per file and 4,096 chunks. Float/compressed WAV, RF64,
+8–192 kHz, at most 24 hours per file and 4,096 chunks. Compressed WAV, RF64,
 multichannel and continuous image/CUE splitting remain unsupported. WAV INFO/ID3
 metadata, embedded artwork, direct PCM matching, retained-source analysis and
 metadata-aware FLAC export are covered by the completion boundaries below. See
@@ -2204,6 +2228,15 @@ No compatibility migration or destructive conversion of existing data is require
 Saved export URLs retain read access to authorized historical media when the owner
 module or schema cannot execute: serve the recorded FLAC with ordinary transfer
 integrity checking, without requiring metadata reconstruction or write eligibility.
+
+## Mixed-format import analysis — 2026-11-13
+
+Shared audio readers must own codestream detection and checked metadata bounds.
+Music analysis must use the frozen playback selection to distinguish required
+files from alternates. A failed alternate must preserve its source position and
+report a bounded diagnostic without blocking valid selected tracks. Cancellation
+and source revalidation still apply to the whole operation. See
+[the supported file and conversion rules](digital-purchases.md#mixed-format-import-compatibility--2026-11-13).
 
 ## Inbox audio compatibility — 2026-11-01
 

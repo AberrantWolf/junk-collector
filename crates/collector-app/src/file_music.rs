@@ -336,9 +336,12 @@ impl CollectionService {
                 .or_else(|| audio.tag("title").map(str::to_owned))
                 .unwrap_or_else(|| file.name.rsplit('/').next().unwrap_or("Track").to_owned());
             let wav = audio.codec == "wav";
+            let float_wav = wav && audio.bits_per_sample == Some(32);
             let encoder = self.encoder_availability(&ConversionProfile::Flac);
-            let can_prepare =
-                wav && can_write && matches!(encoder, EncoderAvailability::Available { .. });
+            let can_prepare = wav
+                && !float_wav
+                && can_write
+                && matches!(encoder, EncoderAvailability::Available { .. });
             let coordinate = ConversionTrack {
                 position: track.position,
                 start: PcmFrame(0),
@@ -371,9 +374,14 @@ impl CollectionService {
                     MusicTrackAvailabilityState::Preparing
                 } else {
                     MusicTrackAvailabilityState::Unavailable {
-                        reason: match encoder {
-                            EncoderAvailability::Unavailable { reason } => reason,
-                            _ => "Prepare FLAC to listen to this WAV original.".into(),
+                        reason: if float_wav {
+                            "Choose live FLAC or Opus, or prepare a saved Opus copy of this float WAV."
+                                .into()
+                        } else {
+                            match encoder {
+                                EncoderAvailability::Unavailable { reason } => reason,
+                                _ => "Prepare FLAC to listen to this WAV original.".into(),
+                            }
                         },
                     }
                 }
@@ -404,7 +412,7 @@ impl CollectionService {
                     })
                     .or(playback_number),
                 audio_format: Some(collector_api_types::MusicAudioFormat {
-                    codec: if wav {
+                    codec: if wav && !float_wav {
                         "flac".into()
                     } else {
                         audio.codec.clone()
@@ -423,7 +431,7 @@ impl CollectionService {
                 start_frame: PcmFrame(0),
                 frame_count: PcmFrame(audio.decoded_frames.ok_or(Error::Conflict)?),
                 title,
-                profile: wav.then_some(ConversionProfile::Flac),
+                profile: (wav && !float_wav).then_some(ConversionProfile::Flac),
                 can_prepare,
                 state,
             });

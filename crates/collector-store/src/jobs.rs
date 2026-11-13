@@ -82,7 +82,7 @@ impl Store {
             collector_app::WorkTarget::Import(id) => ("import", id.to_string()),
             collector_app::WorkTarget::Job(id) => ("job", id.to_string()),
         };
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut stmt=db.prepare("SELECT id,user_id,collection_id,item_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,error,limitation,result FROM private.jobs WHERE user_id=?1 AND ((?2='import' AND (json_extract(request,'$.import_id')=?3 OR id IN (SELECT job_id FROM private.scan_requests WHERE kind='import' AND owner=?3))) OR (?2='job' AND (id=?3 OR id IN (SELECT job_id FROM private.preparation_members WHERE batch_id=?3) OR id IN (SELECT job_id FROM private.game_scan_members WHERE parent=?3) OR id IN (SELECT child FROM private.digital_children WHERE parent=?3)))) AND (?4 IS NULL OR id>?4) ORDER BY id LIMIT ?5").map_err(storage)?;
         let mut items = stmt
             .query_map(
@@ -112,7 +112,7 @@ impl Store {
         import: ImportId,
         user: UserId,
     ) -> Result<Vec<JobRecord>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db
             .prepare(
                 "SELECT id,user_id,collection_id,item_id,kind,state,phase,
@@ -140,7 +140,7 @@ impl Store {
         &self,
         capture: CaptureId,
     ) -> Result<Vec<collector_app::ActiveDerivativeJob>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db
             .prepare(
                 "SELECT j.id,j.user_id,p.frozen_input
@@ -224,7 +224,8 @@ impl Store {
         id: JobId,
         user: UserId,
     ) -> Result<Option<FrozenJobInput>> {
-        let value: Option<String> = lock(&self.db)?
+        let value: Option<String> = self
+            .read_db()?
             .query_row(
                 "SELECT p.frozen_input FROM private.jobs j
                  LEFT JOIN private.processing_jobs p ON p.job_id=j.id
@@ -1036,6 +1037,7 @@ impl Store {
         &self,
         worker_instance: &str,
         lease_seconds: i64,
+        lane: collector_app::JobLane,
     ) -> Result<Option<JobClaim>> {
         if worker_instance.is_empty()
             || worker_instance.len() > 128
@@ -1043,28 +1045,34 @@ impl Store {
         {
             return Err(Error::Invalid("worker identity or lease is invalid".into()));
         }
+        let publication = match lane {
+            collector_app::JobLane::Any => None,
+            collector_app::JobLane::Background => Some(false),
+            collector_app::JobLane::Publication => Some(true),
+        };
         let now = self.clock.now().timestamp();
-        let lease_expires = now.saturating_add(lease_seconds);
-        let mut db = lock(&self.db)?;
-        // Idle polls need no SQLite write reservation. Admission readies cached
-        // work; completion and the periodic recovery owner wake continuations.
-        let work: bool = db
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE
-                (state='queued' AND phase IN ('queued','revision_committed')) OR
-                (state='running' AND claim_token IS NOT NULL AND
-                    (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)) OR
-                (state='cancel_requested' AND
+        // Idle and wrong-lane polls use a read connection. Selection and
+        // admission are checked again under the SQL writer when work is visible.
+        let work: bool = self.read_db()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE (
+                ((state='queued' AND phase IN ('queued','archive_ready','revision_committed')) OR
+                 (state='running' AND claim_token IS NOT NULL AND
+                   (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)))
+                AND (?3 IS NULL OR ?3=(kind='import_publication' AND (
+                    phase='revision_committed' OR id IN (SELECT job_id FROM private.import_publication_stages))))
+              ) OR (?3 IS NOT 1 AND state='cancel_requested' AND
                     (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2)
                     AND (kind IN ('music_derivative','music_derivative_batch')
                          OR id IN (SELECT child FROM private.digital_children))))",
-                params![worker_instance, now],
-                |row| row.get(0),
-            )
-            .map_err(storage)?;
+            params![worker_instance, now, publication],
+            |row| row.get(0),
+        ).map_err(storage)?;
         if !work {
             return Ok(None);
         }
+        let mut db = lock(&self.db)?;
+        let now = self.clock.now().timestamp();
+        let lease_expires = now.saturating_add(lease_seconds);
         let settle_needed: bool = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM private.jobs WHERE state='cancel_requested' AND (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2) AND (kind IN ('music_derivative','music_derivative_batch') OR id IN (SELECT child FROM private.digital_children)))",
             params![worker_instance, now], |row| row.get(0),
@@ -1084,24 +1092,37 @@ impl Store {
         let candidate: Option<String> = db
             .query_row(
                 "WITH active AS (
-                   SELECT id,kind,(kind=?3 OR (kind='preservation_import'
+                   SELECT id,kind,(kind='import_publication' AND (phase='revision_committed'
+                       OR id IN (SELECT job_id FROM private.import_publication_stages))) AS publication,(kind=?3 OR (?11 IS 0 AND kind='import_publication' AND phase<>'revision_committed'
+                        AND id NOT IN (SELECT job_id FROM private.import_publication_stages)) OR (kind='preservation_import'
                      AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
                    FROM private.jobs WHERE state IN ('running','cancel_requested') AND lease_expires>?2
                  ), runnable AS (
-                   SELECT id,kind,created_at,user_id,json_extract(request,'$.digital_parent') AS digital_parent,json_extract(request,'$.import_id') AS import_id,
-                     (kind=?3 OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
+                   SELECT id,kind,created_at,user_id,
+                     (kind='import_publication' AND (phase='revision_committed'
+                       OR id IN (SELECT job_id FROM private.import_publication_stages))) AS publication,
+                     json_extract(request,'$.digital_parent') AS digital_parent,json_extract(request,'$.import_id') AS import_id,
+                     (kind=?3 OR (?11 IS 0 AND kind='import_publication' AND phase<>'revision_committed'
+                        AND id NOT IN (SELECT job_id FROM private.import_publication_stages)) OR (kind='preservation_import' AND json_type(request,'$.inbox_source_locator')='text')) IS TRUE AS is_copy
                    FROM private.jobs
-                   WHERE (state='queued' AND phase IN ('queued','revision_committed')) OR
+                   WHERE (state='queued' AND phase IN ('queued','archive_ready','revision_committed')) OR
                      (state='running' AND claim_token IS NOT NULL AND
                        (worker_instance IS NULL OR worker_instance<>?1 OR lease_expires<=?2))
                  )
                  SELECT candidate.id FROM runnable candidate
-                 WHERE (
+                 WHERE (?11 IS NULL OR candidate.publication=?11)
+                 AND (?11 IS NOT 0 OR candidate.kind<>'import_publication' OR
+                      (SELECT COUNT(*) FROM private.import_publication_stages s JOIN private.jobs j
+                       ON j.id=s.job_id WHERE j.state='queued') < MAX(2,?7))
+                 AND (NOT candidate.publication OR NOT EXISTS (
+                   SELECT 1 FROM active a WHERE a.publication AND a.id<>candidate.id
+                 ))
+                 AND (candidate.publication OR (
                    (SELECT COUNT(*) FROM active
-                    WHERE active.id<>candidate.id
+                    WHERE active.id<>candidate.id AND NOT active.publication
                       AND (active.kind='provider_acquisition')=(candidate.kind='provider_acquisition'))
                       < CASE WHEN candidate.kind='provider_acquisition' THEN ?5 ELSE ?6 END
-                 )
+                 ))
                  AND (candidate.kind!='provider_acquisition' OR NOT EXISTS (
                     SELECT 1 FROM active a JOIN private.processing_jobs ap ON ap.job_id=a.id
                     JOIN private.processing_jobs cp ON cp.job_id=candidate.id
@@ -1113,16 +1134,16 @@ impl Store {
                     WHERE active.id<>candidate.id AND active.is_copy)< ?7
                  ))
                  AND (
-                   candidate.kind='provider_acquisition'
+                   candidate.publication OR candidate.kind='provider_acquisition'
                    OR NOT EXISTS (
                      SELECT 1 FROM runnable waiting
-                     WHERE waiting.kind!='provider_acquisition'
+                     WHERE NOT waiting.publication AND waiting.kind!='provider_acquisition'
                        AND waiting.is_copy!=candidate.is_copy
                    )
                    OR (
                      SELECT COUNT(*) FROM active
                      WHERE active.id<>candidate.id
-                       AND active.kind!='provider_acquisition'
+                       AND NOT active.publication AND active.kind!='provider_acquisition'
                        AND active.is_copy=candidate.is_copy
                    ) < MAX(1,?6-1)
                  )
@@ -1141,7 +1162,7 @@ impl Store {
                     dispatch.prefers_copy(), collector_app::PROVIDER_JOB_SLOTS,
                     settings.processing_workers, settings.copy_workers,
                     serde_json::to_string(&dispatch.preferred_imports()).map_err(storage)?,
-                    dispatch.preferred_publication(), dispatch.prefers_metadata()],
+                    dispatch.preferred_publication(), dispatch.prefers_metadata(), publication],
                 |row| row.get(0),
             )
             .optional()
@@ -1156,7 +1177,7 @@ impl Store {
         if tx
             .execute(
                 "UPDATE private.jobs SET state='running',
-                   phase=CASE WHEN phase='revision_committed' THEN phase ELSE 'starting' END,
+                   phase=CASE WHEN phase IN ('archive_ready','revision_committed') THEN phase ELSE 'starting' END,
                    worker_instance=?,lease_expires=?,claim_token=?,updated_at=?
                  WHERE id=? AND (state='queued' OR (state='running' AND (worker_instance IS NULL OR worker_instance<>? OR lease_expires<=?)))",
                 params![worker_instance, lease_expires, claim_token, now, id, worker_instance, now],
@@ -1248,8 +1269,9 @@ impl Store {
         if phase.is_empty() || phase.len() > 120 || !(1..=300).contains(&lease_seconds) {
             return Err(Error::Invalid("job heartbeat is out of bounds".into()));
         }
+        let db = self.db.lock_urgent()?;
         let now = self.clock.now().timestamp();
-        let changed = lock(&self.db)?
+        let changed = db
             .execute(
                 "UPDATE private.jobs SET
                    phase=CASE WHEN phase<>? OR updated_at<? THEN ? ELSE phase END,
@@ -1291,8 +1313,9 @@ impl Store {
         if !(1..=300).contains(&lease_seconds) {
             return Err(Error::Invalid("job lease is out of bounds".into()));
         }
+        let db = self.db.lock_urgent()?;
         let now = self.clock.now().timestamp();
-        let changed = lock(&self.db)?
+        let changed = db
             .execute(
                 "UPDATE private.jobs SET lease_expires=?
                  WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
@@ -1394,7 +1417,9 @@ impl Store {
         let changed = lock(&self.db)?.execute(
             "UPDATE private.jobs SET
                state=CASE WHEN cancellation_requested=1 AND phase<>'revision_committed' THEN 'cancelled' ELSE 'queued' END,
-               phase=CASE WHEN phase='revision_committed' THEN phase WHEN cancellation_requested=1 THEN 'cancelled' ELSE 'queued' END,
+               phase=CASE WHEN phase='revision_committed' THEN phase WHEN cancellation_requested=1 THEN 'cancelled'
+                          WHEN id IN (SELECT job_id FROM private.import_publication_stages) THEN 'archive_ready'
+                          ELSE 'queued' END,
                worker_instance=NULL,lease_expires=NULL,claim_token=NULL,updated_at=?
              WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
             params![self.clock.now().timestamp(), id.to_string(), claim_token, self.clock.now().timestamp()],
@@ -1406,7 +1431,7 @@ impl Store {
     }
 
     pub(crate) fn cancel_claimed_job_record(&self, id: JobId, claim_token: &str) -> Result<()> {
-        let db = lock(&self.db)?;
+        let db = self.db.lock_urgent()?;
         if !self.settle_cancelled_claim(&db, id, claim_token, false)? {
             return Err(Error::CommandInProgress);
         }
@@ -1442,8 +1467,9 @@ impl Store {
         id: JobId,
         claim_token: &str,
     ) -> Result<bool> {
-        let db = lock(&self.db)?;
-        let cancelled: bool = db.query_row(
+        let db = self.read_db()?;
+        let tx = db.unchecked_transaction().map_err(storage)?;
+        let cancelled: bool = tx.query_row(
                 "SELECT state='cancel_requested' OR EXISTS(SELECT 1 FROM private.work_history h WHERE h.user_id=jobs.user_id AND h.pending=1 AND (h.target='job:'||jobs.id OR h.target='import:'||json_extract(jobs.request,'$.import_id'))) FROM private.jobs
                  WHERE id=? AND claim_token=? AND state IN ('running','cancel_requested') AND lease_expires>?",
                 params![id.to_string(), claim_token, self.clock.now().timestamp()],
@@ -1452,7 +1478,7 @@ impl Store {
             .optional()
             .map_err(storage)?
             .ok_or(Error::CommandInProgress)?;
-        Ok(cancelled || job_generation_obsolete(&db, id)?)
+        Ok(cancelled || job_generation_obsolete(&tx, id)?)
     }
 
     pub(crate) fn request_job_cancellation_record(&self, id: JobId, user: UserId) -> Result<()> {
@@ -1472,7 +1498,7 @@ impl Store {
         {
             return Err(Error::CancellationTooLate);
         }
-        let mut db = lock(&self.db)?;
+        let mut db = self.db.lock_urgent()?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
@@ -1576,7 +1602,8 @@ impl Store {
     }
 
     pub(crate) fn job_record(&self, id: JobId, user: UserId) -> Result<JobRecord> {
-        let row = lock(&self.db)?
+        let row = self
+            .read_db()?
             .query_row(
                 "SELECT id,user_id,collection_id,item_id,kind,state,phase,
                    completed_units,total_units,attempt,created_at,updated_at,error,limitation,result
@@ -1599,7 +1626,7 @@ impl Store {
         if limit == 0 || limit > 100 {
             return Err(Error::Invalid("job page limit must be 1–100".into()));
         }
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let cursor = cursor
             .map(|id| {
                 db.query_row(
