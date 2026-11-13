@@ -4430,14 +4430,20 @@ impl CollectionService {
                     self.processing
                         .active_snapshot(record.view.collection_id, &provider)?
                 };
-                let selection = RawJson::from_value(serde_json::json!({
+                let mut selection = serde_json::json!({
                     "import_id": id,
                     "representation_id": record.view.representation_id,
-                    "files": record.view.files,
                     "snapshot_id": snapshot_id,
                     "system": null,
                     "domain": domain,
-                }));
+                });
+                guided_ingest::set_import_analysis_files(
+                    &mut selection,
+                    &module,
+                    &inventory,
+                    &record.view.files,
+                );
+                let selection = RawJson::from_value(selection);
                 let selection = match self
                     .modules
                     .scan_inputs(&capability, &inventory, &selection)

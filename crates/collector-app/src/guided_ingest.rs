@@ -1,6 +1,36 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn set_import_analysis_files(
+    selection: &mut serde_json::Value,
+    module: &ModuleId,
+    inventory: &PackageInventory,
+    files: &[ImportDeclaredFile],
+) {
+    if module.0 == "org.junk.music"
+        && collector_modules::music::files::is_file_package(
+            &inventory
+                .files
+                .iter()
+                .map(|file| file.display_name.clone())
+                .collect::<Vec<_>>(),
+        )
+    {
+        // The ordered inventory supplies names. Its fingerprint binds file IDs and bytes.
+        // Only explicit playback choices need to be carried into the worker.
+        if files.iter().any(|file| file.album_selected.is_some()) {
+            selection["album_selection"] = serde_json::json!(
+                files
+                    .iter()
+                    .map(|file| file.album_selected)
+                    .collect::<Vec<_>>()
+            );
+        }
+    } else {
+        selection["files"] = serde_json::json!(files);
+    }
+}
+
 fn completed_snapshot_id(result: Option<&serde_json::Value>) -> Option<SnapshotId> {
     let result = result?;
     result
@@ -1111,24 +1141,12 @@ impl CollectionService {
             "import_id":record.view.id,"representation_id":record.view.representation_id,
             "snapshot_id":snapshot_id,"system":null,"domain":null
         });
-        // The ordered inventory supplies names. Its fingerprint binds file IDs and bytes.
-        // Only explicit playback choices need to be carried into the worker.
-        if eligibility.owner.0 == "org.junk.music"
-            && record
-                .view
-                .files
-                .iter()
-                .any(|file| file.album_selected.is_some())
-        {
-            selection["album_selection"] = serde_json::json!(
-                record
-                    .view
-                    .files
-                    .iter()
-                    .map(|file| file.album_selected)
-                    .collect::<Vec<_>>()
-            );
-        }
+        set_import_analysis_files(
+            &mut selection,
+            &eligibility.owner,
+            &inventory,
+            &record.view.files,
+        );
         if let Some(anchor_file_index) = intent.anchor_file_index {
             selection
                 .as_object_mut()

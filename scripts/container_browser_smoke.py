@@ -50,9 +50,21 @@ def main():
                 if time.monotonic() > until:
                     raise RuntimeError('Release-image browser fixture failed readiness')
                 time.sleep(.1)
-            subprocess.run(['node', 'web/tests/quick-smoke.mjs'], cwd=ROOT,
-                           env=dict(os.environ, COLLECTOR_TEST_ORIGIN=origin, COLLECTOR_TEST_PASSWORD=password, COLLECTOR_TEST_SELF_SIGNED='1', COLLECTOR_TEST_CERTIFICATE_PEM=certificate),
-                           check=True, timeout=90)
+            env = dict(os.environ, COLLECTOR_TEST_ORIGIN=origin, COLLECTOR_TEST_PASSWORD=password,
+                       COLLECTOR_TEST_SELF_SIGNED='1', COLLECTOR_TEST_CERTIFICATE_PEM=certificate)
+            for attempt in range(2):
+                result = subprocess.run(['node', 'web/tests/quick-smoke.mjs'], cwd=ROOT,
+                                        env=env, capture_output=True, text=True, timeout=90)
+                print(result.stdout, end='', flush=True)
+                print(result.stderr, end='', flush=True)
+                if result.returncode == 0:
+                    break
+                # A runner network reconfiguration can abort the first Library
+                # read immediately after login, before any fixture writes.
+                if (attempt or 'net::ERR_NETWORK_CHANGED' not in result.stderr
+                        or "waiting for getByRole('button', { name: 'Create collection'" not in result.stderr):
+                    result.check_returncode()
+                print('Retrying smoke after the runner network changed before collection creation.', flush=True)
         except BaseException:
             subprocess.run(['docker', 'logs', name], capture_output=False, timeout=10)
             raise
