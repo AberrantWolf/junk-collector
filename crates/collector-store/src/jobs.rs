@@ -877,7 +877,7 @@ impl Store {
             )
             .optional()
             .map_err(storage)?;
-        if let Some(existing) = existing {
+        if let Some(existing) = &existing {
             let intended = (
                 spec.user_id.to_string(),
                 spec.kind.clone(),
@@ -885,7 +885,7 @@ impl Store {
                 spec.item_id.map(|id| id.to_string()),
                 request.clone(),
             );
-            if existing != intended {
+            if *existing != intended {
                 return Err(Error::IdempotencyConflict);
             }
         } else {
@@ -944,6 +944,13 @@ impl Store {
             )
             .map_err(storage)?;
             retain_scan_request(&tx, spec.id, &spec)?;
+        }
+        if existing.is_none()
+            && spec.kind == "import_analysis"
+            && spec.request["retry_skipped_identification"].as_bool() == Some(true)
+        {
+            let import = spec.request["import_id"].as_str().ok_or(Error::Conflict)?;
+            reopen_guided_import_after_job_failure(&tx, import, &spec.kind)?;
         }
         if spec.kind == "music_derivative" && batch.is_none() {
             tx.execute(
@@ -1831,9 +1838,7 @@ impl Store {
             .map_err(storage)?;
         }
         if let Some(import) = request.get("import_id").and_then(serde_json::Value::as_str) {
-            tx.execute("UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL,
-                preparation_error=CASE WHEN ?2='import_analysis' AND preparation_batch_id IS NULL THEN NULL ELSE preparation_error END
-                WHERE import_id=?1 AND cancelled=0", params![import,kind]).map_err(storage)?;
+            reopen_guided_import_after_job_failure(tx, import, &kind)?;
         }
         let mut result = prior_result
             .as_deref()
@@ -1899,6 +1904,21 @@ fn cancel_job_import(
             .map_err(storage)?;
         }
     }
+    Ok(())
+}
+
+fn reopen_guided_import_after_job_failure(
+    tx: &rusqlite::Transaction<'_>,
+    import: &str,
+    kind: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE private.guided_ingest_intents SET settled=0,enrichment_error=NULL,
+         preparation_error=CASE WHEN ?2='import_analysis' AND preparation_batch_id IS NULL THEN NULL ELSE preparation_error END
+         WHERE import_id=?1 AND cancelled=0",
+        params![import, kind],
+    )
+    .map_err(storage)?;
     Ok(())
 }
 

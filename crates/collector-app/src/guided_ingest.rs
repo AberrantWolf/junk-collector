@@ -1519,12 +1519,9 @@ impl CollectionService {
                 }
                 let current_item = self.reader.item(intent.target_item_id)?;
                 if current_item.domain.module.0 == "org.junk.music" {
-                    if let Err(error) = self.apply_import_album_selection(
-                        &intent,
-                        &record,
-                        &current_item,
-                        ItemEffectSource::GuidedImport(intent.import_id),
-                    ) {
+                    if let Err(error) =
+                        self.apply_import_album_selection(&intent, &record, &current_item)
+                    {
                         if matches!(error, Error::CatalogBusy) {
                             return Err(error);
                         }
@@ -2373,8 +2370,9 @@ impl CollectionService {
                             Some(&eligibility.owner),
                             jobs.iter().any(|job| job.kind == "import_analysis"),
                         ) {
-                            let job = effects
-                                .enqueue_job(self.guided_analysis_spec(&intent, &record)?)?;
+                            let mut spec = self.guided_analysis_spec(&intent, &record)?;
+                            spec.request["retry_skipped_identification"] = true.into();
+                            let job = effects.enqueue_job(spec)?;
                             return Ok(serde_json::json!(job));
                         }
                     }

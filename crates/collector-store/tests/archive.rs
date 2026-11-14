@@ -31234,7 +31234,9 @@ fn retry_skipped_identification_uses_saved_wavs_and_disc_assignments() {
     );
     let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
     db.execute(
-        "UPDATE guided_ingest_intents SET analysis='automatic' WHERE import_id=?",
+        "UPDATE guided_ingest_intents SET analysis='automatic',
+         enrichment_error='music structure analysis is unavailable',
+         preparation_error='no selected audio tracks' WHERE import_id=?",
         [id.to_string()],
     )
     .unwrap();
@@ -31257,6 +31259,9 @@ fn retry_skipped_identification_uses_saved_wavs_and_disc_assignments() {
             .unwrap()
     };
     let queued = retry();
+    let intent = store.guided_ingest_intent(id).unwrap().unwrap();
+    assert!(!intent.settled);
+    assert!(intent.enrichment_error.is_none() && intent.preparation_error.is_none());
     provider_drain(&service);
     let completed = retry();
     assert!(
