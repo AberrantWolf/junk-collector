@@ -1840,6 +1840,7 @@ impl CollectionService {
         intent: &crate::GuidedIngestIntent,
         import: &crate::ImportRecord,
         item: &Item,
+        source: crate::ItemEffectSource,
     ) -> Result<()> {
         if !import
             .view
@@ -1868,6 +1869,15 @@ impl CollectionService {
             |effects| {
                 let item = self.reader.item(item.id)?;
                 self.content_write_eligibility(&actor, item.collection_id)?;
+                if self
+                    .reader
+                    .capture(import.view.capture_id)?
+                    .association
+                    .item_id
+                    != Some(item.id)
+                {
+                    return Err(Error::Conflict);
+                }
                 let LoadedMetadataAuthority {
                     revision,
                     mut authority,
@@ -1964,7 +1974,7 @@ impl CollectionService {
                     Some(crate::ItemEffectContext {
                         item_id: item.id,
                         generation: item.lifecycle.generation,
-                        source: crate::ItemEffectSource::GuidedImport(intent.import_id),
+                        source,
                     }),
                 )
             },

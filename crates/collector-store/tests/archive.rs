@@ -31133,6 +31133,174 @@ fn guided_failed_file_analysis_retries_after_preservation_without_republishing()
 }
 
 #[test]
+fn retry_skipped_identification_uses_saved_wavs_and_disc_assignments() {
+    use collector_app::{IngestAnalysisPolicy, IngestStepState, RetryIngestCommand};
+    use collector_modules::music::files::MusicImportTrack;
+
+    let (root, store, actor, service, collection) = setup();
+    let wav = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let files = [
+        ("a.mp3", mp3),
+        ("a.wav", wav),
+        ("b.mp3", mp3),
+        ("b.wav", wav),
+        ("c.mp3", mp3),
+        ("c.wav", wav),
+        ("z.flac", b"unreadable excluded lossless copy".as_slice()),
+    ];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    album_tracks: Some(
+                        [("a.wav", 3), ("b.wav", 1), ("c.wav", 2)]
+                            .into_iter()
+                            .map(|(name, disc)| MusicImportTrack {
+                                file_name: name.into(),
+                                disc_position: Some(disc),
+                                display_position: None,
+                            })
+                            .collect(),
+                    ),
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Three-disc purchase".into(),
+                    },
+                    files: files
+                        .iter()
+                        .map(|(name, bytes)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(bytes.len() as u64),
+                            sha256: None,
+                            visibility: None,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let id = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: IngestAnalysisPolicy::PreserveOnly,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                audio_preparation: None,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap()
+        .imports[0]
+        .import_id;
+    for (index, (_, bytes)) in files.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(&actor, id, index, 0, bytes)
+            .unwrap();
+    }
+    provider_drain(&service);
+    let preserved = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(preserved.import.phase, ImportPhase::Published);
+    let item = preserved.summary.target_item_id.unwrap();
+    let capture = store.capture(preserved.import.capture_id).unwrap();
+
+    // Model the pre-fix admission failure: preservation and the review exist,
+    // but the oversized request never became a Job.
+    let mut skipped = store.import_record(id).unwrap();
+    skipped
+        .view
+        .limitations
+        .push("Automatic analysis unavailable: Selection is oversized".into());
+    store
+        .save_import(skipped.clone(), skipped.view.revision)
+        .unwrap();
+    assert!(
+        !service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .steps
+            .iter()
+            .any(|step| step.step == "identification" && step.retryable)
+    );
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE guided_ingest_intents SET analysis='automatic' WHERE import_id=?",
+        [id.to_string()],
+    )
+    .unwrap();
+    drop(db);
+    let before = service.ingest_detail(&actor, id).unwrap();
+    assert!(before.steps.iter().any(|step| step.step == "identification"
+        && step.state == IngestStepState::Skipped
+        && step.job_id.is_none()
+        && step.retryable));
+    assert!(
+        service
+            .recorded_music_track_availability(&actor, item)
+            .unwrap()
+            .is_empty()
+    );
+    let context = command();
+    let retry = || {
+        service
+            .retry_ingest(&actor, id, RetryIngestCommand { job_id: None }, &context)
+            .unwrap()
+    };
+    let queued = retry();
+    provider_drain(&service);
+    let completed = retry();
+    assert!(
+        completed
+            .steps
+            .iter()
+            .any(|step| step.step == "identification"
+                && step.state == IngestStepState::Succeeded
+                && step.job_id
+                    == queued
+                        .steps
+                        .iter()
+                        .find(|step| step.step == "identification")
+                        .unwrap()
+                        .job_id),
+        "{completed:?}"
+    );
+    let playback = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(
+        playback
+            .tracks
+            .iter()
+            .map(|track| (track.track_position, track.disc_position))
+            .collect::<Vec<_>>(),
+        [(4, Some(1)), (6, Some(2)), (2, Some(3))]
+    );
+    assert!(
+        completed
+            .import
+            .limitations
+            .iter()
+            .any(|message| message.contains("z.flac"))
+    );
+    assert_eq!(
+        serde_json::to_value(store.capture(capture.id).unwrap()).unwrap(),
+        serde_json::to_value(capture).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(completed.import.files).unwrap(),
+        serde_json::to_value(before.import.files).unwrap()
+    );
+}
+
+#[test]
 fn preserved_file_analysis_retry_rejects_changed_archived_bytes() {
     preserved_file_analysis_retry(true, false);
     if std::env::var_os("COLLECTOR_TEST_FLAC").is_some() {

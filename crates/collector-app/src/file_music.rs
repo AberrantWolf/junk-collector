@@ -140,6 +140,20 @@ impl CollectionService {
         retained.selection = RawJson::from_value(selection);
         self.run_frozen_processing(claim, retained)?;
         let observation = self.processing.processing_record(original.observation_id)?;
+        if let Some(intent) = self
+            .provisional_imports
+            .guided_ingest_intent(record.view.id)?
+        {
+            self.apply_import_album_selection(
+                &intent,
+                &record,
+                &item,
+                ItemEffectSource::Job {
+                    id: claim.id,
+                    claim: claim.claim_token.parse().map_err(|_| Error::Conflict)?,
+                },
+            )?;
+        }
         record.view.limitations = observation.observation.limitations;
         record.view.analysis_job_id = Some(claim.id);
         let revision = record.view.revision;

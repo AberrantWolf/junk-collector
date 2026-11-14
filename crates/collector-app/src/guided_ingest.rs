@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+const ANALYSIS_ADMISSION_LIMITATION: &str = "Automatic analysis unavailable: ";
+
 pub(super) fn set_import_analysis_files(
     selection: &mut serde_json::Value,
     module: &ModuleId,
@@ -1093,11 +1095,11 @@ impl CollectionService {
         Ok(item)
     }
 
-    fn enqueue_guided_analysis(
+    fn guided_analysis_spec(
         &self,
         intent: &GuidedIngestIntent,
         record: &ImportRecord,
-    ) -> Result<JobId> {
+    ) -> Result<JobSpec> {
         let eligibility =
             self.content_write_eligibility_for_user(intent.user_id, record.view.collection_id)?;
         let capability = CapabilityId::new(format!("{}.import-analysis", eligibility.owner.0))?;
@@ -1172,12 +1174,43 @@ impl CollectionService {
             selection: selected.selection,
             created_at: intent.created_at,
         };
-        self.jobs.enqueue_job(JobSpec {
-            id: job, user_id: intent.user_id, collection_id: Some(record.view.collection_id),
-            item_id: Some(intent.target_item_id), kind: "import_analysis".into(), phase: "queued".into(), total_units: 1,
+        Ok(JobSpec {
+            id: job,
+            user_id: intent.user_id,
+            collection_id: Some(record.view.collection_id),
+            item_id: Some(intent.target_item_id),
+            kind: "import_analysis".into(),
+            phase: "queued".into(),
+            total_units: 1,
             request: serde_json::json!({"import_id":record.view.id,"module":eligibility.owner,"guided":true}),
             frozen_input: Some(FrozenJobInput::Processing(frozen)),
         })
+    }
+
+    fn can_retry_skipped_file_analysis(
+        intent: &GuidedIngestIntent,
+        view: &ImportView,
+        owner: Option<&ModuleId>,
+        has_analysis_job: bool,
+    ) -> bool {
+        intent.analysis == IngestAnalysisPolicy::Automatic
+            && !intent.cancelled
+            && view.phase == ImportPhase::Published
+            && view.association.item_id == Some(intent.target_item_id)
+            && view.analysis_job_id.is_none()
+            && !has_analysis_job
+            && owner.is_some_and(|module| module.0 == "org.junk.music")
+            && view
+                .limitations
+                .iter()
+                .any(|message| message.starts_with(ANALYSIS_ADMISSION_LIMITATION))
+            && collector_modules::music::files::is_file_package(
+                &view
+                    .files
+                    .iter()
+                    .filter_map(|file| PackageFileName::new(file.name.clone()).ok())
+                    .collect::<Vec<_>>(),
+            )
     }
 
     fn enqueue_guided_publication(
@@ -1414,12 +1447,14 @@ impl CollectionService {
                     return Ok(());
                 }
                 if !jobs.iter().any(|job| job.kind == "import_analysis")
-                    && let Err(error) = self.enqueue_guided_analysis(&intent, &record)
+                    && let Err(error) = self
+                        .guided_analysis_spec(&intent, &record)
+                        .and_then(|spec| self.jobs.enqueue_job(spec))
                 {
                     let mut next = record.clone();
                     next.view
                         .limitations
-                        .push(format!("Automatic analysis unavailable: {error}"));
+                        .push(format!("{ANALYSIS_ADMISSION_LIMITATION}{error}"));
                     next.view.review = Some(ImportReviewDecision {
                         identity: ImportIdentityDecision::Unidentified,
                         association: next.view.association,
@@ -1484,9 +1519,12 @@ impl CollectionService {
                 }
                 let current_item = self.reader.item(intent.target_item_id)?;
                 if current_item.domain.module.0 == "org.junk.music" {
-                    if let Err(error) =
-                        self.apply_import_album_selection(&intent, &record, &current_item)
-                    {
+                    if let Err(error) = self.apply_import_album_selection(
+                        &intent,
+                        &record,
+                        &current_item,
+                        ItemEffectSource::GuidedImport(intent.import_id),
+                    ) {
                         if matches!(error, Error::CatalogBusy) {
                             return Err(error);
                         }
@@ -2127,22 +2165,32 @@ impl CollectionService {
                 retryable: false,
             }
         };
+        let mut identification = job_step(
+            "identification",
+            game_job
+                .as_ref()
+                .or_else(|| by_kind.get("import_analysis").copied()),
+            game_job.is_none()
+                && record.view.phase == ImportPhase::Published
+                && !by_kind.contains_key("import_analysis"),
+            if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
+                Some("Save originals only was selected. Files were not analyzed or matched to an album or edition.".into())
+            } else {
+                record.view.limitations.first().cloned()
+            },
+        );
+        identification.retryable |= self
+            .content_write_eligibility(actor, record.view.collection_id)
+            .is_ok()
+            && Self::can_retry_skipped_file_analysis(
+                &intent,
+                &record.view,
+                owner.as_ref(),
+                by_kind.contains_key("import_analysis"),
+            );
         let mut steps = vec![
             staging_step,
-            job_step(
-                "identification",
-                game_job
-                    .as_ref()
-                    .or_else(|| by_kind.get("import_analysis").copied()),
-                game_job.is_none()
-                    && record.view.phase == ImportPhase::Published
-                    && !by_kind.contains_key("import_analysis"),
-                if intent.analysis == IngestAnalysisPolicy::PreserveOnly {
-                    Some("Save originals only was selected. Files were not analyzed or matched to an album or edition.".into())
-                } else {
-                    record.view.limitations.first().cloned()
-                },
-            ),
+            identification,
             job_step(
                 "preservation",
                 by_kind.get("import_publication").copied(),
@@ -2280,7 +2328,7 @@ impl CollectionService {
         command: RetryIngestCommand,
         context: &CommandContext,
     ) -> Result<IngestDetail> {
-        let (record, _) = self.provisional_import_for_write(actor, id)?;
+        let (record, eligibility) = self.provisional_import_for_write(actor, id)?;
         let mut intent = self
             .provisional_imports
             .guided_ingest_intent(id)?
@@ -2308,20 +2356,41 @@ impl CollectionService {
                 effects.retry_failed_job(job_id, actor.user_id)
             })?;
         } else {
-            intent.enrichment_error = None;
-            intent.cd_check_error = None;
-            if intent.preparation_batch_id.is_none() {
-                intent.preparation_error = None;
+            let result: serde_json::Value =
+                self.execute_command(actor, context, "ingest.retry", &(id, &command), |effects| {
+                    if intent.cancelled || record.view.phase == ImportPhase::Cancelled {
+                        return Err(Error::Conflict);
+                    }
+                    if record.view.phase == ImportPhase::Published {
+                        let mut view = record.view.clone();
+                        view.association = self.reader.capture(view.capture_id)?.association;
+                        let jobs = self
+                            .provisional_imports
+                            .import_job_records(id, actor.user_id)?;
+                        if Self::can_retry_skipped_file_analysis(
+                            &intent,
+                            &view,
+                            Some(&eligibility.owner),
+                            jobs.iter().any(|job| job.kind == "import_analysis"),
+                        ) {
+                            let job = effects
+                                .enqueue_job(self.guided_analysis_spec(&intent, &record)?)?;
+                            return Ok(serde_json::json!(job));
+                        }
+                    }
+                    intent.enrichment_error = None;
+                    intent.cd_check_error = None;
+                    if intent.preparation_batch_id.is_none() {
+                        intent.preparation_error = None;
+                    }
+                    intent.settled = false;
+                    intent.updated_at = self.authentication.now();
+                    effects.save_guided_ingest_intent(intent)?;
+                    Ok(serde_json::Value::Null)
+                })?;
+            if result.is_null() {
+                self.reconcile_guided_ingest(id)?;
             }
-            intent.settled = false;
-            intent.updated_at = self.authentication.now();
-            self.execute_command(actor, context, "ingest.retry", &(id, &command), |effects| {
-                if intent.cancelled || record.view.phase == ImportPhase::Cancelled {
-                    return Err(Error::Conflict);
-                }
-                effects.save_guided_ingest_intent(intent)
-            })?;
-            self.reconcile_guided_ingest(record.view.id)?;
         }
         self.ingest_detail(actor, id)
     }
