@@ -139,11 +139,14 @@ while True:
  // Simulate a sparse server page with a real scoped continuation: later matches
  // must appear without asking the user to scrub through healthy albums.
  await page.route('**/api/v1/library?*',async route=>{
+  const query=new URL(route.request().url()).searchParams;
+  if(query.get('filter')!=='album_playback_needs_attention'||query.has('cursor'))return route.continue();
   const response=await route.fetch();const page=await response.json();assert.ok(page.next_cursor);
   await route.fulfill({response,json:{...page,items:[]}});
- },{times:1});
+ });
  await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
  await page.waitForFunction(()=>new URL(location.href).searchParams.get('filter')==='album_playback_needs_attention'&&document.querySelectorAll('.collection-row').length===12);
+ await page.unroute('**/api/v1/library?*');
  await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
  await page.getByLabel('Show',{exact:true}).selectOption('all');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  // An empty filtered page with a failed summary is still unfinished work.

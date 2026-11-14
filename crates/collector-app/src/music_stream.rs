@@ -77,18 +77,40 @@ impl StreamAccess {
 }
 
 impl CollectionService {
+    fn playback_capture(&self, item: &Item, source: RepresentationId) -> Result<Capture> {
+        if let Some(capture) = item.captures.iter().find(|capture| {
+            capture.association.item_id == Some(item.id)
+                && capture.representations.iter().any(|rep| rep.id == source)
+        }) {
+            return Ok(capture.clone());
+        }
+        for id in &item.lifecycle.historical_captures {
+            match self.reader.capture(*id) {
+                Ok(capture)
+                    if capture.collection_id == item.collection_id
+                        && capture.association.item_id == Some(item.id)
+                        && capture.representations.iter().any(|rep| rep.id == source) =>
+                {
+                    return Ok(capture);
+                }
+                Ok(_) | Err(Error::NotFound) => (),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(Error::NotFound)
+    }
+
     pub fn recheck_stream(&self, actor: &Principal, access: StreamAccess) -> Result<()> {
         let item = self.reader.item(access.item)?;
         let role = self.authorize(actor, item.collection_id, Action::Browse)?;
         if item.deleted || item.lifecycle.generation != access.generation {
             return Err(Error::NotFound);
         }
-        let rep = item
-            .captures
+        let capture = self.playback_capture(&item, access.representation)?;
+        let rep = capture
+            .representations
             .iter()
-            .filter(|c| c.association.item_id == Some(item.id))
-            .flat_map(|c| &c.representations)
-            .find(|r| r.id == access.representation)
+            .find(|rep| rep.id == access.representation)
             .ok_or(Error::NotFound)?;
         let private = match access.index {
             Some(index) => {
@@ -125,17 +147,11 @@ impl CollectionService {
         if item.deleted {
             return Err(Error::NotFound);
         }
-        let (capture, source) = item
-            .captures
+        let capture = self.playback_capture(&item, source_id)?;
+        let source = capture
+            .representations
             .iter()
-            .filter(|c| c.association.item_id == Some(id))
-            .find_map(|capture| {
-                capture
-                    .representations
-                    .iter()
-                    .find(|r| r.id == source_id)
-                    .map(|r| (capture, r))
-            })
+            .find(|rep| rep.id == source_id)
             .ok_or(Error::NotFound)?;
         let access = |representation, index| StreamAccess {
             item: id,

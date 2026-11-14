@@ -73,9 +73,9 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
    const route=await prepareLocalPlayback(controller.signal);
    if(token!==generation.current||audio.current!==element)return;
    let url:string, liveOffset:number|undefined, checkPath:string|undefined;
-   const directOriginal=track.original&&!track.liveOnly&&(
-    requested==='original'||requested==='high_bandwidth'&&['audio/flac','audio/mpeg'].includes(track.mediaType));
-   if(normalPlaybackAvailable()&&!directOriginal){
+   const directFile=!track.liveOnly&&(requested==='original'?track.original:
+    requested==='high_bandwidth'&&['audio/flac','audio/mpeg'].includes(track.mediaType));
+   if(normalPlaybackAvailable()&&!directFile){
     streamCheck.current={track:track.id};
     url=streamTrackUrl(track,requested,preference.bitrate);
     const head=await fetch(url,{method:'HEAD',credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
