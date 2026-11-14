@@ -380,7 +380,7 @@ impl CollectionService {
                         } else {
                             match encoder {
                                 EncoderAvailability::Unavailable { reason } => reason,
-                                _ => "Prepare FLAC to listen to this WAV original.".into(),
+                                _ => "Use High Bandwidth for live playback or prepare a saved FLAC copy.".into(),
                             }
                         },
                     }

@@ -27,19 +27,19 @@ count, result-membership revision and bounded refresh of visible rows.
 ## Live playback format preference — 2026-11-10
 
 Browser preferences are local to the signed-in account on this browser. The
-normal authenticated audio listener accepts a typed format and optional Opus
-bitrate for a source-bound track (or an explicitly queued original file).
-Application services resolve current readable sources, preferring saved FLAC
-and then the original before a lossy derivative. Disc traversal uses the same
-package/PCM reader as durable preparation. List and library reads neither start
-an encoder nor hash audio payloads.
+authenticated audio listener must apply Original, High Bandwidth or Low
+Bandwidth to the selected source-bound track or explicitly queued original
+file. High Bandwidth is the default. A prepared file must match the source
+fingerprint, track and requested output profile. Disc traversal uses the same
+package/PCM reader as durable preparation. Original CD playback exposes a
+seekable WAV view of the track's exact PCM window. List and library reads must
+neither start an encoder nor hash audio payloads.
 
 The encoder adapter feeds bounded blocks to an isolated FFmpeg process for
-each live playback request. The HTTP adapter owns independent live-stream
-admission, cancellation, and periodic access checks. Live streams create no
-Jobs, derivatives, or archive state. An exact saved output can retain ordinary
-byte-range playback. Dedicated media delivery still uses its existing
-authorized saved-file contracts.
+each encoded stream. The HTTP adapter owns admission, cancellation and access
+checks. Playback must create no Jobs, derivatives or archive state. Existing
+files and Original CD WAV support byte ranges. Dedicated media delivery
+continues to use its authorized saved-file contracts.
 
 ## Operator audio connection policy — 2026-11-04
 

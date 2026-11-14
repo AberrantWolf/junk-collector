@@ -4,7 +4,7 @@ import PurchaseDetails from './purchase-details';
 import ActionMenu from './action-menu';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks,usePlaybackPreference} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Availability=components['schemas']['MusicTrackAvailability'];
@@ -234,14 +234,12 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   return files.length?`${files[0].name}${files.length>1?` and ${files.length-1} more`:''} · ${new Date(capture!.created_at).toLocaleString()}`:'Saved original';
  }
 
- const playbackPreference=usePlaybackPreference();
  function playableRow(group:Availability[]):Availability|undefined{
-  if(playbackPreference.format==='saved')return preferredAvailable(group);
   return preferredAvailable(group)||group.find(row=>row.state.status==='available')||group.find(row=>row.can_stream_original);
  }
  function queuedTrack(row:Availability){
   const saved=row.state.status==='available'?row.state:undefined;
-  return {itemId:item.id,collectionId:item.collection_id,album:item.title,artist:item.subtitle||undefined,title:row.title,position:row.display_position??row.track_position,representationId:saved?.representation_id||row.source_representation_id,fileIndex:saved?.file_index??0,mediaType:saved?.media_type||'',artwork:item.primary_artwork||undefined,original:!row.profile,
+  return {itemId:item.id,collectionId:item.collection_id,album:item.title,artist:item.subtitle||undefined,title:row.title,position:row.display_position??row.track_position,representationId:saved?.representation_id||row.source_representation_id,fileIndex:saved?.file_index??0,mediaType:saved?.media_type||'',artwork:item.primary_artwork||undefined,original:saved?.representation_id===row.source_representation_id,
    sourceId:row.source_representation_id,sourcePosition:row.track_position,seconds:row.frame_count/(row.audio_format?.sample_rate||44100)||undefined,opusBitrate:row.profile?.codec==='opus'?row.profile.bitrate_kbps:undefined,liveOnly:!saved};
  }
  async function play(source?:string,track?:number){

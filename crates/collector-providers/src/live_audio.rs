@@ -85,6 +85,9 @@ impl LiveEncoder {
             "1",
         ]);
         match codec {
+            StreamCodec::Original => {
+                return Err(Error::Invalid("Original audio needs no encoder".into()));
+            }
             StreamCodec::Flac => {
                 // Experimental mode is needed for >24 bit FLAC in newer FFmpeg.
                 // 16/24 bit sources retain their native sample depth.

@@ -2444,7 +2444,7 @@ wait
         }
         req.body(Body::empty()).unwrap()
     };
-    let live_flac = "track=1&format=flac";
+    let live_flac = "track=1";
     for (router, token, query, status) in [
         (app.clone(), None, live_flac, StatusCode::UNAUTHORIZED),
         (
@@ -2456,7 +2456,7 @@ wait
         (
             app.clone(),
             Some(viewer_token.as_str()),
-            "track=1&format=opus&bitrate=257",
+            "track=1&mode=low_bandwidth&bitrate=257",
             StatusCode::BAD_REQUEST,
         ),
     ] {
@@ -2466,6 +2466,38 @@ wait
             .unwrap();
         assert_eq!(result.status(), status);
     }
+    let original = app
+        .clone()
+        .oneshot(live_request(
+            "track=1&mode=original",
+            Some(&viewer_token),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(original.status(), StatusCode::OK);
+    assert_eq!(original.headers()["content-type"], "audio/wav");
+    assert_eq!(original.headers()["accept-ranges"], "bytes");
+    let wave = axum::body::to_bytes(original.into_body(), 20000)
+        .await
+        .unwrap();
+    assert_eq!(&wave[..4], b"RIFF");
+    assert_eq!(&wave[8..12], b"WAVE");
+    assert_eq!(&wave[22..28], &[2, 0, 0x44, 0xac, 0, 0]);
+    assert_eq!(&wave[34..36], &[16, 0]);
+    assert_eq!(&wave[44..], pcm.as_slice());
+    let partial = app
+        .clone()
+        .oneshot(live_request(
+            "track=1&mode=original",
+            Some(&viewer_token),
+            Some("bytes=49-77"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+    let bytes = axum::body::to_bytes(partial.into_body(), 32).await.unwrap();
+    assert_eq!(&bytes[..], &pcm[5..34]);
     #[cfg(unix)]
     {
         let response = stalled
@@ -2503,8 +2535,8 @@ wait
                 .oneshot(live_request(query, Some(&viewer_token), None))
         };
         let (lossless, opus) = tokio::join!(
-            request("track=1&format=flac&start_ms=10"),
-            request("track=1&format=opus&bitrate=113")
+            request("track=1&mode=high_bandwidth&start_ms=10"),
+            request("track=1&mode=low_bandwidth")
         );
         let lossless = lossless.unwrap();
         let opus = opus.unwrap();
@@ -2810,7 +2842,7 @@ wait
         .unwrap();
     assert!(matches!(
         opus_source,
-        collector_app::StreamInput::File(_, "flac")
+        collector_app::StreamInput::Pcm(_, 2352)
     ));
     let export_path = format!(
         "/api/v1/items/{}/music-exports/{}/1",

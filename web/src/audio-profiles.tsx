@@ -18,7 +18,7 @@ export function preparationQuery(preset:PreparationPreset){
  return preset==='flac'?'':`opus_bitrate_kbps=${preset}`;
 }
 export function importPreparation(choice:ImportPreparationChoice):S['ImportAudioPreparation']|undefined{
- if(choice==='default'||choice==='flac')return undefined;
+ if(choice==='default')return undefined;
  return choice==='none'?{codec:'none'}:conversionProfile(choice);
 }
 

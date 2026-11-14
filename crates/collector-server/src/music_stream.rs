@@ -4,7 +4,7 @@ use axum::http::Method;
 use collector_app::{MusicStreamRequest, StreamCodec, StreamCoordinate, StreamInput};
 use collector_providers::LiveEncoder;
 use std::{
-    io,
+    io::{self, Read, Seek, SeekFrom},
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
@@ -43,20 +43,40 @@ impl Drop for Lease {
     }
 }
 
+// Length-delimited CD WAV reads still traverse the original package.
+struct AdmittedDiscReader {
+    reader: Box<dyn collector_app::MediaReader>,
+    _lease: Lease,
+}
+
+impl Read for AdmittedDiscReader {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.reader.read(bytes)
+    }
+}
+
+impl Seek for AdmittedDiscReader {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.reader.seek(position)
+    }
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-enum Format {
-    Flac,
-    Opus,
+enum PlaybackMode {
+    Original,
+    HighBandwidth,
+    LowBandwidth,
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StreamQuery {
+    /// Select a playback mode. Defaults to High Bandwidth.
     #[param(inline)]
-    format: Format,
-    /// Required for Opus. Target variable bitrate in kbps, 6–256.
+    mode: Option<PlaybackMode>,
+    /// Low Bandwidth Opus target in kbps, 6–256. Defaults to 128.
     #[param(minimum = 6, maximum = 256)]
     bitrate: Option<u16>,
     /// Track number when playing a source-bound track.
@@ -74,12 +94,14 @@ fn allowed(state: &AppState) -> collector_core::Result<()> {
             .audio_connection_policy(state.remote_media_allowed)?
             .remote_media_allowed
     {
-        return Err(Error::Unavailable("Live format conversion needs normal authenticated audio or a direct Collector listener".into()));
+        return Err(Error::Unavailable(
+            "Playback modes need normal authenticated audio or a direct Collector listener".into(),
+        ));
     }
     Ok(())
 }
 
-#[utoipa::path(get, path = "/api/v1/items/{id}/music-stream/{source}", params(("id"=ItemId,Path),("source"=RepresentationId,Path),StreamQuery), responses((status=200,content(("audio/flac"),("audio/ogg"))),(status=206),(status=400),(status=401),(status=403),(status=404),(status=429),(status=503)))]
+#[utoipa::path(get, path = "/api/v1/items/{id}/music-stream/{source}", params(("id"=ItemId,Path),("source"=RepresentationId,Path),StreamQuery), responses((status=200,content(("audio/flac"),("audio/ogg"),("audio/wav"),("audio/mpeg"))),(status=206),(status=400),(status=401),(status=403),(status=404),(status=429),(status=503)))]
 pub(crate) async fn music_stream(
     State(state): State<AppState>,
     method: Method,
@@ -89,12 +111,18 @@ pub(crate) async fn music_stream(
 ) -> ApiResult<Response> {
     let actor = principal(&state, &headers).await?;
     allowed(&state)?;
-    let codec = match (query.format, query.bitrate) {
-        (Format::Flac, None) => StreamCodec::Flac,
-        (Format::Opus, Some(rate)) => StreamCodec::Opus(rate).validate()?,
+    let codec = match (
+        query.mode.unwrap_or(PlaybackMode::HighBandwidth),
+        query.bitrate,
+    ) {
+        (PlaybackMode::Original, None) => StreamCodec::Original,
+        (PlaybackMode::HighBandwidth, None) => StreamCodec::Flac,
+        (PlaybackMode::LowBandwidth, bitrate) => {
+            StreamCodec::Opus(bitrate.unwrap_or(128)).validate()?
+        }
         _ => {
             return Err(
-                Error::Invalid("Choose FLAC or Opus with an explicit bitrate".into()).into(),
+                Error::Invalid("Bitrate applies only to Low Bandwidth playback".into()).into(),
             );
         }
     };
@@ -145,11 +173,17 @@ pub(crate) async fn music_stream(
     .await
     .map_err(|_| Error::Unavailable("Opening the audio source timed out".into()))??;
     allowed(&state)?;
-    let check_path = HeaderValue::from_str(&access.playback_check_path())
+    let check_path = HeaderValue::from_str(&access.playback_check_path(query.track))
         .map_err(|e| Error::Storage(e.to_string()))?;
     if let StreamInput::Saved(mut saved) = input {
-        drop(lease);
-        saved.media_type = codec.media_type().into();
+        if access.is_disc() {
+            saved.reader = Box::new(AdmittedDiscReader {
+                reader: saved.reader,
+                _lease: lease,
+            });
+        } else {
+            drop(lease);
+        }
         let mut response = file_response(saved, headers).await?;
         response
             .headers_mut()
@@ -157,7 +191,12 @@ pub(crate) async fn music_stream(
         return Ok(response);
     }
     let builder = Response::builder()
-        .header(header::CONTENT_TYPE, codec.media_type())
+        .header(
+            header::CONTENT_TYPE,
+            codec.media_type().ok_or_else(|| {
+                Error::Invalid("Original playback requires a playable source".into())
+            })?,
+        )
         .header(header::ACCEPT_RANGES, "none")
         .header(header::CACHE_CONTROL, "private, no-store")
         .header("x-accel-buffering", "no")

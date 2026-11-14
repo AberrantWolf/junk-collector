@@ -68,34 +68,37 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
   const preference=getPlaybackPreference();
   const requested=preference.format;
   resume.current=undefined;
-  if(changed||requested!=='saved'||live.current){live.current=undefined;pendingSeek.current=undefined;element.pause();element.removeAttribute('src');element.load();loaded.current='';if(changed){setPosition(0);setDuration(0);}}
+  if(changed||live.current){live.current=undefined;pendingSeek.current=undefined;element.pause();element.removeAttribute('src');element.load();loaded.current='';if(changed){setPosition(0);setDuration(0);}}
   try{
    const route=await prepareLocalPlayback(controller.signal);
    if(token!==generation.current||audio.current!==element)return;
-   const preferred=requested==='flac'?'audio/flac':'audio/ogg; codecs=opus';
    let url:string, liveOffset:number|undefined, checkPath:string|undefined;
-   if(requested!=='saved'&&normalPlaybackAvailable()){
+   const directOriginal=track.original&&!track.liveOnly&&(
+    requested==='original'||requested==='high_bandwidth'&&['audio/flac','audio/mpeg'].includes(track.mediaType));
+   if(normalPlaybackAvailable()&&!directOriginal){
     streamCheck.current={track:track.id};
-    if(!element.canPlayType(preferred))throw new Error('This browser cannot play the selected format. Choose another playback format.');
     url=streamTrackUrl(track,requested,preference.bitrate);
     const head=await fetch(url,{method:'HEAD',credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
-    if(!head.ok)throw new ApiRequestError(head.status,`http_${head.status}`,head.status===429?'Live playback is busy. Use Play to retry.':'The requested audio could not be opened. Try another track or choose Saved audio.');
+    if(!head.ok)throw new ApiRequestError(head.status,`http_${head.status}`,head.status===429?'Live playback is busy. Use Play to retry.':'The requested audio could not be opened. Try another playback mode.');
+    const mediaType=head.headers.get('content-type');
+    if(!mediaType||!element.canPlayType(mediaType))throw new Error('This browser cannot play this format. Choose another playback mode.');
     checkPath=head.headers.get('x-collector-playback-check')||undefined;
     if(head.headers.get('accept-ranges')!=='bytes'){
      liveOffset=Math.min(Math.max(0,previousPosition),Math.max(0,(track.seconds??previousPosition+1)-0.05));
      url=streamTrackUrl(track,requested,preference.bitrate,liveOffset);
     }
    }else{
-    if(track.liveOnly)throw new Error('This track needs live conversion. Choose FLAC or Opus on the normal Collector connection, or prepare a saved copy.');
-    if(requested!=='saved'&&(requested==='flac'?track.mediaType!=='audio/flac':track.opusBitrate!==preference.bitrate))
-     throw new Error('Live conversion is unavailable on this separate audio connection. Choose Saved audio to play the existing file.');
+    const canPlaySaved=!track.liveOnly&&(requested==='original'?track.original:
+     requested==='high_bandwidth'?['audio/flac','audio/mpeg'].includes(track.mediaType):
+     track.opusBitrate===preference.bitrate);
+    if(!canPlaySaved)throw new Error('This track needs the normal Collector connection or a prepared copy for this playback mode.');
     await checkTrack(track,controller.signal,renew);
     if(!element.canPlayType(track.mediaType))throw new Error('This browser cannot play this format. Choose another playback format or download the track.');
     url=await playbackUrl(musicTrackUrl(track),controller.signal);
    }
    if(token!==generation.current||audio.current!==element)return;
    streamCheck.current=checkPath?{track:track.id,path:checkPath}:undefined;
-   setRouteLabel(requested==='saved'?route:`${requested==='flac'?'FLAC':`Opus · ${preference.bitrate} kbps`} · ${route}`);
+   setRouteLabel(requested==='low_bandwidth'?`Opus · ${preference.bitrate} kbps · ${route}`:route);
    if(loaded.current!==url){
     if(liveOffset!==undefined){live.current={offset:liveOffset,duration:track.seconds||0};setPosition(liveOffset);setDuration(track.seconds||0);}
     else pendingSeek.current=previousPosition>0?{element,position:previousPosition}:undefined;
@@ -104,7 +107,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
    await element.play();
   }catch(e){
    if(controller.signal.aborted||token!==generation.current||audio.current!==element)return;
-   element.pause();if(element.error)loaded.current='';setState('Paused');setError(requestErrorMessage(e));if(isApiRequestError(e)&&e.status===401)expired.current();else if(element.error&&requested==='saved')void diagnosePlaybackFailure(track,element,token);
+   element.pause();if(element.error)loaded.current='';setState('Paused');setError(requestErrorMessage(e));if(isApiRequestError(e)&&e.status===401)expired.current();else if(element.error&&!streamCheck.current?.path)void diagnosePlaybackFailure(track,element,token);
   }
  }
  useEffect(()=>{if(queue.playRequest&&queue.playRequest===current?.id)void play(current);},[queue.playRequest]);

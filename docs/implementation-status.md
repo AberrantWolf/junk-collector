@@ -5,6 +5,14 @@ published release and installation acceptance are separate states. This document
 makes no claim about any reader's installed version. The [ADRs](decisions/README.md)
 define architectural rules rather than implementation or qualification status. See [documentation authority](index.md).
 
+## Playback modes
+
+Original serves the selected file or a seekable PCM WAV view of a raw CD
+track. High Bandwidth defaults to existing compatible audio or live FLAC.
+Low Bandwidth defaults to Opus 128 kbps VBR with a configurable target.
+Imports require an explicit FLAC selection for saved FLAC preparation.
+See [playback settings and API](configuration.md#live-playback-format).
+
 ## Live playback format preference — 2026-11-10
 
 The web player and Account settings share a browser/account preference for

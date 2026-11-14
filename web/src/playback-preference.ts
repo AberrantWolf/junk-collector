@@ -1,14 +1,14 @@
 import {useSyncExternalStore} from 'react';
 
-export type PlaybackFormat='saved'|'flac'|'opus';
+export type PlaybackFormat='original'|'high_bandwidth'|'low_bandwidth';
 type Preference={format:PlaybackFormat;bitrate:number};
-const defaults:Preference={format:'saved',bitrate:128};
+const defaults:Preference={format:'high_bandwidth',bitrate:128};
 const listeners=new Set<()=>void>();
 let owner:string|undefined;
 let preference=defaults;
-const key=()=>`collector.playback-format.v1.${owner}`;
+const key=()=>`collector.playback-format.v2.${owner}`;
 export const validOpusBitrate=(rate:number)=>Number.isInteger(rate)&&rate>=6&&rate<=256;
-const validFormat=(format:unknown):format is PlaybackFormat=>format==='saved'||format==='flac'||format==='opus';
+const validFormat=(format:unknown):format is PlaybackFormat=>format==='original'||format==='high_bandwidth'||format==='low_bandwidth';
 
 export function setPlaybackPreferenceUser(user?:string){
  if(owner===user)return;

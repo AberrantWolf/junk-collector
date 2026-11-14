@@ -3,6 +3,7 @@ use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamCodec {
+    Original,
     Flac,
     Opus(u16),
 }
@@ -16,10 +17,11 @@ impl StreamCodec {
         }
     }
 
-    pub fn media_type(self) -> &'static str {
+    pub fn media_type(self) -> Option<&'static str> {
         match self {
-            Self::Flac => "audio/flac",
-            Self::Opus(_) => "audio/ogg; codecs=opus",
+            Self::Original => None,
+            Self::Flac => Some("audio/flac"),
+            Self::Opus(_) => Some("audio/ogg; codecs=opus"),
         }
     }
 }
@@ -53,9 +55,18 @@ pub struct StreamAccess {
     generation: u64,
 }
 impl StreamAccess {
-    /// A regular media coordinate for checking a browser's buffered playback.
-    /// Disc package access has already been checked for every member.
-    pub fn playback_check_path(self) -> String {
+    pub fn is_disc(self) -> bool {
+        self.index.is_none()
+    }
+
+    /// Select an authenticated coordinate for checking buffered playback.
+    pub fn playback_check_path(self, track: Option<u16>) -> String {
+        if let (None, Some(track)) = (self.index, track) {
+            return format!(
+                "/api/v1/items/{}/music-stream/{}?mode=original&track={track}",
+                self.item, self.representation,
+            );
+        }
         format!(
             "/api/v1/items/{}/representations/{}/{}",
             self.item,
@@ -156,12 +167,20 @@ impl CollectionService {
             return Err(Error::NotFound);
         }
         let open_file = |rep, index, exact_opus| -> Result<_> {
-            let media = self.representation(actor, id, rep, index)?;
+            let mut media = self.representation(actor, id, rep, index)?;
             let input = match media.media_type.as_str() {
-                "audio/flac" if codec == StreamCodec::Flac && start_ms == 0 => {
+                "audio/flac" | "audio/mpeg" if codec == StreamCodec::Flac => {
                     StreamInput::Saved(media)
                 }
-                "audio/ogg" if exact_opus && start_ms == 0 => StreamInput::Saved(media),
+                "audio/flac" | "audio/mpeg" | "audio/wav" | "audio/ogg"
+                    if codec == StreamCodec::Original =>
+                {
+                    StreamInput::Saved(media)
+                }
+                "audio/ogg" if exact_opus => {
+                    media.media_type = "audio/ogg; codecs=opus".into();
+                    StreamInput::Saved(media)
+                }
                 "audio/flac" => StreamInput::File(media, "flac"),
                 "audio/mpeg" => StreamInput::File(media, "mp3"),
                 "audio/ogg" => StreamInput::File(media, "ogg"),
@@ -217,44 +236,35 @@ impl CollectionService {
         }
         let scope = PackageScope::Representation(source_id);
         let fingerprint = self.processing.recorded_source(item.collection_id, scope)?;
-        let mut saved = Vec::new();
-        for rep in capture
-            .representations
-            .iter()
-            .filter(|r| r.source == Some(source_id))
-        {
-            let Some(profile) = &rep.profile else {
-                continue;
-            };
-            if !rep
-                .files
-                .first()
-                .is_some_and(|f| f.visibility == Visibility::Shared || role != Role::Viewer)
-            {
-                continue;
-            }
-            match self.processing.recipe(RecipeId(rep.id.0)) {
-                Ok(recipe)
-                    if recipe.source_fingerprint == fingerprint
-                        && recipe.tracks.len() == 1
-                        && recipe.tracks[0].position == position
-                        && profile == &crate::derivatives::profile_for_recipe(&recipe) =>
-                {
-                    let quality = match profile {
-                        ConversionProfile::Flac => u32::MAX,
-                        ConversionProfile::Opus { bitrate_kbps } => u32::from(*bitrate_kbps),
-                    };
-                    saved.push((quality, rep.id));
+        let profile = match codec {
+            StreamCodec::Original => None,
+            StreamCodec::Flac => Some(ConversionProfile::Flac),
+            StreamCodec::Opus(bitrate_kbps) => Some(ConversionProfile::Opus { bitrate_kbps }),
+        };
+        if let Some(profile) = &profile {
+            for rep in capture.representations.iter().filter(|rep| {
+                rep.source == Some(source_id) && rep.profile.as_ref() == Some(profile)
+            }) {
+                if !rep.files.first().is_some_and(|file| {
+                    file.visibility == Visibility::Shared || role != Role::Viewer
+                }) {
+                    continue;
                 }
-                Ok(_) | Err(Error::NotFound) => (),
-                Err(e) => return Err(e),
-            }
-        }
-        saved.sort_unstable_by_key(|value| std::cmp::Reverse(*value));
-        for &(_, rep) in saved.iter().take_while(|(rank, _)| *rank == u32::MAX) {
-            match open_file(rep, 0, false) {
-                Err(Error::PreparedMediaInvalid | Error::NotFound) => (),
-                result => return result,
+                match self.processing.recipe(RecipeId(rep.id.0)) {
+                    Ok(recipe)
+                        if recipe.source_fingerprint == fingerprint
+                            && recipe.tracks.len() == 1
+                            && recipe.tracks[0].position == position
+                            && profile == &crate::derivatives::profile_for_recipe(&recipe) =>
+                    {
+                        match open_file(rep.id, 0, matches!(codec, StreamCodec::Opus(_))) {
+                            Err(Error::PreparedMediaInvalid | Error::NotFound) => (),
+                            result => return result,
+                        }
+                    }
+                    Ok(_) | Err(Error::NotFound) => (),
+                    Err(error) => return Err(error),
+                }
             }
         }
         let original =
@@ -296,6 +306,33 @@ impl CollectionService {
                         .ok_or(Error::NotFound)?;
                     // Use the same track-local window as durable preparation, including
                     // the first track's captured pregap where the source provides it.
+                    let mut reader = junk_libs_pcm::CdReader(pcm.reader);
+                    if codec == StreamCodec::Original {
+                        let wave = junk_libs_pcm::wav_output::PcmWave::new(
+                            Box::new(reader),
+                            track.start_frame,
+                            track.frame_count,
+                        )
+                        .map_err(|error| Error::Invalid(error.to_string()))?;
+                        let identity = serde_json::to_vec(&(
+                            "cd-track-wave-v1",
+                            &fingerprint,
+                            track.start_frame,
+                            track.frame_count,
+                        ))
+                        .map_err(|error| Error::Storage(error.to_string()))?;
+                        return Ok((
+                            StreamInput::Saved(MediaResource {
+                                visibility: Visibility::Curators,
+                                length: wave.byte_length(),
+                                reader: Box::new(wave),
+                                media_type: "audio/wav".into(),
+                                digest: Digest::sha256(&identity),
+                                download_name: format!("Track {position:02}.wav"),
+                            }),
+                            lease,
+                        ));
+                    }
                     let start = pcm_offset(start_ms, 44_100);
                     let frames = track
                         .frame_count
@@ -304,7 +341,6 @@ impl CollectionService {
                         .ok_or(Error::Invalid(
                             "Playback position is beyond the track".into(),
                         ))?;
-                    let mut reader = junk_libs_pcm::CdReader(pcm.reader);
                     use junk_libs_pcm::IntegerPcmReader;
                     reader
                         .seek_frame(track.start_frame + start)
@@ -313,20 +349,7 @@ impl CollectionService {
                 })()
             };
         checkpoint()?;
-        match original {
-            Ok(source) => Ok(source),
-            Err(error) => {
-                // Older archives can retain a playable derivative even if the
-                // original package cannot be opened or isn't visible to this role.
-                for (rate, rep) in saved.into_iter().filter(|(rate, _)| *rate != u32::MAX) {
-                    match open_file(rep, 0, codec == StreamCodec::Opus(rate as u16)) {
-                        Err(Error::PreparedMediaInvalid | Error::NotFound) => (),
-                        result => return result,
-                    }
-                }
-                Err(error)
-            }
-        }
+        original
     }
 }
 

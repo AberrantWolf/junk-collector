@@ -9,9 +9,9 @@ export default function PlaybackFormatControl({compact=false}:{compact?:boolean}
   if(validOpusBitrate(rate))setPlaybackPreference({...preference,bitrate:rate});
  }}>
   <label>Playback format<select value={preference.format} onChange={e=>setPlaybackPreference({...preference,format:e.target.value as PlaybackFormat})}>
-   <option value="saved">Saved audio</option><option value="flac">FLAC</option><option value="opus">Opus</option>
+   <option value="original">Original</option><option value="high_bandwidth">High Bandwidth</option><option value="low_bandwidth">Low Bandwidth</option>
   </select></label>
-  {preference.format==='opus'&&<><label>Opus bitrate (kbps)<input type="number" required min={6} max={256} step={1} value={bitrate} onChange={e=>setBitrate(e.target.value)}/></label><button type="submit" disabled={!validOpusBitrate(Number(bitrate))||Number(bitrate)===preference.bitrate}>Apply bitrate</button></>}
+  {preference.format==='low_bandwidth'&&<><label>Opus bitrate (kbps)<input type="number" required min={6} max={256} step={1} value={bitrate} onChange={e=>setBitrate(e.target.value)}/></label><button type="submit" disabled={!validOpusBitrate(Number(bitrate))||Number(bitrate)===preference.bitrate}>Apply bitrate</button></>}
   {!compact&&<p className="muted">Saved for this account in this browser. Changes apply the next time you press Play or start a track. Live conversion uses the normal Collector audio connection.</p>}
  </form>;
 }
