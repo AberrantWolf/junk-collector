@@ -13080,7 +13080,7 @@ fn published_import_reconciles_a_crash_before_job_completion() {
 
 #[test]
 fn final_chunk_replay() {
-    let (_root, _store, actor, service, collection) = setup();
+    let (root, store, actor, service, collection) = setup();
     let import = staged_import(&service, &actor, collection.id, "final-retry");
     assert!(
         service
@@ -13111,6 +13111,11 @@ fn final_chunk_replay() {
     service.run_next_job("worker").unwrap();
     assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
     let published = service.provisional_import(&actor, import.id).unwrap();
+    let staging = root
+        .path()
+        .join("state/imports")
+        .join(import.id.to_string());
+    assert!(!staging.exists());
     assert_eq!(
         service
             .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data")
@@ -13118,6 +13123,62 @@ fn final_chunk_replay() {
             .revision,
         published.revision
     );
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, import.id, 0, 0, b"evil"),
+        Err(Error::Conflict)
+    ));
+    let inventory = store
+        .package_inventory(collection.id, PackageScope::Import(import.id))
+        .unwrap();
+    let mut reader = store
+        .package_file(collection.id, inventory.scope, inventory.files[0].id)
+        .unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"data");
+}
+
+#[test]
+fn published_import_staging_recovery_retains_bytes_until_archive_is_available() {
+    let (root, store, actor, service, collection) = setup();
+    let import = reviewed_unattached_import(&service, &actor, collection.id, "staging-recovery");
+    service
+        .enqueue_import_publication(&actor, import.id, &command())
+        .unwrap();
+    service.run_next_job("publisher").unwrap();
+
+    let staging = root
+        .path()
+        .join("state/imports")
+        .join(import.id.to_string());
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("0.part"), b"data").unwrap();
+    std::fs::write(staging.join("unknown"), b"retain").unwrap();
+    let capture = store.capture(import.capture_id).unwrap();
+    let archive_collection = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let master = archive_collection
+        .join("captures")
+        .join(capture.id.to_string())
+        .join("payload")
+        .join(import.representation_id.to_string())
+        .join(&capture.representations[0].files[0].name);
+    let held = master.with_extension("held");
+    std::fs::rename(&master, &held).unwrap();
+    assert!(store.reconcile_guided_cleanup().is_err());
+    assert_eq!(std::fs::read(staging.join("0.part")).unwrap(), b"data");
+    std::fs::rename(&held, &master).unwrap();
+    drop(service);
+    drop(store);
+
+    let _reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(!staging.join("0.part").exists());
+    assert_eq!(std::fs::read(staging.join("unknown")).unwrap(), b"retain");
+    assert_eq!(std::fs::read(master).unwrap(), b"data");
 }
 
 #[test]

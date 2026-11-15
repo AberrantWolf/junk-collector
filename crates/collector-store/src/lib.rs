@@ -607,6 +607,9 @@ impl Store {
         store.recover_private_publications()?;
         store.reconcile_job_publications()?;
         store.reconcile_import_cleanup()?;
+        if let Err(error) = store.reconcile_published_import_staging() {
+            tracing::warn!(%error, "published import staging cleanup pending");
+        }
         tracing::info!(
             elapsed_ms = startup.elapsed().as_millis(),
             "startup private-state reconciliation complete"

@@ -1711,6 +1711,17 @@ lookup errors propagate; only an explicit missing record permits new publication
 
 ## Ingest and assets
 
+### Published import staging
+
+After an Import's published state is durable, the store must reclaim its known
+private staging parts once the committed preservation master matches the
+recorded inventory and its files are present at the expected sizes. Publication
+already verifies the destination bytes. Cleanup must retain unfinished imports,
+unrecognized entries and parts whose archive master cannot be confirmed.
+Startup and background reconciliation must retry interrupted cleanup. Published
+Import package reads and chunk replays must use the archive master while
+preserving the Import's file identities and replay checks.
+
 ### Explicit inbox source cleanup
 
 Cleanup is an optional local-inbox action, separate from import acceptance. The
@@ -1789,7 +1800,7 @@ available for pre-release callers, while the browser uses the paged path.
 
 Uploads declare a complete file inventory, optional source SHA-256 values, item and expected revision. Names reject traversal, absolute paths, control characters and Windows separators. Chunks are bounded to 8 MiB; browser chunks use 4 MiB. Durable file lengths recover upload cursors after restart. Duplicate identical chunks are idempotent; conflicting overlaps fail. Completed staging still accepts byte-identical chunk replay read-only. Browser resumption validates the reselected inventory and compares retained prefixes before appending remaining bytes. Startup resolves abandoned cancellation acknowledgments atomically with their Import state; once a Capture is committed, recovery completes its existing publication rather than reopening pre-commit Item revision review.
 
-Commit checks complete lengths/digests, copies into archive-local staging, rereads destination SHA-256, publishes files and then item/evidence. Source uploads are retained. Integrity means those bytes match, not catalog identity. Reverification appends evidence. Catalog verification, reconstruction, offsets and audio derivatives require separate providers and independent oracles.
+Commit checks complete lengths/digests, copies into archive-local staging, rereads destination SHA-256, publishes files and then item/evidence. Published private parts follow the [staging cleanup contract](#published-import-staging). Integrity means those bytes match, not catalog identity. Reverification appends evidence. Catalog verification, reconstruction, offsets and audio derivatives require separate providers and independent oracles.
 
 Artwork is stored as an original image plus a bounded PNG thumbnail. Image decoding has dimension/allocation limits. Both asset and original-media requests enforce collection access and asset visibility. Private attachments are not merely hidden in HTML.
 

@@ -860,7 +860,7 @@ impl ProvisionalImportPort for Store {
         before_publish: &mut dyn FnMut() -> Result<()>,
     ) -> Result<ImportRecord> {
         let journals = publication::PublicationJournalStore::new(&self.archive);
-        let result = self.publish_import_inner(id, job, claim_token, before_publish);
+        let mut result = self.publish_import_inner(id, job, claim_token, before_publish);
         let transaction = TransactionId(job.0);
         if matches!(result, Err(Error::JobCancelled))
             && journals
@@ -881,7 +881,12 @@ impl ProvisionalImportPort for Store {
         {
             self.reindex()?;
             finish_v3_publication(self, transaction)?;
-            return self.publish_import_inner(id, job, claim_token, before_publish);
+            result = self.publish_import_inner(id, job, claim_token, before_publish);
+        }
+        if let Ok(record) = &result
+            && let Err(error) = self.reclaim_published_import_staging(record)
+        {
+            tracing::warn!(import_id = %id, %error, "published import staging cleanup pending");
         }
         result
     }
@@ -1045,7 +1050,8 @@ impl ProvisionalImportPort for Store {
         self.finish_import_cleanup(id)
     }
     fn reconcile_guided_cleanup(&self) -> Result<()> {
-        self.reconcile_import_cleanup()
+        let discard = self.reconcile_import_cleanup();
+        discard.and(self.reconcile_published_import_staging())
     }
     fn reconcile_removed_item_work(&self) -> Result<()> {
         Store::reconcile_removed_item_work(self)
@@ -1357,6 +1363,158 @@ impl Store {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn reconcile_published_import_staging(&self) -> Result<()> {
+        let mut first_error = None;
+        for entry in fs::read_dir(self.state.join("imports")).map_err(storage)? {
+            let entry = entry.map_err(storage)?;
+            let Some(id) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<ImportId>().ok())
+            else {
+                continue;
+            };
+            let published: bool = self
+                .read_db()?
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM private.imports WHERE id=? AND phase='published')",
+                    [id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if published
+                && let Err(error) = self
+                    .import_record(id)
+                    .and_then(|record| self.reclaim_published_import_staging(&record))
+            {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn reclaim_published_import_staging(&self, record: &ImportRecord) -> Result<()> {
+        if record.view.phase != ImportPhase::Published {
+            return Ok(());
+        }
+        let directory = self.state.join("imports").join(record.view.id.to_string());
+        let metadata = match fs::symlink_metadata(&directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(storage(error)),
+        };
+        if !metadata.is_dir() {
+            return Err(Error::Storage(
+                "invalid published import staging directory".into(),
+            ));
+        }
+        let mut staged = Vec::new();
+        let mut other_files = false;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(storage(error)),
+        };
+        for entry in entries {
+            let entry = entry.map_err(storage)?;
+            let name = entry.file_name();
+            let index = name
+                .to_str()
+                .and_then(|name| name.strip_suffix(".part"))
+                .and_then(|number| number.parse::<usize>().ok())
+                .filter(|index| {
+                    *index < record.view.files.len() && name == format!("{index}.part").as_str()
+                });
+            if index.is_some() && entry.file_type().map_err(storage)?.is_file() {
+                staged.push(entry.path());
+            } else {
+                other_files = true;
+            }
+        }
+        if !staged.is_empty() {
+            let root = self.published_import_payload_root(record)?;
+            for file in &record.view.files {
+                Self::published_import_file_path(&root, file)?;
+            }
+        }
+        let _uploads = lock(&self.uploads)?;
+        for path in staged {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage(error)),
+            }
+        }
+        if !other_files {
+            match fs::remove_dir(directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage(error)),
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn published_import_payload_root(&self, record: &ImportRecord) -> Result<PathBuf> {
+        self.archive_guard.check()?;
+        let capture = self.capture(record.view.capture_id)?;
+        let master = capture
+            .representations
+            .iter()
+            .find(|rep| {
+                rep.id == record.view.representation_id
+                    && rep.role == RepresentationRole::PreservationMaster
+            })
+            .ok_or(Error::NotFound)?;
+        if capture.collection_id != record.view.collection_id
+            || master.files.len() != record.view.files.len()
+            || master
+                .files
+                .iter()
+                .zip(&record.view.files)
+                .any(|(master, staged)| {
+                    master.name != staged.name
+                        || master.bytes != staged.bytes
+                        || Some(&master.digest) != staged.digest.as_ref()
+                })
+        {
+            return Err(Error::Storage(
+                "published master differs from the import inventory".into(),
+            ));
+        }
+        let collection = collection_path(&*self.read_db()?, &self.archive, capture.collection_id)?;
+        let root = fs::canonicalize(
+            collection
+                .join("captures")
+                .join(capture.id.to_string())
+                .join("payload")
+                .join(master.id.to_string()),
+        )
+        .map_err(storage)?;
+        if !root.starts_with(fs::canonicalize(&self.archive).map_err(storage)?) {
+            return Err(Error::Forbidden);
+        }
+        Ok(root)
+    }
+
+    pub(crate) fn published_import_file_path(
+        root: &Path,
+        file: &collector_app::ImportDeclaredFile,
+    ) -> Result<PathBuf> {
+        safe_name(&file.name)?;
+        let path = fs::canonicalize(root.join(&file.name)).map_err(storage)?;
+        if !path.starts_with(root) {
+            return Err(Error::Forbidden);
+        }
+        let metadata = fs::metadata(&path).map_err(storage)?;
+        if !metadata.is_file() || metadata.len() != file.bytes.0 {
+            return Err(Error::Storage(
+                "published master does not match the import file size".into(),
+            ));
+        }
+        Ok(path)
     }
 
     fn finish_import_cleanup(&self, id: ImportId) -> Result<IngestDiscardResult> {
@@ -1982,7 +2140,7 @@ impl Store {
         if bytes.len() > IMPORT_CHUNK_LIMIT {
             return Err(Error::Invalid("chunk exceeds 8 MiB".into()));
         }
-        let _guard = lock(&self.uploads)?;
+        let uploads = lock(&self.uploads)?;
         self.ensure_import_not_clearing(id)?;
         let mut record = self.import_record(id)?;
         if record.view.phase == ImportPhase::Cancelled {
@@ -2002,7 +2160,14 @@ impl Store {
             if end > declared.received_bytes.0 {
                 return Err(Error::Conflict);
             }
-            let mut file = File::open(directory.join(format!("{index}.part"))).map_err(storage)?;
+            let path = if record.view.phase == ImportPhase::Published {
+                drop(uploads);
+                let root = self.published_import_payload_root(&record)?;
+                Self::published_import_file_path(&root, declared)?
+            } else {
+                directory.join(format!("{index}.part"))
+            };
+            let mut file = File::open(path).map_err(storage)?;
             let mut previous = vec![0; bytes.len()];
             file.seek(SeekFrom::Start(offset)).map_err(storage)?;
             file.read_exact(&mut previous).map_err(storage)?;

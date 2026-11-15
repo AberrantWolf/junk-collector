@@ -30,6 +30,16 @@ a different installation. See [documentation maintenance](index.md).
 The following dated results retain their original acceptance scope. They are not
 current assignments or a present-day supported-feature matrix.
 
+## Published import staging reclamation — 2026-11-14
+
+Local source checks covered successful publication, archive-backed package reads
+and exact chunk replay, retention when a master is missing, and startup cleanup
+after the master returns. The import and inbox-cleanup store selections,
+store Clippy, server and media builds, and browser smoke and intake-review
+journeys passed. The intake journey included 31 albums and a server restart.
+These checks cover the source change. Release qualification and installation
+were outside this run.
+
 # Validation recorded for the foundation
 
 ## Digital purchases — 2026-10-19
