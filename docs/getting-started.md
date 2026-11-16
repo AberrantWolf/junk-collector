@@ -39,6 +39,10 @@ To choose a different account name, use `setup --username YOUR_NAME`. Passwords 
 
 Open **http://localhost:9842** on the server computer and sign in. Use `localhost` exactly: `127.0.0.1` is a different browser origin. Local HTTP sign-in is tested with Chromium-based browsers; use browser-trusted HTTPS for remote browsers.
 
+The site follows your system color theme. Open **Account & security → Appearance**
+to choose **Light** or **Dark** for this browser, or **Use system setting** to
+follow device changes again.
+
 For permanent storage locations or custom certificate names, create `collector.toml` using the [configuration reference](configuration.md) **before running setup**. Supply a custom configuration path before the command:
 
 ```sh

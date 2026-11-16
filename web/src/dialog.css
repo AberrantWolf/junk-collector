@@ -7,7 +7,7 @@
  right: auto;
  z-index: 2;
  background: var(--paper);
- box-shadow: 0 2px 8px #17271c22;
+ box-shadow: 0 2px 8px var(--shadow);
  min-width: 44px;
  min-height: 44px;
 }

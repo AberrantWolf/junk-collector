@@ -1,3 +1,4 @@
+import {appearancePreference,setAppearance,type Appearance} from './appearance';
 import PlaybackFormatControl from './playback-format';
 import InfoHelp from './info-help';
 import React,{useEffect,useState,api,useOperationScope,registerPasskey,isApiRequestError,requestErrorMessage} from '@collector/runtime';
@@ -12,9 +13,30 @@ type NativeDevice=components['schemas']['NativeDeviceView'];
 type Features=components['schemas']['FeaturesResponse'];
 type SecurityPage<T>={items:T[];next_cursor:string|null};
 
+function AppearanceSettings(){
+ const [appearance,setChoice]=useState(appearancePreference);
+ useEffect(()=>{
+  const update=()=>setChoice(appearancePreference());
+  window.addEventListener('storage',update);
+  return()=>window.removeEventListener('storage',update);
+ },[]);
+ return <section aria-label="Appearance settings">
+  <h3>Appearance</h3>
+  <label>Color theme<select value={appearance} onChange={event=>{
+   const choice=event.target.value as Appearance;
+   setAppearance(choice);
+   setChoice(choice);
+  }}>
+   <option value="system">Use system setting</option>
+   <option value="light">Light</option>
+   <option value="dark">Dark</option>
+  </select></label>
+ </section>;
+}
+
 export default function Security({onClose,onSessionExpired,initialSection,onRecoveryCodesIssued,onProfile}:{onProfile?:(account:Account)=>void;onRecoveryCodesIssued?:()=>void;initialSection?:string;onClose:()=>void;onSessionExpired:()=>void}){
  const dialog=useDialogDismiss(()=>{if(codes&&!window.confirm('Have you saved these one-time recovery codes? They cannot be shown again after closing.'))return;onClose();});
- const [section,setSection]=useState<'profile'|'password'|'passkeys'|'recovery'|'sessions'|'devices'|'playback'>(initialSection==='recovery'?'recovery':'profile');
+ const [section,setSection]=useState<'profile'|'password'|'passkeys'|'recovery'|'sessions'|'devices'|'playback'|'appearance'>(initialSection==='recovery'?'recovery':'profile');
  const [newPassword,setNewPassword]=useState('');const [confirmation,setConfirmation]=useState('');const [features,setFeatures]=useState<Features>();const [featuresError,setFeaturesError]=useState('');const [messageError,setMessageError]=useState(false);
  const sessionCommands=useOperationScope('security-sessions');
  const reads=useOperationScope('security-reads');
@@ -46,7 +68,8 @@ export default function Security({onClose,onSessionExpired,initialSection,onReco
 
  async function revokePasskey(passkey:Passkey){reads.cancel();setLoading(false);setMoreBusy('');setBusy(true);try{await api(`/security/passkeys/${passkey.id}?expected_revision=${passkey.revision}`,{method:'DELETE'});await load();}catch(error){fail(error);}finally{setBusy(false);}}
  async function revokeDevice(device:NativeDevice){reads.cancel();setLoading(false);setMoreBusy('');setBusy(true);try{await api(`/security/native-devices/${device.id}?expected_revision=${device.revision}`,{method:'DELETE'});await load();}catch(error){fail(error);}finally{setBusy(false);}}
- return <div className="modal-backdrop"><section ref={dialog.ref} data-unsaved={!!newPassword||!!confirmation||!!profile&&displayName!==profile.display_name||!!preferences&&language!==preferences.language} className="modal" role="dialog" aria-modal="true" aria-labelledby="security-title" aria-busy={busy}><button className="close" onClick={dialog.dismiss} aria-label="Close account and security">×</button><p className="eyebrow">Account &amp; security</p><h2 id="security-title">Account &amp; security</h2><nav className="curation-sections security-tasks" aria-label="Security tasks">{([['profile','Profile'],['password','Password'],['passkeys','Passkeys'],['recovery','Recovery'],['sessions','Browser sessions'],['devices','Apps'],['playback','Playback']] as const).map(([value,label])=><button key={value} type="button" aria-current={section===value?'page':undefined} onClick={()=>setSection(value)}>{label}</button>)}</nav>{loading&&<p role="status">Loading security details…</p>}{featuresError&&<p role="alert" className="notice error">{featuresError}</p>}{loadError&&<p role="alert" className="notice error">{loadError} <button onClick={()=>void load()}>Retry security details</button></p>}
+ return <div className="modal-backdrop"><section ref={dialog.ref} data-unsaved={!!newPassword||!!confirmation||!!profile&&displayName!==profile.display_name||!!preferences&&language!==preferences.language} className="modal" role="dialog" aria-modal="true" aria-labelledby="security-title" aria-busy={busy}><button className="close" onClick={dialog.dismiss} aria-label="Close account and security">×</button><p className="eyebrow">Account &amp; security</p><h2 id="security-title">Account &amp; security</h2><nav className="curation-sections security-tasks" aria-label="Security tasks">{([['profile','Profile'],['password','Password'],['passkeys','Passkeys'],['recovery','Recovery'],['sessions','Browser sessions'],['devices','Apps'],['playback','Playback'],['appearance','Appearance']] as const).map(([value,label])=><button key={value} type="button" aria-current={section===value?'page':undefined} onClick={()=>setSection(value)}>{label}</button>)}</nav>{loading&&<p role="status">Loading security details…</p>}{featuresError&&<p role="alert" className="notice error">{featuresError}</p>}{loadError&&<p role="alert" className="notice error">{loadError} <button onClick={()=>void load()}>Retry security details</button></p>}
+  {section==='appearance'&&<AppearanceSettings/>}
   {section==='playback'&&<section aria-label="Playback settings"><h3>Playback settings</h3><PlaybackFormatControl/></section>}
   {section==='profile'&&<section aria-label="Profile and recovery">{profile&&<p>Signed in as <strong>{profile.username}</strong>.</p>}{profile&&<form onSubmit={event=>{event.preventDefault();void updateProfile();}}><label>Display name<input value={displayName} onChange={event=>setDisplayName(event.target.value)} disabled={busy}/></label><button disabled={busy||!displayName.trim()}>Save profile</button></form>}
   {preferences&&<form onSubmit={event=>{event.preventDefault();void saveLanguage();}}><label>Preferred metadata language<input value={language} onChange={event=>setLanguage(event.target.value)} maxLength={35} placeholder="en, ja, fr, de…" disabled={busy}/></label><p className="muted">Use a language tag such as en for English or ja for Japanese. Album language variants follow this preference; your choices take priority.</p><button disabled={busy||!language.trim()}>Save metadata language</button></form>}

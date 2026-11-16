@@ -19,7 +19,7 @@
 }
 
 .job-list article {
-  border-bottom: 1px dotted #cbd1c4;
+  border-bottom: 1px dotted var(--line);
   padding: 13px 0;
 }
 
@@ -43,7 +43,7 @@
 }
 
 .job-list progress {
-  accent-color: var(--green);
+  accent-color: var(--link);
   height: 7px;
   width: 100%;
 }
@@ -57,13 +57,13 @@
 
 .job-state.failed,
 .job-state.cancel_requested {
-  border-color: #c99783;
-  color: #8c382d;
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 
 .job-state.completed {
-  border-color: #9aaa7a;
-  color: var(--green);
+  border-color: var(--success-line);
+  color: var(--link);
 }
 
 @media (max-width: 700px) {
@@ -80,7 +80,7 @@
 .work-history .job-list header input { width: auto; flex: 0 0 auto; }
 .work-history .job-list p { margin: .4rem 0; }
 .work-history .row-actions { justify-content:flex-start;align-items:center;display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-.work-review { padding: 1rem; border: 2px solid var(--accent, #71885c); margin: 1rem 0; }
+.work-review { padding: 1rem; border: 2px solid var(--accent); margin: 1rem 0; }
 .work-history small { display: block; }
 .work-history .job-list header { flex-wrap: wrap; gap: .5rem; }
 @media(max-width:600px) { .work-history .form-grid { grid-template-columns: 1fr; } .work-history .job-list article { overflow-wrap: anywhere; } }
@@ -90,7 +90,7 @@
 .work-history fieldset details { margin-top:.6rem; }
 
 .work-history-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.work-history-heading h2{margin-bottom:10px}.work-history-heading p{max-width:72ch;margin-bottom:0;color:var(--muted);font-size:14px}.work-history-heading>button{flex:none}
-.work-history .work-filters{margin:0;padding:14px 16px 16px;border:1px solid var(--line);border-radius:5px;min-width:0}.work-filter-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(135px,1fr) minmax(180px,1.2fr);gap:16px;align-items:start}.work-filter-fields>label{margin:0;align-content:start}.work-collection{display:grid;gap:8px;font-size:13px;min-width:0}.work-collection>details{position:relative}.work-collection>details>summary{padding:12px;border:1px solid #bdc6b8;border-radius:4px;cursor:pointer;background:white;overflow-wrap:anywhere}.work-collection .collection-chooser{position:absolute;top:calc(100% + 6px);right:0;width:min(360px,75vw);z-index:4;background:var(--paper);border:1px solid var(--line);padding:14px;box-shadow:0 6px 18px #24324a18}.work-collection .destination-results{max-height:220px;overflow:auto}.work-collection .collection-chooser label{margin-bottom:12px}
+.work-history .work-filters{margin:0;padding:14px 16px 16px;border:1px solid var(--line);border-radius:5px;min-width:0}.work-filter-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(135px,1fr) minmax(180px,1.2fr);gap:16px;align-items:start}.work-filter-fields>label{margin:0;align-content:start}.work-collection{display:grid;gap:8px;font-size:13px;min-width:0}.work-collection>details{position:relative}.work-collection>details>summary{padding:12px;border:1px solid var(--control-line);border-radius:4px;cursor:pointer;background:var(--panel);overflow-wrap:anywhere}.work-collection .collection-chooser{position:absolute;top:calc(100% + 6px);right:0;width:min(360px,75vw);z-index:4;background:var(--paper);border:1px solid var(--line);padding:14px;box-shadow:0 6px 18px var(--shadow)}.work-collection .destination-results{max-height:220px;overflow:auto}.work-collection .collection-chooser label{margin-bottom:12px}
 .work-filter-options{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-top:14px}.work-history .work-filter-options .work-toggle{margin:0}.work-history .work-filter-options>details{margin:0}.work-filter-options summary{cursor:pointer;font-size:13px}.work-filter-options .form-grid{margin-top:14px;align-items:start}
 @media(max-width:700px){.work-history-heading{flex-wrap:wrap}.work-filter-fields{grid-template-columns:minmax(0,1fr)}.work-history .work-filters{padding:12px}.work-collection .collection-chooser{position:static;width:100%;margin-top:6px;box-shadow:none}.work-filter-options{align-items:flex-start;flex-direction:column;gap:12px}}
 

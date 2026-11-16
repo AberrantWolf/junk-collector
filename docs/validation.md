@@ -14,6 +14,7 @@ Use [implementation status](implementation-status.md) for availability and
 | Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md), [large package analysis](validation/large-import-analysis-2026-11-13.md) |
 | Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
 | Library and media | [Library access during music imports](validation/import-time-library-2026-11-13.md), [layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
+| Web interface | [November 16 issue acceptance](#web-interface-issue-acceptance--2026-11-16) |
 | Security and recovery | [Repository exposure review](validation/repository-exposure-2026-11-11.md), [dependency review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
 | Audio and game support | [Audio matrix](audio-preparation.md), [game matrix](game-identification.md) |
 | Testing and packaging | [Change-based delivery](validation/testing-and-packaging-2026-10-26.md) |
@@ -29,6 +30,26 @@ a different installation. See [documentation maintenance](index.md).
 
 The following dated results retain their original acceptance scope. They are not
 current assignments or a present-day supported-feature matrix.
+
+## Web interface issue acceptance — 2026-11-16
+
+The Redump link in Game catalogs and the upload guide points to the live
+downloads page. The Metadata journey kept a scrolled, focused row in place
+through an unchanged poll and a later title update. Navigation covered collection
+search, switching, Back, keyboard focus and the mobile menu. The account journey
+verified that a saved display name reaches the sidebar and that the existing
+keyboard order still works with Appearance available.
+
+The local real-server fixture exercised the system theme and explicit Light and
+Dark settings across reloads. Visual inspection covered sign-in, the populated
+Library and album details, collection selection, Lists, Imports, Metadata, Prepare
+audio, Activity, Purchase inbox, Administration, Collection access and Appearance,
+including the mobile Library and menu. The browser checks assert behavior without
+pinning color values.
+
+An initial account run caught a tab-order regression, corrected by moving
+Appearance after the existing tasks. A Work run detected stale embedded CSS during
+a rebuild, and passed after the server was rebuilt with the final assets.
 
 ## Published import staging reclamation — 2026-11-14
 
