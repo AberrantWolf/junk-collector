@@ -1,4 +1,4 @@
-import React,{useEffect,useState,useRef,api,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useState,useRef,api,requestErrorMessage,isApiRequestError,retainUnchanged} from '@collector/runtime';
 import MailConnection from './mail-connection';
 import type {components} from './generated/api';
 type Suggestion=components['schemas']['PurchaseSuggestion'];
@@ -11,12 +11,52 @@ const labels:Record<string,string>={amazon_jp:'Amazon Japan',joshin:'Joshin',squ
 export default function PurchaseInbox({userId,collection,canCurate,canCreate,canAdminister,onSessionExpired,onChanged}:Props){
  const [inbox,setInbox]=useState<Inbox>({items:[],next_cursor:null}),[error,setError]=useState(''),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0),[selected,setSelected]=useState<string>(),[view,setView]=useState('pending');
  const controller=useRef<AbortController|null>(null);
+ const loadedPages=useRef(1);
  function failure(e:unknown){if(isApiRequestError(e)&&e.code==='unauthenticated')onSessionExpired();else setError(requestErrorMessage(e));}
- useEffect(()=>{const c=new AbortController();controller.current=c;setInbox({items:[],next_cursor:null});setSelected(undefined);setError('');setBusy(true);
+ useEffect(()=>{const c=new AbortController();controller.current=c;loadedPages.current=1;setInbox({items:[],next_cursor:null});setSelected(undefined);setError('');setBusy(true);
   (collection&&canCurate?api<Inbox>(`/collections/${collection}/purchase-inbox?view=${view}`,{signal:c.signal}):Promise.resolve({items:[],next_cursor:null})).then(i=>{if(!c.signal.aborted)setInbox(i);}).catch(e=>{if(!c.signal.aborted)failure(e);}).finally(()=>{if(!c.signal.aborted)setBusy(false);});return()=>c.abort();
  },[userId,collection,canCurate,revision,view]);
- useEffect(()=>{const timer=setTimeout(()=>{if(!selected&&!busy)setRevision(v=>v+1);},60000);return()=>clearTimeout(timer);},[revision,selected,busy]);
- async function more(){if(!inbox.next_cursor)return;setBusy(true);try{const next=await api<Inbox>(`/collections/${collection}/purchase-inbox?view=${view}&after=${inbox.next_cursor}`,{signal:controller.current?.signal});setInbox(i=>({items:[...i.items,...next.items],next_cursor:next.next_cursor}));}catch(e){failure(e);}finally{setBusy(false);}}
+ useEffect(()=>{
+  if(!collection||!canCurate||selected||busy)return;
+  const c=new AbortController();
+  const path=`/collections/${collection}/purchase-inbox?view=${view}`;
+  let timer=setTimeout(poll,60000);
+  async function poll(){
+   try{
+    const items:Suggestion[]=[];
+    let cursor:string|null=null;
+    for(let index=0;index<loadedPages.current;index++){
+     const page:Inbox=await api<Inbox>(cursor?`${path}&after=${encodeURIComponent(cursor)}`:path,{signal:c.signal});
+     c.signal.throwIfAborted();
+     items.push(...page.items);
+     cursor=page.next_cursor??null;
+     if(!cursor)break;
+    }
+    setInbox(current=>retainUnchanged(current,{items,next_cursor:cursor}));
+    setError('');
+   }catch(e){
+    if(!c.signal.aborted){
+     if(isApiRequestError(e)&&[401,403,404].includes(e.status))setInbox({items:[],next_cursor:null});
+     failure(e);
+    }
+   }finally{
+    if(!c.signal.aborted)timer=setTimeout(poll,60000);
+   }
+  }
+  return()=>{c.abort();clearTimeout(timer);};
+ },[userId,collection,canCurate,revision,view,selected,busy]);
+ async function more(){
+  if(!inbox.next_cursor)return;
+  const signal=controller.current?.signal;
+  setBusy(true);
+  try{
+   const next=await api<Inbox>(`/collections/${collection}/purchase-inbox?view=${view}&after=${encodeURIComponent(inbox.next_cursor)}`,{signal});
+   if(signal?.aborted)return;
+   loadedPages.current++;
+   setInbox(i=>({items:[...i.items,...next.items],next_cursor:next.next_cursor}));
+  }catch(e){if(!signal?.aborted)failure(e);}
+  finally{if(!signal?.aborted)setBusy(false);}
+ }
  const items=inbox.items.filter(s=>view==='all'||(view==='pending'&&!s.dismissed&&!s.accepted_item)||(view==='accepted'&&s.accepted_item)||(view==='dismissed'&&s.dismissed));
  return <section className="purchase-workspace" aria-label="Purchase review inbox"><header><h2>Suggested collection updates</h2><p>Review receipts before they change your collection. Orders, possession and archived files are recorded separately.</p></header>
  <MailConnection userId={userId} collection={collection} canCurate={canCurate} canAdminister={canAdminister} onSessionExpired={onSessionExpired}/>

@@ -1,6 +1,6 @@
 import LibrarySettings,{WorkerSettings,AudioConnectionSettings} from './library-settings';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage,retainUnchanged} from '@collector/runtime';
 import {useDialogDismiss} from './dialog';
 import type {components} from './generated/api';
 import {saveGrant} from './grant-command';
@@ -53,6 +53,8 @@ export default function Administration({collections,collectionTypes,onClose,onSe
  const uploadDraftKey=`collector:dat-upload:${settings?.current_user_id||''}`;
  useEffect(()=>{if(!settings)return;try{const draft=JSON.parse(sessionStorage.getItem(uploadDraftKey)||'null');if(draft){setCatalogJobId(draft.job||'');setCatalogJobCollection(draft.collection||'');setUploadPreview(draft.preview);setUploadPreviewCollection(draft.previewCollection||'');setCatalogImportKeys(draft.keys||{});setCatalogImportJobs(draft.jobs||[]);}}catch{}},[settings?.current_user_id]);
  useEffect(()=>{if(settings)sessionStorage.setItem(uploadDraftKey,JSON.stringify({job:catalogJobId,collection:catalogJobCollection,preview:uploadPreview,previewCollection:uploadPreviewCollection,keys:catalogImportKeys,jobs:catalogImportJobs}));},[settings?.current_user_id,catalogJobId,catalogJobCollection,uploadPreview,uploadPreviewCollection,catalogImportKeys,catalogImportJobs]);
+ const snapshotPages=useRef(1);
+ const snapshotReadVersion=useRef(0);
  const catalogScope=useRef(catalogCollection);catalogScope.current=catalogCollection;
  function fail(error:unknown){if(isApiRequestError(error)&&error.code==='unauthenticated'){onSessionExpired();return;}setFeedback({kind:'error',text:requestErrorMessage(error,'This operation requires a server administrator. Collection ownership alone does not grant server administration.')});}
  function accountQuery(cursor?:string){const params=new URLSearchParams({search:accountSearch,limit:'50'});if(cursor)params.set('cursor',cursor);return `/admin/users?${params}`;}
@@ -61,14 +63,45 @@ export default function Administration({collections,collectionTypes,onClose,onSe
  useEffect(()=>{const controller=new AbortController();void api<Settings>('/admin/settings',{signal:controller.signal}).then(setSettings).catch(error=>{if(!controller.signal.aborted)fail(error);});return()=>controller.abort();},[]);
  useEffect(()=>{const controller=new AbortController();setCatalogSourcesError('');setCatalogSourcesLoaded(false);api<CatalogSource[]>('/admin/catalog-sources',{signal:controller.signal}).then(value=>{if(controller.signal.aborted)return;setCatalogSources(value);setCatalogSource(current=>value.some(source=>source.id===current)?current:value[0]?.id||'');setCatalogSourcesLoaded(true);}).catch(error=>{if(controller.signal.aborted)return;setCatalogSourcesError(requestErrorMessage(error));if(isApiRequestError(error)&&error.code==='unauthenticated')onSessionExpired();});return()=>controller.abort();},[catalogSourcesRevision]);
  useEffect(()=>{if(!catalogCollection&&collectionChoices.items.length)setCatalogCollection(collectionChoices.items[0].id);},[catalogCollection,collectionChoices.items]);
- useEffect(()=>{if(!catalogCollection){setSnapshots([]);setSnapshotCursor(null);setLoadedSnapshotCollection('');return;}const controller=new AbortController();setSnapshotLoading(true);api<CatalogPage>(`/admin/collections/${catalogCollection}/catalog-snapshots?limit=50`,{signal:controller.signal}).then(page=>{if(!controller.signal.aborted){setSnapshots(page.items);setSnapshotCursor(page.next_cursor??null);setLoadedSnapshotCollection(catalogCollection);}}).catch(error=>{if(!controller.signal.aborted)fail(error);}).finally(()=>{if(!controller.signal.aborted)setSnapshotLoading(false);});return()=>controller.abort();},[catalogCollection]);
- useEffect(()=>{if(!catalogJobId||!catalogJobCollection)return;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;async function poll(){try{const job=await api<JobView>(`/jobs/${catalogJobId}`,{signal:controller.signal});if(controller.signal.aborted)return;setCatalogJob(job);if(job.state==='completed'&&catalogScope.current===catalogJobCollection)await reloadSnapshots(catalogJobCollection);if(!terminal.has(job.state))timer=setTimeout(poll,1200);}catch(error){if(!controller.signal.aborted)fail(error);}}void poll();return()=>{controller.abort();clearTimeout(timer);};},[catalogJobId,catalogJobCollection]);
+ useEffect(()=>{
+  snapshotPages.current=1;
+  if(!catalogCollection){setSnapshots([]);setSnapshotCursor(null);setLoadedSnapshotCollection('');setSnapshotLoading(false);return;}
+  const controller=new AbortController();
+  void reloadSnapshots(catalogCollection,controller.signal).catch(error=>{if(!controller.signal.aborted)fail(error);});
+  return()=>controller.abort();
+ },[catalogCollection]);
+ useEffect(()=>{if(!catalogJobId||!catalogJobCollection)return;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;async function poll(){try{const job=await api<JobView>(`/jobs/${catalogJobId}`,{signal:controller.signal});if(controller.signal.aborted)return;setCatalogJob(current=>retainUnchanged(current,job));if(job.state==='completed'&&catalogScope.current===catalogJobCollection)await reloadSnapshots(catalogJobCollection,controller.signal,true);if(!terminal.has(job.state))timer=setTimeout(poll,1200);}catch(error){if(!controller.signal.aborted)fail(error);}}void poll();return()=>{controller.abort();clearTimeout(timer);};},[catalogJobId,catalogJobCollection]);
  async function createCollection(){setBusy(true);setFeedback(undefined);try{await api('/admin/collections',{method:'POST',body:JSON.stringify({name,module})});setName('');setModule('');collectionChoices.retry();setFeedback({kind:'success',text:'Collection created. Close this panel to browse it.'});}catch(error){fail(error);}finally{setBusy(false);}}
  async function createAccount(){if(!settings?.multi_user)return;setBusy(true);setFeedback(undefined);const exact=username.trim();const body=JSON.stringify({username:exact,password,administrator:newAdministrator});if(createRequest.current?.body!==body)createRequest.current={body,key:crypto.randomUUID()};try{const created=await api<{user_id:string}>('/admin/users',{method:'POST',headers:{'Idempotency-Key':createRequest.current.key},body});setAccessAccount({id:created.user_id,username:exact});setAccessCollection('');setAccessSaved(false);setUsername('');setPassword('');setNewAdministrator(false);createRequest.current=undefined;setFeedback({kind:'success',text:`Account ${exact} created. No collection access yet. Assign access below or ask a collection owner.`});}catch(error){fail(error);}finally{setAccountRevision(value=>value+1);setBusy(false);}}
  async function updateAccount(account:Account,change:Partial<Account>){setBusy(true);setFeedback(undefined);try{await api(`/admin/users/${account.id}`,{method:'PUT',body:JSON.stringify({expected_revision:account.revision,display_name:change.display_name??account.display_name,enabled:change.enabled??account.enabled,administrator:change.administrator??account.administrator})});setAccountRevision(value=>value+1);}catch(error){fail(error);}finally{setBusy(false);}}
  async function makeDefault(account:Account){setBusy(true);try{await api(`/admin/default-user/${account.id}`,{method:'PUT'});setSettings(await api<Settings>('/admin/settings').catch(error=>{throw new Error(`Default account changed. Settings refresh failed: ${requestErrorMessage(error)} Reopen Administration to reload.`);}));setAccountRevision(value=>value+1);setFeedback({kind:'success',text:`${account.username} is now the default account.`});}catch(error){fail(error);}finally{setBusy(false);}}
- async function reloadSnapshots(collectionId=catalogCollection){if(!collectionId)return;setSnapshotLoading(true);try{const page=await api<CatalogPage>(`/admin/collections/${collectionId}/catalog-snapshots?limit=50`);if(catalogScope.current!==collectionId)return;setSnapshots(page.items);setSnapshotCursor(page.next_cursor??null);setLoadedSnapshotCollection(collectionId);}finally{if(catalogScope.current===collectionId)setSnapshotLoading(false);}}
- async function moreSnapshots(){if(!catalogCollection||!snapshotCursor||snapshotLoading)return;const scope=catalogCollection;setSnapshotLoading(true);try{const page=await api<CatalogPage>(`/admin/collections/${scope}/catalog-snapshots?limit=50&cursor=${encodeURIComponent(snapshotCursor)}`);if(catalogScope.current===scope){setSnapshots(current=>[...current,...page.items.filter(value=>!current.some(previous=>previous.snapshot.id===value.snapshot.id))]);setSnapshotCursor(page.next_cursor??null);}}catch(error){if(catalogScope.current===scope)fail(error);}finally{if(catalogScope.current===scope)setSnapshotLoading(false);}}
+ async function reloadSnapshots(collectionId=catalogCollection,signal?:AbortSignal,background=false){
+  if(!collectionId||catalogScope.current!==collectionId)return;
+  const version=background?snapshotReadVersion.current:++snapshotReadVersion.current;
+  const pageCount=snapshotPages.current;
+  const isCurrent=()=>!signal?.aborted&&catalogScope.current===collectionId&&version===snapshotReadVersion.current;
+  if(!background)setSnapshotLoading(true);
+  try{
+   const items:CatalogStatus[]=[];
+   let cursor:string|null=null;
+   for(let index=0;index<pageCount;index++){
+    const query=new URLSearchParams({limit:'50'});
+    if(cursor)query.set('cursor',cursor);
+    const page:CatalogPage=await api(`/admin/collections/${collectionId}/catalog-snapshots?${query}`,{signal});
+    if(!isCurrent())return;
+    items.push(...page.items);
+    cursor=page.next_cursor??null;
+    if(!cursor)break;
+   }
+   if(!isCurrent()||pageCount!==snapshotPages.current)return;
+   setSnapshots(current=>retainUnchanged(current,items));
+   setSnapshotCursor(cursor);
+   setLoadedSnapshotCollection(collectionId);
+  }finally{
+   if(!background&&isCurrent())setSnapshotLoading(false);
+  }
+ }
+ async function moreSnapshots(){if(!catalogCollection||!snapshotCursor||snapshotLoading)return;const scope=catalogCollection;snapshotReadVersion.current++;setSnapshotLoading(true);try{const page=await api<CatalogPage>(`/admin/collections/${scope}/catalog-snapshots?limit=50&cursor=${encodeURIComponent(snapshotCursor)}`);if(catalogScope.current===scope){snapshotPages.current++;setSnapshots(current=>[...current,...page.items.filter(value=>!current.some(previous=>previous.snapshot.id===value.snapshot.id))]);setSnapshotCursor(page.next_cursor??null);}}catch(error){if(catalogScope.current===scope)fail(error);}finally{if(catalogScope.current===scope)setSnapshotLoading(false);}}
  async function importCatalog(){if(!catalogCollection||!catalogSource)return;setBusy(true);setFeedback(undefined);try{const accepted=await api<{job_id:string}>(`/admin/collections/${catalogCollection}/catalog-snapshots`,{method:'POST',body:JSON.stringify({source:catalogSource})});setCatalogJobId(accepted.job_id);setCatalogJobCollection(catalogCollection);setCatalogJob(undefined);setFeedback({kind:'success',text:'Catalog import started. You can continue managing other settings while it runs.'});}catch(error){fail(error);}finally{setBusy(false);}}
  async function uploadCatalogFile(){
   if(!catalogCollection||!uploadFiles.length)return;const scope=catalogCollection;
@@ -82,7 +115,14 @@ export default function Administration({collections,collectionTypes,onClose,onSe
   await uploadWrites.run(async attempt=>{const jobs:string[]=[];for(const entry of uploadPreview.entries){if(!entry.upload)continue;const result=await api<{job_id:string}>(`/admin/collections/${scope}/catalog-upload/accept`,{method:'POST',headers:{'Idempotency-Key':catalogImportKeys[uploadKey(entry.upload)]},body:JSON.stringify(entry.upload),signal:attempt.signal});jobs.push(result.job_id);}return jobs;},{success:jobs=>{setCatalogImportJobs(jobs);setFeedback({kind:'success',text:'Catalog imports queued. Activate the saved catalogs below after import completes.'});},failure:fail,settled:()=>setBusy(false)});
  }
  useEffect(()=>{if(!catalogImportJobs.length)return;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-  async function poll(){try{const jobs=await Promise.all(catalogImportJobs.map(id=>api<JobView>(`/jobs/${id}`,{signal:controller.signal})));if(controller.signal.aborted)return;setCatalogWorkJobs(jobs);await reloadSnapshots(uploadPreviewCollection);const failed=jobs.filter(j=>j.state==='failed'||j.state==='cancelled');if(failed.length)setFeedback({kind:'error',text:`${failed.length} catalog tasks failed or were cancelled. Review each result below.`});if(jobs.some(j=>!['completed','failed','cancelled'].includes(j.state)))timer=setTimeout(poll,1000);}catch(error){if(!controller.signal.aborted){fail(error);timer=setTimeout(poll,2500);}}}void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
+  let published='';
+  async function poll(){try{const jobs=await Promise.all(catalogImportJobs.map(id=>api<JobView>(`/jobs/${id}`,{signal:controller.signal})));if(controller.signal.aborted)return;setCatalogWorkJobs(current=>retainUnchanged(current,jobs));const completed=jobs.filter(job=>job.state==='completed').map(job=>job.id).join(',');
+   if(completed!==published){
+    await reloadSnapshots(uploadPreviewCollection,controller.signal,true);
+    if(controller.signal.aborted)return;
+    published=completed;
+   }
+   const failed=jobs.filter(j=>j.state==='failed'||j.state==='cancelled');if(failed.length)setFeedback(current=>retainUnchanged(current,{kind:'error',text:`${failed.length} catalog tasks failed or were cancelled. Review each result below.`}));if(jobs.some(j=>!['completed','failed','cancelled'].includes(j.state)))timer=setTimeout(poll,1000);}catch(error){if(!controller.signal.aborted){fail(error);timer=setTimeout(poll,2500);}}}void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
  },[catalogImportJobs,uploadPreviewCollection]);
 
  async function activateCatalog(status:CatalogStatus){setBusy(true);setFeedback(undefined);try{const activated=await api<CatalogStatus>(`/admin/collections/${catalogCollection}/catalog-snapshots/${status.snapshot.id}/active`,{method:'PUT',body:JSON.stringify({snapshot_id:status.snapshot.id})});if(activated.identification_job_id){setUploadPreviewCollection(catalogCollection);setCatalogImportJobs(current=>[...new Set([...current,activated.identification_job_id!])]);}await reloadSnapshots().catch(error=>{throw new Error(`Catalog activated. Listing refresh failed: ${requestErrorMessage(error)} Reload the catalog list.`);});setFeedback({kind:'success',text:'Catalog activated. Existing games are queued for identification. Earlier results are kept.'});}catch(error){fail(error);}finally{setBusy(false);}}

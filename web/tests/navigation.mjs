@@ -34,6 +34,44 @@ try{
  const scope=page.locator('.collection-scope');const summary=scope.locator('summary');await summary.focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'CD collection',exact:true}).click();await expect(summary).toContainText('CD collection');await expect(summary).toBeFocused();assert.equal(await scope.getAttribute('open'),null);
  await nav.getByRole('button',{name:'Lists',exact:true}).click();await expect(page.getByRole('heading',{name:'Lists',exact:true})).toBeVisible();assert.equal(new URL(page.url()).searchParams.get('collection'),seed[0].id);await expect(nav.getByRole('button',{name:'Lists',exact:true})).toHaveAttribute('aria-current','page');
  await page.goBack();await expect(page.getByRole('heading',{name:'Library',exact:true})).toBeVisible();await expect(summary).toContainText('CD collection');
+ // Keep the real metadata rows while modeling a projection that stays pending
+ // through one unchanged poll and then receives a new title.
+ const metadataApi='**/api/v1/library-care/metadata?*';
+ let metadataReads=0;
+ let releasePoll;
+ const holdPoll=new Promise(resolve=>{releasePoll=resolve;});
+ await page.route(metadataApi,async route=>{
+  const read=++metadataReads;
+  const response=await route.fetch();
+  const result=await response.json();
+  if(result.items.length){
+   result.items[0].summary_state='pending';
+   if(read>=3)result.items[0].title='Updated metadata title';
+  }
+  if(read===2)await holdPoll;
+  await route.fulfill({response,json:result});
+ });
+ await page.setViewportSize({width:1360,height:425});
+ await nav.getByRole('button',{name:'Metadata',exact:true}).click();
+ const metadata=page.getByRole('region',{name:'Metadata workspace'});
+ const row=metadata.locator('[data-item-id]').last();
+ await expect(row).toBeVisible();
+ await row.scrollIntoViewIfNeeded();
+ await row.evaluate(node=>node.focus({preventScroll:true}));
+ const scroll=await page.evaluate(()=>window.scrollY);
+ assert.ok(scroll>0,'the metadata results must be scrolled before polling');
+ try{
+  await expect.poll(()=>metadataReads).toBeGreaterThanOrEqual(2);
+  await expect(metadata.getByRole('status').filter({hasText:'Loading entries'})).toHaveCount(0);
+ }finally{releasePoll();}
+ await expect.poll(()=>metadataReads).toBeGreaterThanOrEqual(3);
+ await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(scroll);
+ await expect(row).toBeFocused();
+ await expect(metadata.getByText('Updated metadata title',{exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(scroll);
+ await nav.getByRole('button',{name:'Library',exact:true}).click();
+ await page.unroute(metadataApi);
+ await page.setViewportSize({width:1360,height:980});
  // Force smaller real pages to exercise continuation and changing-query fences.
  await page.route('**/api/v1/collection-search?*',route=>{const url=new URL(route.request().url());url.searchParams.set('limit','2');return route.continue({url:url.toString()});});
  await summary.click();await page.getByRole('searchbox',{name:'Find a collection'}).fill('C');await page.getByRole('button',{name:'More collections',exact:true}).waitFor();await page.getByRole('button',{name:'More collections',exact:true}).click();await page.getByRole('button',{name:'Concert recordings',exact:true}).waitFor();await page.getByRole('searchbox',{name:'Find a collection'}).fill('Soundtracks');await page.getByRole('button',{name:'Soundtracks',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'More collections',exact:true}).count(),0);

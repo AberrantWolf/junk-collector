@@ -1,3 +1,4 @@
+import {useBrowseScrollRestore,type BrowseRestore} from './browse-scroll-restore';
 import MoreButton from './more-button';
 import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
 import type {components} from './generated/api';
@@ -12,9 +13,9 @@ type Selection={selected:string[];all:boolean;exclusions:string[];sources:Record
 const emptySelection:Selection={selected:[],all:false,exclusions:[],sources:{}};
 const endpoint='/library-care/music-preparation';
 
-export type Props={pages:number;onMore:()=>void;userId:string;collection:string;search:string;attention:boolean;preset:PreparationPreset;itemId:string;batchId:string;onQuery:(v:{item?:string;batch?:string;attention?:boolean;collection?:string;preparationPreset?:PreparationPreset})=>void;onMetadata:(item:string,collection:string)=>void;onChanged:()=>void;onSessionExpired:()=>void};
+export type Props={restore:BrowseRestore;navigationRevision:number;pages:number;onMore:()=>void;userId:string;collection:string;search:string;attention:boolean;preset:PreparationPreset;itemId:string;batchId:string;onQuery:(v:{item?:string;batch?:string;attention?:boolean;collection?:string;preparationPreset?:PreparationPreset})=>void;onMetadata:(item:string,collection:string)=>void;onChanged:()=>void;onSessionExpired:()=>void};
 
-export default function Preparation({pages,onMore,userId,collection,search,attention,preset,itemId,batchId,onQuery,onMetadata,onChanged,onSessionExpired}:Props){
+export default function Preparation({restore,navigationRevision,pages,onMore,userId,collection,search,attention,preset,itemId,batchId,onQuery,onMetadata,onChanged,onSessionExpired}:Props){
  const scope=JSON.stringify([userId,collection,search,attention,preset]);
  const draftKey=`collector:preparation-selection:${userId}`;
  const [draft,setDraft]=useState<{key:string;value:Selection}>();
@@ -96,12 +97,7 @@ export default function Preparation({pages,onMore,userId,collection,search,atten
   return()=>{controller.abort();clearTimeout(timer);};
  },[scope,reload,pages]);
 
- useEffect(()=>{
-  if(!itemId&&!batchId&&!loading&&rows.length){
-   if(history.state?.focus)document.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(history.state.focus)}"]`)?.focus({preventScroll:true});
-   window.scrollTo(0,history.state?.scroll||0);
-  }
- },[itemId,batchId,loading,scope]);
+ useBrowseScrollRestore(restore,!itemId&&!batchId&&!loading&&!!rows.length,navigationRevision,true);
  useEffect(()=>{
   if(!itemId)return;
   const controller=new AbortController();

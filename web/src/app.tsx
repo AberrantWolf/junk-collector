@@ -1,10 +1,11 @@
+import {useBrowseScrollRestore} from './browse-scroll-restore';
 import MoreButton from './more-button';
 import {pendingDigitalSubmissions,recoverDigitalSubmissions,submitDigitalAlbum,dismissDigitalSubmission,type DigitalSubmission} from './digital-submissions';
 export {queueDigitalAlbum} from './digital-submissions';
 import AudioCheckStatus from './audio-check-status';
 import ActionMenu from './action-menu';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,setRecentAuthenticationHandler,setApiIdentity,useOperationScope} from './runtime';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,setRecentAuthenticationHandler,setApiIdentity,useOperationScope,retainUnchanged} from './runtime';
 import {createRoot} from 'react-dom/client';
 import type {components} from './generated/api';
 import MusicTracks from './music-tracks';
@@ -25,7 +26,7 @@ import type {Props as ImportsPageProps} from './library-imports';
 import type {Props as MetadataPageProps} from './library-metadata';
 
 export {useMusicQueue,addMusicTracks,startMusicTracks,usePlaybackPreference,setPlaybackPreference,validOpusBitrate} from './runtime';
-export {OperationScope,useOperationScope,setApiIdentity,getApiIdentity,default,useState,useEffect,useRef,useId,ApiRequestError,isApiRequestError,requestErrorMessage,api} from './runtime';
+export {OperationScope,useOperationScope,setApiIdentity,getApiIdentity,default,useState,useEffect,useRef,useId,ApiRequestError,isApiRequestError,requestErrorMessage,retainUnchanged,api} from './runtime';
 
 type Collection=components['schemas']['PresentedCollection'];
 type CollectionPageState={key:string;items:Collection[];cursor:string|null;ready:boolean;loading:boolean;error:string};
@@ -151,7 +152,8 @@ function App(){
   const sameScope=listScope.current===scope;
   const previous=sameScope&&pageCache.current?.scope===scope?pageCache.current:undefined;
   const append=previous?.refresh===refresh&&previous.poll===importPoll&&previous.pages<navigation.pages;
-  setBusy(true);setListFailed(false);
+  const background=!!(previous&&previous.refresh===refresh&&previous.poll!==importPoll&&previous.pages===navigation.pages);
+  if(!background){setBusy(true);setListFailed(false);}
   if(!sameScope){
    listScope.current=scope;
    setItems([]);setCursor(null);setLibraryTotal(null);setLibraryLoaded(0);setSummaryState('ready');
@@ -215,8 +217,7 @@ function App(){
 
   const timer=setTimeout(async()=>{
    try{
-    const refreshVisible=previous&&previous.refresh===refresh&&previous.poll!==importPoll&&
-     previous.pages===navigation.pages&&filter!=='album_playback_needs_attention';
+    const refreshVisible=previous&&background&&filter!=='album_playback_needs_attention';
     if(refreshVisible){
      let updated;
      try{updated=await refreshRows(previous);}
@@ -226,7 +227,7 @@ function App(){
      if(!isCurrent())return;
      if(updated){
       pageCache.current={...updated,poll:importPoll};
-      setItems(updated.items);setSummaryState(updated.summaryState);setError('');
+      setItems(current=>retainUnchanged(current,updated.items));setSummaryState(updated.summaryState);setListFailed(false);setError('');
       return;
      }
     }
@@ -240,8 +241,10 @@ function App(){
     }
     if(!isCurrent())return;
     pageCache.current={...result,scope,refresh,poll:importPoll,pages:navigation.pages};
-    setSummaryState(result.summaryState);setItems(result.items);setCursor(result.cursor);
-    setLibraryLoaded(result.items.length);setLibraryTotal(null);setError('');
+    setSummaryState(result.summaryState);setItems(current=>retainUnchanged(current,result.items));setCursor(result.cursor);
+    setLibraryLoaded(result.items.length);setListFailed(false);
+    if(!background||previous.catalogRevision!==result.catalogRevision)setLibraryTotal(null);
+    setError('');
     setBusy(false);
     const summary=await count;
     if(isCurrent()&&summary?.catalog_revision===result.catalogRevision&&summary.total_is_exact){
@@ -249,8 +252,9 @@ function App(){
     }
    }catch(error){
     if(!isCurrent())return;
-    pageCache.current=undefined;setCursor(null);
-    if(isApiRequestError(error)&&['forbidden','unauthenticated'].includes(error.code)){
+    const accessLost=isApiRequestError(error)&&['forbidden','unauthenticated'].includes(error.code);
+    if(!background||accessLost){pageCache.current=undefined;setCursor(null);}
+    if(accessLost){
      setItems([]);setLibraryTotal(null);setLibraryLoaded(0);
     }
     if(isApiRequestError(error)&&['revision_conflict','catalog_busy'].includes(error.code)){
@@ -274,11 +278,7 @@ function App(){
   return()=>controller.abort();
  },[actor,route.item,collection,filter,refresh,detailRetry,route.page]);
  useEffect(()=>{if(route.item&&!management)detailsRef.current?.focus({preventScroll:true});},[route.item,detailLoading,management]);
- useEffect(()=>{
-  if(route.page!=='library'||busy||management)return;const target=navigation.restore.current;if(!target)return;
-  const frame=requestAnimationFrame(()=>{if(!route.item&&target.focus)document.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(target.focus)}"]`)?.focus({preventScroll:true});window.scrollTo(0,target.scroll);navigation.restore.current=null;});
-  return()=>cancelAnimationFrame(frame);
- },[busy,items,route.item,route.page,navigation.revision,management]);
+ useBrowseScrollRestore(navigation.restore,route.page==='library'&&!busy&&!management&&pageCache.current?.scope===JSON.stringify([actor?.user_id,collection,search,sort,filter]),navigation.revision,!route.item);
  function openItem(item:Pick<Item,'id'>){managementRequest.current?.abort();navigate({item:item.id});}
  function loadMore(){if(cursor&&!busy)navigation.setPages(navigation.pages+1);}
  async function changeItemVisibility(item:Item,removed:boolean){
@@ -340,7 +340,7 @@ function App(){
  {clientOnly&&<div className="notice" role="note"><strong>Client access only at this address.</strong> You can browse and play permitted media here. To create collections or change inventory, open the private management address printed by the server. Never publish that private listener through a public tunnel.</div>}
  {selectedCollection?.content_permissions.message&&<ContentNotice collection={selectedCollection}/>}{route.page!=='purchases'&&(route.page!=='lists'||!route.list)&&<div className="toolbar"><label className="search"><span aria-hidden="true">⌕</span><input type="search" value={search} maxLength={256} onChange={e=>changeScope({search:e.target.value},true)} placeholder={route.page==='lists'?'Find a list':'Find a title, artist, or platform'} aria-label="Search collection"/></label>{route.page==='library'&&features?.curation&&canCurateAny&&(!collection||selectedCollection?.content_permissions.can_edit)&&<button className="primary" disabled={!collectionTypes.length} onClick={()=>openManagement('curation',true)}>Add / import</button>}</div>}
  {digitalAdmissions.map(receipt=><p key={receipt.key} role={receipt.error?'alert':'status'} className={receipt.error?'notice error':'notice'}>{receipt.title}: {receipt.error?`${receipt.failure==='rejected'?'Queue request rejected.':'Queue unconfirmed.'} ${receipt.error}`:'Queueing album…'} {receipt.error&&<button disabled={receipt.unreadable} onClick={()=>void submitDigitalAlbum(receipt).catch(()=>{})}>Retry queue request</button>}{(receipt.failure==='rejected'||receipt.unreadable&&!!receipt.itemId)&&<button onClick={()=>dismissDigitalSubmission(receipt)}>{receipt.unreadable?'Discard unreadable receipt':'Dismiss'}</button>}</p>)}
- {route.page==='lists'?<CollectionLists key={`${actor.user_id}/${collection}`} collection={collection} listId={route.list} search={search} canEdit={!!features?.curation&&!!selectedCollection?.effective_permissions.can_curate} onSelect={list=>navigate({list,item:''})} onEntry={item=>navigate({page:'library',item,list:''})} onPrepare={item=>navigate({page:'preparation',item,list:''})} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:route.page==='preparation'?(PreparationPage?<PreparationPage userId={actor.user_id} pages={navigation.pages} onMore={()=>navigation.setPages(navigation.pages+1)} collection={collection} search={search} attention={route.attention} preset={route.preparationPreset} itemId={route.item} batchId={route.batch} onQuery={navigate} onMetadata={(item,collection)=>navigate({page:'metadata',item,collection,batch:''})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening audio preparation…</p>):route.page==='activity'?(ActivityPage?<ActivityPage collection={collection} collections={collections} itemId={route.item} batchId={route.batch} onQuery={navigate} onTask={(page,item,collection,preparationPreset)=>navigate({page,item,collection,batch:'',...(preparationPreset?{preparationPreset}:{})})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening activity…</p>):route.page==='purchases'?(features?.curation?(PurchaseInboxPage?<PurchaseInboxPage canAdminister={!!features?.administration&&actor.administrator} key={`${actor.user_id}:${collection}`} userId={actor.user_id} collection={collection} canCurate={!!selectedCollection?.effective_permissions.can_curate} canCreate={selectedCollection?.binding.state==='assigned'&&selectedCollection.binding.module==='org.junk.games'} onSessionExpired={()=>clearSession('Sign in again to review purchases.')} onChanged={()=>setRefresh(v=>v+1)}/>:<p role="status">Opening purchase inbox…</p>):<p>Purchase review is available at your private management address.</p>):route.page==='imports'?(features?.curation?(ImportsPage?<ImportsPage key={`${actor.user_id}:${collection}`} userId={actor.user_id} collection={collection} collections={collections} itemId={route.item} onQuery={navigate} onMetadata={(item,collection)=>navigate({page:'metadata',item,collection})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening imports…</p>):<p>Imports are available at your private management address.</p>):route.page==='metadata'?(features?.curation?(MetadataPage?<MetadataPage userId={actor.user_id} pages={navigation.pages} onMore={()=>navigation.setPages(navigation.pages+1)} collection={collection} search={search} itemId={route.item} reason={route.reason} attention={route.attention} batchId={route.batch} groupIds={route.group} onBatch={batch=>navigate({batch,item:''})} onLibrary={item=>navigate({page:'library',collection:item.collection_id,item:item.id})} onQuery={navigate} onChanged={()=>setRefresh(value=>value+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening metadata workspace…</p>):<p role="alert">Metadata care is available at your private management address.</p>):<>
+ {route.page==='lists'?<CollectionLists key={`${actor.user_id}/${collection}`} collection={collection} listId={route.list} search={search} canEdit={!!features?.curation&&!!selectedCollection?.effective_permissions.can_curate} onSelect={list=>navigate({list,item:''})} onEntry={item=>navigate({page:'library',item,list:''})} onPrepare={item=>navigate({page:'preparation',item,list:''})} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:route.page==='preparation'?(PreparationPage?<PreparationPage restore={navigation.restore} navigationRevision={navigation.revision} userId={actor.user_id} pages={navigation.pages} onMore={()=>navigation.setPages(navigation.pages+1)} collection={collection} search={search} attention={route.attention} preset={route.preparationPreset} itemId={route.item} batchId={route.batch} onQuery={navigate} onMetadata={(item,collection)=>navigate({page:'metadata',item,collection,batch:''})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening audio preparation…</p>):route.page==='activity'?(ActivityPage?<ActivityPage collection={collection} collections={collections} itemId={route.item} batchId={route.batch} onQuery={navigate} onTask={(page,item,collection,preparationPreset)=>navigate({page,item,collection,batch:'',...(preparationPreset?{preparationPreset}:{})})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening activity…</p>):route.page==='purchases'?(features?.curation?(PurchaseInboxPage?<PurchaseInboxPage canAdminister={!!features?.administration&&actor.administrator} key={`${actor.user_id}:${collection}`} userId={actor.user_id} collection={collection} canCurate={!!selectedCollection?.effective_permissions.can_curate} canCreate={selectedCollection?.binding.state==='assigned'&&selectedCollection.binding.module==='org.junk.games'} onSessionExpired={()=>clearSession('Sign in again to review purchases.')} onChanged={()=>setRefresh(v=>v+1)}/>:<p role="status">Opening purchase inbox…</p>):<p>Purchase review is available at your private management address.</p>):route.page==='imports'?(features?.curation?(ImportsPage?<ImportsPage key={`${actor.user_id}:${collection}`} userId={actor.user_id} collection={collection} collections={collections} itemId={route.item} onQuery={navigate} onMetadata={(item,collection)=>navigate({page:'metadata',item,collection})} onChanged={()=>setRefresh(v=>v+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening imports…</p>):<p>Imports are available at your private management address.</p>):route.page==='metadata'?(features?.curation?(MetadataPage?<MetadataPage restore={navigation.restore} navigationRevision={navigation.revision} userId={actor.user_id} pages={navigation.pages} onMore={()=>navigation.setPages(navigation.pages+1)} collection={collection} search={search} itemId={route.item} reason={route.reason} attention={route.attention} batchId={route.batch} groupIds={route.group} onBatch={batch=>navigate({batch,item:''})} onLibrary={item=>navigate({page:'library',collection:item.collection_id,item:item.id})} onQuery={navigate} onChanged={()=>setRefresh(value=>value+1)} onSessionExpired={()=>clearSession('Your session expired or was revoked. Sign in again.')}/>:<p role="status">Opening metadata workspace…</p>):<p role="alert">Metadata care is available at your private management address.</p>):<>
  <div className="browse-options"><label>Sort by<select aria-label="Sort by" value={sort} onChange={e=>changeScope({sort:e.target.value as BrowseLocation['sort']})}><option value="title">Title</option><option value="recently_added">Recently added</option><option value="artist">Artist</option><option value="platform">Platform</option></select></label><label>Show<select aria-label="Show" value={filter} onChange={e=>changeScope({filter:e.target.value as BrowseLocation['filter']})}><option value="all">All entries</option><option value="wishlist">Wishlist</option><option value="files_attached">Files attached</option><option value="playable">Playable audio</option><option value="album_playback_needs_attention">Album playback needs attention</option><option value="needs_attention">Needs my attention</option>{features?.curation&&canCurateAny&&<option value="removed">Removed entries</option>}</select></label>{(search||filter!=='all')&&<button onClick={()=>changeScope({search:'',filter:'all'})}>Clear filters</button>}</div>
  {libraryTotal!==null&&<p role="status" className="muted">{libraryLoaded} of {libraryTotal} entries loaded{busy?'…':''}</p>}
  {summaryState!=='ready'&&<p role={summaryState==='retrying'?'alert':'status'} className="muted">{summaryState==='retrying'?'Some summaries could not be updated. Retrying in the background…':'Updating library summaries…'}</p>}

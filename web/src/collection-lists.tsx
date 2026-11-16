@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from './runtime';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,retainUnchanged} from './runtime';
 import {startMusicTracks,type QueuedTrack} from './music-queue';
 import type {components} from './generated/api';
 type Summary=components['schemas']['CollectionListSummary'];type View=components['schemas']['CollectionListView'];type Entry=View['entries']['items'][number];type Change=components['schemas']['CollectionListChange'];
@@ -12,7 +12,7 @@ export default function CollectionLists({collection,listId,search,canEdit,onSele
  function report(e:unknown){if(isApiRequestError(e)&&e.status===401)onSessionExpired();else setError(isApiRequestError(e)&&e.code==='revision_conflict'?'This list changed while you were working. Reload it to see the current order before trying again.':requestErrorMessage(e,'Access to this collection is no longer available.'));}
  useEffect(()=>{reads.current.abort();const controller=new AbortController();reads.current=controller;let timer:ReturnType<typeof setTimeout>;setLoading(true);if(!collection){setLoading(false);return;}
  async function load(){try{
-  if(listId){const next=await loadView(controller.signal);if(controller.signal.aborted)return;setView(next);}
+  if(listId){const next=await loadView(controller.signal);if(controller.signal.aborted)return;setView(current=>retainUnchanged(current,next));}
   else{const result=await api<{items:Summary[];next_cursor:string|null}>(`/collections/${collection}/lists?${new URLSearchParams({search,limit:'50'})}`,{signal:controller.signal});setLists(result.items);setCursor(result.next_cursor);}
   setLoading(false);if(listId)timer=setTimeout(load,5000);
  }catch(e){if(!controller.signal.aborted){setLoading(false);if(isApiRequestError(e)&&[401,403,404].includes(e.status))setView(undefined);report(e);}}}

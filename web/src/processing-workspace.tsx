@@ -1,6 +1,6 @@
 import AccurateRipCheck from './accuraterip-check';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useState,useRef,api} from '@collector/runtime';
+import React,{useEffect,useState,useRef,api,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 
 
@@ -118,7 +118,7 @@ function RepresentationOperations({item,capture,representation,capabilities,snap
  useEffect(()=>{
   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
   setPlanError('');
-  async function refresh(){try{const next=await api<ScanPlan>(`/captures/${capture.id}/operations/plan`,{method:'POST',body:request,signal:controller.signal});if(controller.signal.aborted)return;setPlan({request,value:next});if(operation==='org.junk.music.import-analysis'&&next.state==='completed'&&next.job?.id&&notified.current!==next.job.id){const saved=await api<Item>(`/items/${item.id}`,{signal:controller.signal});if(controller.signal.aborted)return;notified.current=next.job.id;changedCallback.current?.(saved);}if(next.state==='running'||next.state==='cancelling'){timer=setTimeout(()=>void refresh(),1200);}else{await load(undefined,controller.signal);}}catch(error){if(!controller.signal.aborted)setPlanError(error instanceof Error?error.message:String(error));}}
+  async function refresh(){try{const next=await api<ScanPlan>(`/captures/${capture.id}/operations/plan`,{method:'POST',body:request,signal:controller.signal});if(controller.signal.aborted)return;setPlan(current=>retainUnchanged(current,{request,value:next}));if(operation==='org.junk.music.import-analysis'&&next.state==='completed'&&next.job?.id&&notified.current!==next.job.id){const saved=await api<Item>(`/items/${item.id}`,{signal:controller.signal});if(controller.signal.aborted)return;notified.current=next.job.id;changedCallback.current?.(saved);}if(next.state==='running'||next.state==='cancelling'){timer=setTimeout(()=>void refresh(),1200);}else{await load(undefined,controller.signal);}}catch(error){if(!controller.signal.aborted)setPlanError(error instanceof Error?error.message:String(error));}}
   void refresh();return()=>{controller.abort();if(timer)clearTimeout(timer);};
  },[request,revision]);
  async function run(){if(!plan||submitting||['running','cancelling','blocked'].includes(plan.state))return;setSubmitting(true);try{await api<{job_id:string}>(`/captures/${capture.id}/operations`,{method:'POST',body:JSON.stringify(plan.command)});setRevision(value=>value+1);window.dispatchEvent(new Event('collector-jobs-updated'));}catch(error){onError(error);}finally{setSubmitting(false);}}

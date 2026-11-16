@@ -4,7 +4,7 @@ import PurchaseDetails from './purchase-details';
 import ActionMenu from './action-menu';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Availability=components['schemas']['MusicTrackAvailability'];
@@ -110,7 +110,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
    try{
     const summary=await api<components['schemas']['TrackSummary']>(`/items/${item.id}/client-tracks/summary`,{signal:controller.signal});
     if(controller.signal.aborted)return;
-    if(summary.pending){setLoading(true);timer=setTimeout(load,1500);return;}
+    if(summary.pending){timer=setTimeout(load,1500);return;}
     let next=trackCache.current?.revision===summary.tracks_revision?trackCache.current.rows:undefined;
     if(!next){
      next=[];let cursor:number|undefined;
@@ -123,7 +123,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
      trackCache.current={revision:summary.tracks_revision,rows:next};
     }
     const nextCoverage=item.supports_listening?await api<Coverage>(`/items/${item.id}/music-disc-coverage`,{signal:controller.signal}):undefined;
-    if(controller.signal.aborted)return;setRows(next);setCoverage(nextCoverage);setLoading(false);
+    if(controller.signal.aborted)return;setRows(next);setCoverage(current=>retainUnchanged(current,nextCoverage));setLoading(false);
     const outputs=JSON.stringify(next.flatMap(row=>row.state.status==='available'?[row.state.representation_id]:[]).sort());
     if(callbacks.current.onPrepared&&outputs!==notifiedOutputs.current&&outputs!=='[]'){
      const saved=await api<Item>(`/items/${item.id}`,{signal:controller.signal});
@@ -144,8 +144,8 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
      api<AlbumPlan>(`/items/${item.id}/music-preparation-plan${preset==='flac'?'':'?'+preparationQuery(preset)}`,{signal:controller.signal,operation:'Load track preparation choices'}),
      api<Batch[]>(`/items/${item.id}/music-preparation-batches`,{signal:controller.signal,operation:'Load track preparation results'}),
     ]);if(controller.signal.aborted)return;
-    setPlan(nextPlan);setBatches(nextBatches);
-    setDiscSources(current=>{const next={...current};for(const disc of nextPlan.discs){const selected=disc.sources.find(source=>preparationSources?.includes(source.source_representation_id))??disc.sources.find(source=>source.default_selected);if(!disc.sources.some(source=>source.source_representation_id===next[disc.capture_id]))next[disc.capture_id]=selected?.source_representation_id||'';}return next;});
+    setPlan(current=>retainUnchanged(current,nextPlan));setBatches(current=>retainUnchanged(current,nextBatches));
+    setDiscSources(current=>{const next={...current};for(const disc of nextPlan.discs){const selected=disc.sources.find(source=>preparationSources?.includes(source.source_representation_id))??disc.sources.find(source=>source.default_selected);if(!disc.sources.some(source=>source.source_representation_id===next[disc.capture_id]))next[disc.capture_id]=selected?.source_representation_id||'';}return retainUnchanged(current,next);});
     const added=nextPlan.discs.filter(disc=>!initializedDiscs.current.has(disc.capture_id)).map(disc=>disc.capture_id);
     for(const id of added)initializedDiscs.current.add(id);
     if(added.length)setIncludedDiscs(current=>new Set([...current,...added]));

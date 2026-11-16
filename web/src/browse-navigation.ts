@@ -1,3 +1,4 @@
+import type {ScrollTarget} from './browse-scroll-restore';
 import {useEffect,useRef,useState} from './runtime';
 import {preparationPreset,type PreparationPreset} from './audio-profiles';
 import type {operations} from './generated/api';
@@ -14,7 +15,7 @@ export function browseUrl(value:BrowseLocation){const q=new URLSearchParams();if
 export function useBrowseNavigation(){
  const [route,setRoute]=useState(readLocation);const [revision,setRevision]=useState(0);
  const workspaces=useRef(new Map<BrowseLocation['page'],{route:BrowseLocation;state:Record<string,unknown>}>());
- const restore=useRef<{scroll:number;focus?:string}|null>(null);
+ const restore=useRef<ScrollTarget|null>(null);
  useEffect(()=>{const previous=history.scrollRestoration;history.scrollRestoration='manual';
   const pop=()=>{restore.current={scroll:history.state?.scroll||0,focus:history.state?.focus};setRoute(readLocation());setRevision(v=>v+1);};
   const save=()=>history.replaceState({...history.state,scroll:window.scrollY},'',location.href);

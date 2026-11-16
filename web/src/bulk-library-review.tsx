@@ -1,7 +1,7 @@
 import {profileLabel} from './audio-profiles';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
-import React,{useEffect,useState,api,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useState,api,requestErrorMessage,isApiRequestError,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 import {bytes} from './work-progress';
 type S=components['schemas'];export type Summary=S['BulkLibrarySummary'];
@@ -26,7 +26,7 @@ export default function BulkReview({id,onOpen,onChanged,onSessionExpired}:{id:st
      if(!next)break;
     }
     if(controller.signal.aborted)return;
-    setSummary(summary);setMembers(rows);setCursor(next);setLoadError('');
+    setSummary(current=>retainUnchanged(current,summary));setMembers(current=>retainUnchanged(current,rows));setCursor(next);setLoadError('');
     if(summary.plans_during_admission&&(summary.state==='completed'||summary.state==='cancelled'))return;
    }catch(e){if(!controller.signal.aborted)fail(e,setLoadError);}
    if(!controller.signal.aborted)timer=setTimeout(load,2000);

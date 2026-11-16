@@ -98,3 +98,10 @@ async function waitForReadRetry(milliseconds:number,signal?:AbortSignal|null){
 }
 
 export {usePlaybackPreference,setPlaybackPreference,validOpusBitrate,type PlaybackFormat} from './playback-preference';
+
+
+// Poll responses are bounded JSON projections. Retain the committed value
+// when a read returns the same data so dependent effects stay idle.
+export function retainUnchanged<T>(current:T,next:T):T {
+ return current===next||JSON.stringify(current)===JSON.stringify(next)?current:next;
+}

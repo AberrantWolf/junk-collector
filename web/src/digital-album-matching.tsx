@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState,api,queueDigitalAlbum,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,queueDigitalAlbum,requestErrorMessage,isApiRequestError,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 type Item=components['schemas']['PresentedItem'];
 type Assignment=components['schemas']['DigitalTrackAssignment'];
@@ -15,7 +15,7 @@ export default function DigitalAlbumMatching({userId,item,metadataRevision,disab
  const owns=(controller:AbortController)=>lifetime.current===controller&&!controller.signal.aborted;
  useEffect(()=>{const controller=new AbortController();lifetime.current=controller;setStatus(undefined);setBusy(false);setError('');setLoadError('');let timer:ReturnType<typeof setTimeout>|undefined;
   let previous:Status|undefined;
-  async function load(){try{const known=previous?.jobs.find(work=>work.result)?.result_revision;const next=await api<Status>(`/items/${item.id}/digital-album-matches${known?`?known_result=${encodeURIComponent(known)}`:''}`,{signal:controller.signal});if(controller.signal.aborted)return;next.jobs=next.jobs.map(work=>({...work,result:work.result||(work.result_revision?previous?.jobs.find(old=>old.job.id===work.job.id&&old.result_revision===work.result_revision)?.result:null)||null}));previous=next;setStatus(next);setLoadError('');if(next.jobs.some(w=>active.has(w.job.state)))timer=setTimeout(load,1000);}catch(e){if(!controller.signal.aborted){if(isApiRequestError(e)&&e.code==='unauthenticated')callbacks.current.onError(e);else setLoadError(requestErrorMessage(e));timer=setTimeout(load,3000);}}}
+  async function load(){try{const known=previous?.jobs.find(work=>work.result)?.result_revision;const next=await api<Status>(`/items/${item.id}/digital-album-matches${known?`?known_result=${encodeURIComponent(known)}`:''}`,{signal:controller.signal});if(controller.signal.aborted)return;next.jobs=next.jobs.map(work=>({...work,result:work.result||(work.result_revision?previous?.jobs.find(old=>old.job.id===work.job.id&&old.result_revision===work.result_revision)?.result:null)||null}));if(retainUnchanged(previous,next)!==previous){previous=next;setStatus(next);}setLoadError('');if(next.jobs.some(w=>active.has(w.job.state)))timer=setTimeout(load,1000);}catch(e){if(!controller.signal.aborted){if(isApiRequestError(e)&&e.code==='unauthenticated')callbacks.current.onError(e);else setLoadError(requestErrorMessage(e));timer=setTimeout(load,3000);}}}
   void load();return()=>{controller.abort();if(timer)clearTimeout(timer);};
  },[userId,item.id,item.revision,metadataRevision,reload]);
  const pending=status?.jobs.find(w=>active.has(w.job.state));const latest=status?.jobs[0];const completed=status?.jobs.find(w=>w.result);const inventoryChanged=!!completed?.result&&(completed.stale!==false||completed.result.inventory_revision!==item.revision);

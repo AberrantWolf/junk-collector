@@ -61,6 +61,12 @@ is client state; Collector owns only its shared derived projections.
 
 ## User-visible contract
 
+The web client must keep the current results, scroll and focus during background
+reads of the same workspace. Unchanged responses must leave the visible state
+alone. Adopt refreshed pages together and retain the pages already requested.
+Only navigation may apply a saved scroll position. Access loss must still remove
+results that the current session can no longer view.
+
 1. Establish trusted server identity and check the current login independently of
    the library. Show connected, authentication required, forbidden, unreachable or
    identity mismatch distinctly. A reachable control server does not prove that

@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 
 type Coverage=components['schemas']['MusicAlbumCoverage'];
@@ -19,7 +19,7 @@ export default function MusicBrainzDiscSubmission({itemId,releaseId,refreshKey,s
    try{
     const coverage=await api<Coverage>(`/items/${itemId}/music-disc-coverage`,{signal:controller.signal});
     if(controller.signal.aborted)return;
-    setResult({scope,coverage});timer=setTimeout(load,5000);
+    setResult(current=>retainUnchanged(current,{scope,coverage}));timer=setTimeout(load,5000);
    }catch(error){
     if(controller.signal.aborted)return;
     setResult({scope,error:requestErrorMessage(error,'Disc ID submission is unavailable.')});

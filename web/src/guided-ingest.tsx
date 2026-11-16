@@ -6,7 +6,7 @@ import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {WorkProgress,UploadMeter,bytes} from './work-progress';
-import React,{useEffect,useRef,useState,api,getApiIdentity,useOperationScope,isApiRequestError,requestErrorMessage} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,getApiIdentity,useOperationScope,isApiRequestError,requestErrorMessage,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 import DestinationChooser from './destination-chooser';
 import InboxPackageChooser from './inbox-package-chooser';
@@ -61,16 +61,16 @@ export default function GuidedIngest({initialImportId,historyOnly=false,initialI
    const item=associated?await request<Item>(`/items/${associated}`,{signal:attempt.signal}):null;
    return {value,item};
   },{success:({value,item})=>{
-   setDetail(value);if(!targetEdited.current)setTarget(item);
+   setDetail(current=>retainUnchanged(current,value));if(!targetEdited.current)setTarget(current=>retainUnchanged(current,item));
    if(value.import.phase==='published'&&item){const marker=JSON.stringify(item);if(notified.current.get(item.id)!==marker){notified.current.set(item.id,marker);callbacks.current.onPublished(item);}}
   },failure:fail,settled:()=>{reading.current=false;}});
  }
  async function open(id:string){setDetailOpen(true);setTarget(undefined);targetEdited.current=false;detailId.current=id;await loadDetail(id);}
  useEffect(()=>{
-  lifecycle.current=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-  async function poll(){const id=detailId.current;if(id&&!reading.current&&!mutating.current)await loadDetail(id);if(!lifecycle.current.signal.aborted)timer=setTimeout(poll,2000);}
+  const controller=new AbortController();lifecycle.current=controller;let timer:ReturnType<typeof setTimeout>|undefined;
+  async function poll(){const id=detailId.current;if(id&&!reading.current&&!mutating.current)await loadDetail(id);if(!controller.signal.aborted)timer=setTimeout(poll,2000);}
   void poll();if(!historyOnly)void request<InboxSource[]>(`/collections/${collectionId}/inboxes?packages=false`).then(value=>{setInboxes(value);setInboxLabel(value[0]?.label||'');}).catch(fail);
-  return()=>{lifecycle.current.abort();reads.cancel();reading.current=false;if(timer)clearTimeout(timer);callbacks.current.setBusy(false);};
+  return()=>{controller.abort();reads.cancel();reading.current=false;if(timer)clearTimeout(timer);callbacks.current.setBusy(false);};
  },[collectionId,historyOnly]);
  useEffect(()=>{if(!uploadProgress)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[!!uploadProgress]);
  useEffect(()=>{if(initialImportId)void open(initialImportId);},[initialImportId]);

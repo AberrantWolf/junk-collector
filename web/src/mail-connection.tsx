@@ -1,4 +1,4 @@
-import React,{useEffect,useRef,useState,api,requestErrorMessage,isApiRequestError} from '@collector/runtime';
+import React,{useEffect,useRef,useState,api,requestErrorMessage,isApiRequestError,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 type Profile=components['schemas']['MailProfile'];
 type Connection=components['schemas']['MailConnection'];
@@ -15,9 +15,9 @@ export default function MailConnection({userId,collection,canCurate,canAdministe
    const results=await Promise.allSettled([api<Profile[]>('/mail/profiles',{signal:c.signal,operation:'Load mail profiles'}),api<Connection[]>('/mail/connections',{signal:c.signal,operation:'Load mail connections'}),canAdminister?api<Setup>('/mail/setup',{signal:c.signal,operation:'Load Bridge status'}):Promise.resolve(undefined)]);
    if(c.signal.aborted)return;
    const [p,cx,s]=results;
-   if(p.status==='fulfilled')setProfiles(p.value);
-   if(cx.status==='fulfilled')setConnections(cx.value);
-   if(s.status==='fulfilled')setSetup(s.value);else setSetup(undefined);
+   if(p.status==='fulfilled')setProfiles(current=>retainUnchanged(current,p.value));
+   if(cx.status==='fulfilled')setConnections(current=>retainUnchanged(current,cx.value));
+   if(s.status==='fulfilled')setSetup(current=>retainUnchanged(current,s.value));else setSetup(undefined);
    if(p.status==='fulfilled'&&cx.status==='fulfilled')setLoaded(true);
    const failures=results.filter((v):v is PromiseRejectedResult=>v.status==='rejected');
    const expired=failures.find(v=>isApiRequestError(v.reason)&&v.reason.code==='unauthenticated');
