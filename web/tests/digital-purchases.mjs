@@ -78,13 +78,13 @@ try{
  await expect(player.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();await expect(player.getByRole('button',{name:'Next track',exact:true})).toBeDisabled();
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
  // A lossy original can supply the live encoder without saved derivatives.
- await player.getByLabel('Playback format').selectOption('opus');
- const liveMp3=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('format=opus'));
+ await player.getByLabel('Playback format').selectOption('low_bandwidth');
+ const liveMp3=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('mode=low_bandwidth'));
  await tracks.getByRole('button',{name:'Play track 2: MP3 original',exact:true}).click();
  assert.equal((await liveMp3).status(),200);
  await expect.poll(()=>player.locator('audio').evaluate(audio=>!audio.paused&&audio.currentTime>.02)).toBe(true);
  await player.getByRole('button',{name:'Pause',exact:true}).click();
- await player.getByLabel('Playback format').selectOption('saved');
+ await player.getByLabel('Playback format').selectOption('high_bandwidth');
  // Close an album while its real server response is withheld. A later response
  // cannot replace a new track selected after reopening the panel.
  let releaseAlbum;const heldAlbum=new Promise(resolve=>{releaseAlbum=resolve;});
@@ -301,7 +301,7 @@ try{
  await page.setViewportSize({width:1440,height:1000});
  await page.goto(`${origin}/imports?collection=${collection}`);
  await imports.getByLabel("Choose one package's files").setInputFiles(wavFile);
- await imports.getByLabel('Audio preparation after import',{exact:true}).selectOption('none');
+ await expect(imports.getByLabel('Audio preparation after import',{exact:true})).toHaveValue('default');
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
  await page.waitForURL(url=>url.searchParams.has('item'));
  const laterIntake=new URL(page.url()).searchParams.get('item');
@@ -309,15 +309,15 @@ try{
  const laterItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items[0].import.target_item_id,laterIntake);
  await page.goto(`${origin}/?collection=${collection}&item=${laterItem}`);
  // The strict WAV reader plays the declared 24-bit segment before any FLAC is prepared.
- await player.getByLabel('Playback format').selectOption('flac');
- const liveWav=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('format=flac'));
+ await player.getByLabel('Playback format').selectOption('high_bandwidth');
+ const liveWav=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('mode=high_bandwidth'));
  await tracks.getByRole('button',{name:'Play track 1: 03.wav',exact:true}).click();
  const converted=await liveWav;
  assert.equal(converted.status(),200);
  assert.equal(converted.headers()['accept-ranges'],'none');
  await expect.poll(()=>player.locator('audio').evaluate(audio=>!audio.paused&&audio.currentTime>.02)).toBe(true);
  await player.getByRole('button',{name:'Pause',exact:true}).click();
- await player.getByLabel('Playback format').selectOption('saved');
+ await player.getByLabel('Playback format').selectOption('high_bandwidth');
  await page.getByRole('button',{name:'Album management',exact:true}).click();await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();
  await editor.getByRole('button',{name:'Music',exact:true}).click();
  const prepareLater=editor.getByRole('region',{name:'Prepare album',exact:true});

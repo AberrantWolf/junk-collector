@@ -2,6 +2,7 @@
 use super::*;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const IDENTITY: &str = ".archive-identity";
 const BINDING: &str = "archive-binding";
@@ -61,6 +62,7 @@ pub(crate) struct ArchiveGuard {
     root: File,
     mount: Option<ArchiveMount>,
     unavailable: AtomicBool,
+    last_healthy: StdMutex<Instant>,
 }
 
 fn unavailable(reason: impl std::fmt::Display) -> Error {
@@ -101,6 +103,7 @@ impl ArchiveGuard {
             root: File::open(archive).map_err(unavailable)?,
             mount,
             unavailable: AtomicBool::new(false),
+            last_healthy: StdMutex::new(Instant::now()),
         });
         guard.check()?;
         Ok(guard)
@@ -118,10 +121,53 @@ impl ArchiveGuard {
         self.configured.clone()
     }
 
-    pub(crate) fn check(&self) -> Result<()> {
+    pub(crate) fn start_probe(self: &Arc<Self>) -> Result<()> {
+        if self.mount.is_some() {
+            let guard = Arc::downgrade(self);
+            std::thread::Builder::new()
+                .name("collector-archive-probe".into())
+                .spawn(move || {
+                    loop {
+                        std::thread::sleep(Duration::from_millis(500));
+                        let Some(guard) = guard.upgrade() else { break };
+                        if let Err(error) = guard.check() {
+                            tracing::warn!(%error, "archive health probe stopped");
+                            break;
+                        }
+                    }
+                })
+                .map_err(storage)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_latched(&self) -> Result<()> {
         if self.unavailable.load(Ordering::Acquire) {
             return Err(unavailable("this process has latched a storage failure"));
         }
+        Ok(())
+    }
+
+    pub(crate) fn check_local_operation(&self) -> Result<()> {
+        if self.mount.is_none() {
+            return self.check();
+        }
+        self.check_freshness()
+    }
+
+    pub(crate) fn check_freshness(&self) -> Result<()> {
+        self.check_latched()?;
+        if self.mount.is_some()
+            && self.last_healthy.lock().map_err(storage)?.elapsed() > Duration::from_secs(2)
+        {
+            return Err(Error::Unavailable("archive health check is overdue".into()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self) -> Result<()> {
+        self.check_latched()?;
+        let started = Instant::now();
         let result = (|| {
             #[cfg(unix)]
             {
@@ -157,6 +203,9 @@ impl ArchiveGuard {
         })();
         if result.is_err() {
             self.unavailable.store(true, Ordering::Release);
+        } else {
+            let mut checked = self.last_healthy.lock().map_err(storage)?;
+            *checked = (*checked).max(started);
         }
         result
     }
@@ -531,6 +580,12 @@ pub(crate) struct GuardedPublicationFault {
 }
 impl PublicationFaultInjector for GuardedPublicationFault {
     fn check(&self, point: PublicationFaultPoint) -> Result<()> {
+        // At this point the archive commit already exists and the SQL writer
+        // is held. Filesystem health checks belong outside this transaction.
+        if point == PublicationFaultPoint::ProjectionWriting {
+            self.guard.check_freshness()?;
+            return self.inner.check(point);
+        }
         self.guard.check()?;
         let result = self.inner.check(point);
         self.guard.check()?;

@@ -36,7 +36,7 @@ impl Store {
         decode: impl FnOnce(&str) -> Result<T>,
     ) -> Result<Option<T>> {
         let raw: Option<String> = {
-            let db = self.db.read_lock()?;
+            let db = self.read_db()?;
             db.query_row("SELECT c.record FROM private.digital_checkpoints c JOIN private.jobs j ON j.id=c.job_id WHERE j.id=? AND j.user_id=?",params![id.to_string(),user.to_string()],|r|r.get(0)).optional().map_err(storage)?
         };
         raw.as_deref().map(decode).transpose()

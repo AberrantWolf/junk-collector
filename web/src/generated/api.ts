@@ -4399,6 +4399,7 @@ export interface components {
         LibraryPage: {
             catalog_revision: string;
             items: components["schemas"]["LibraryEntry"][];
+            membership_revision: string;
             next_cursor?: string | null;
             summary_state: components["schemas"]["LibrarySummaryState"];
         };
@@ -11777,9 +11778,9 @@ export interface operations {
     };
     music_stream: {
         parameters: {
-            query: {
-                format: "flac" | "opus";
-                /** @description Required for Opus. Target variable bitrate in kbps, 6–256. */
+            query?: {
+                mode?: "original" | "high_bandwidth" | "low_bandwidth";
+                /** @description Low Bandwidth Opus target in kbps, 6–256. Defaults to 128. */
                 bitrate?: number;
                 /** @description Track number when playing a source-bound track. */
                 track?: number;
@@ -11805,6 +11806,8 @@ export interface operations {
                 content: {
                     "audio/flac": unknown;
                     "audio/ogg": unknown;
+                    "audio/wav": unknown;
+                    "audio/mpeg": unknown;
                 };
             };
             /** @description Partial Content */
@@ -13051,6 +13054,10 @@ export interface operations {
                 limit?: number;
                 revision?: string;
                 max_bytes?: number;
+                /** @description Comma-separated IDs for refreshing up to 50 visible rows */
+                row_ids?: string;
+                /** @description Required when refreshing visible rows */
+                membership_revision?: string;
             };
             header?: never;
             path?: never;
@@ -13069,6 +13076,13 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

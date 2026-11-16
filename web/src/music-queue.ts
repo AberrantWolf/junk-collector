@@ -1,5 +1,5 @@
 import {useSyncExternalStore} from 'react';
-import {setPlaybackPreferenceUser} from './playback-preference';
+import {setPlaybackPreferenceUser,type PlaybackFormat} from './playback-preference';
 
 // Personal browser activity: immutable coordinates, never paths or media bytes.
 export type QueuedTrack={id:string;itemId:string;collectionId:string;album:string;artist?:string;title:string;position:number;representationId:string;fileIndex:number;mediaType:string;artwork?:string;original?:boolean;sourceId?:string;sourcePosition?:number;seconds?:number;opusBitrate?:number;liveOnly?:boolean};
@@ -27,9 +27,9 @@ export function reorderMusicTrack(id:string,delta:number){const tracks=[...state
 export function clearMusicQueue(){publish(empty);}
 export function musicTrackUrl(track:QueuedTrack){return `/api/v1/items/${track.itemId}/representations/${track.representationId}/${track.fileIndex}`;}
 
-export function streamTrackUrl(track:QueuedTrack,format:'flac'|'opus',bitrate:number,start=0){
- const query=new URLSearchParams({format});
- if(format==='opus')query.set('bitrate',String(bitrate));
+export function streamTrackUrl(track:QueuedTrack,mode:PlaybackFormat,bitrate:number,start=0){
+ const query=new URLSearchParams({mode});
+ if(mode==='low_bandwidth')query.set('bitrate',String(bitrate));
  if(track.sourceId&&track.sourcePosition)query.set('track',String(track.sourcePosition));else query.set('file',String(track.fileIndex));
  if(start>0)query.set('start_ms',String(Math.floor(start*1000)));
  return `/api/v1/items/${track.itemId}/music-stream/${track.sourceId||track.representationId}?${query}`;

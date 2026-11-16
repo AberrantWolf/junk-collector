@@ -7576,7 +7576,27 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     let recovered = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     recovered.resume_guided_ingests().unwrap();
     assert!(recovered.run_next_job("guided-analysis").unwrap());
-    assert!(recovered.run_next_job("guided-publication").unwrap());
+    use collector_app::JobLane;
+    assert!(
+        recovered
+            .run_next_job_in_lane("guided-prepare", JobLane::Background)
+            .unwrap()
+    );
+    assert!(matches!(
+        store.capture(accepted.imports[0].capture_id),
+        Err(Error::NotFound)
+    ));
+    drop(recovered);
+    drop(service);
+    drop(store);
+    let store =
+        Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    let recovered = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    assert!(
+        recovered
+            .run_next_job_in_lane("guided-after-restart", JobLane::Publication)
+            .unwrap()
+    );
     let detail = recovered.ingest_detail(&actor, id).unwrap();
     assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
     assert_eq!(detail.summary.capture_revision, Some(Revision(1)));
@@ -13060,7 +13080,7 @@ fn published_import_reconciles_a_crash_before_job_completion() {
 
 #[test]
 fn final_chunk_replay() {
-    let (_root, _store, actor, service, collection) = setup();
+    let (root, store, actor, service, collection) = setup();
     let import = staged_import(&service, &actor, collection.id, "final-retry");
     assert!(
         service
@@ -13091,6 +13111,11 @@ fn final_chunk_replay() {
     service.run_next_job("worker").unwrap();
     assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
     let published = service.provisional_import(&actor, import.id).unwrap();
+    let staging = root
+        .path()
+        .join("state/imports")
+        .join(import.id.to_string());
+    assert!(!staging.exists());
     assert_eq!(
         service
             .stage_provisional_import_chunk(&actor, import.id, 0, 0, b"data")
@@ -13098,6 +13123,62 @@ fn final_chunk_replay() {
             .revision,
         published.revision
     );
+    assert!(matches!(
+        service.stage_provisional_import_chunk(&actor, import.id, 0, 0, b"evil"),
+        Err(Error::Conflict)
+    ));
+    let inventory = store
+        .package_inventory(collection.id, PackageScope::Import(import.id))
+        .unwrap();
+    let mut reader = store
+        .package_file(collection.id, inventory.scope, inventory.files[0].id)
+        .unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"data");
+}
+
+#[test]
+fn published_import_staging_recovery_retains_bytes_until_archive_is_available() {
+    let (root, store, actor, service, collection) = setup();
+    let import = reviewed_unattached_import(&service, &actor, collection.id, "staging-recovery");
+    service
+        .enqueue_import_publication(&actor, import.id, &command())
+        .unwrap();
+    service.run_next_job("publisher").unwrap();
+
+    let staging = root
+        .path()
+        .join("state/imports")
+        .join(import.id.to_string());
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("0.part"), b"data").unwrap();
+    std::fs::write(staging.join("unknown"), b"retain").unwrap();
+    let capture = store.capture(import.capture_id).unwrap();
+    let archive_collection = std::fs::read_dir(root.path().join("archive/collections"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let master = archive_collection
+        .join("captures")
+        .join(capture.id.to_string())
+        .join("payload")
+        .join(import.representation_id.to_string())
+        .join(&capture.representations[0].files[0].name);
+    let held = master.with_extension("held");
+    std::fs::rename(&master, &held).unwrap();
+    assert!(store.reconcile_guided_cleanup().is_err());
+    assert_eq!(std::fs::read(staging.join("0.part")).unwrap(), b"data");
+    std::fs::rename(&held, &master).unwrap();
+    drop(service);
+    drop(store);
+
+    let _reopened = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(!staging.join("0.part").exists());
+    assert_eq!(std::fs::read(staging.join("unknown")).unwrap(), b"retain");
+    assert_eq!(std::fs::read(master).unwrap(), b"data");
 }
 
 #[test]
@@ -29194,7 +29275,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
         })
         .unwrap();
     let sources = store
-        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en")
+        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en", None)
         .unwrap();
     assert!(sources.items.iter().all(|source| source.cached.is_some()));
     let before = sources
@@ -29219,7 +29300,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
         )
         .unwrap();
     let sources = store
-        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en")
+        .library_entry_sources(actor.user_id, query.clone(), &namespace, "en", None)
         .unwrap();
     assert!(
         sources
@@ -29318,7 +29399,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
     service.library_entries(&actor, query.clone()).unwrap();
     assert!(
         store
-            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja", None)
             .unwrap()
             .items
             .iter()
@@ -29337,7 +29418,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     assert!(
         store
-            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja", None)
             .unwrap()
             .items
             .iter()
@@ -29356,7 +29437,7 @@ fn library_row_cache_reuses_compact_rows_and_fences_edits_roles_restart_and_rein
     store.reindex().unwrap();
     assert!(
         store
-            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja")
+            .library_entry_sources(actor.user_id, query.clone(), &namespace, "ja", None)
             .unwrap()
             .items
             .iter()
@@ -31783,4 +31864,151 @@ fn worker_catalog_contention_resumes_shared_provider_work_without_manual_retry()
         "shared provider did not resume after catalog contention: {:?}",
         store.job_record(parent, actor.user_id)
     );
+}
+
+#[test]
+fn float_wav_import_keeps_playback_coordinates_when_an_alternate_fails() {
+    use collector_app::{MusicStreamRequest, StreamCodec, StreamCoordinate, StreamInput};
+
+    let (_root, store, actor, service, collection) = setup();
+    let mut wav = b"RIFF\x30\0\0\0WAVEfmt \x10\0\0\0\x03\0\x01\0".to_vec();
+    wav.extend(48_000u32.to_le_bytes());
+    wav.extend(192_000u32.to_le_bytes());
+    wav.extend(b"\x04\0\x20\0data\x0c\0\0\0");
+    for sample in [-0.5f32, 0.25, 1.25] {
+        wav.extend(sample.to_le_bytes());
+    }
+    let names = ["MP3/01.mp3", "WAV/01.wav"];
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &names,
+        &[b"invalid alternate MP3", &wav],
+        |_| None,
+        Some(vec![collector_modules::music::files::MusicImportTrack {
+            file_name: names[1].into(),
+            disc_position: None,
+            display_position: None,
+        }]),
+    );
+    let item = detail.summary.target_item_id.unwrap();
+    let capture = &store.item(item).unwrap().captures[0];
+    let source = capture.representations[0].id;
+    let rows = service
+        .recorded_music_track_availability(&actor, item)
+        .unwrap();
+    let row = rows.iter().find(|row| row.primary_playback()).unwrap();
+    assert_eq!(row.audio_format.as_ref().unwrap().bits_per_sample, Some(32));
+    assert!(!row.can_prepare);
+    assert!(row.can_stream_original);
+    let (input, _) = service
+        .music_stream(
+            &actor,
+            item,
+            source,
+            MusicStreamRequest {
+                coordinate: StreamCoordinate::Track(row.track_position),
+                codec: StreamCodec::Flac,
+                start_ms: 0,
+            },
+            &|| Ok(()),
+        )
+        .unwrap();
+    let StreamInput::Pcm(mut pcm, 3) = input else {
+        panic!("expected three frames of playback PCM")
+    };
+    assert_eq!(pcm.format().bits, 24);
+    let mut decoded = [0; 9];
+    assert_eq!(pcm.read_pcm(&mut decoded).unwrap(), 3);
+    assert_eq!(decoded, [0, 0, 0xc0, 0, 0, 0x20, 0xff, 0xff, 0x7f]);
+    assert_eq!(pcm.read_pcm(&mut decoded).unwrap(), 0);
+
+    let alternate = capture.representations[0]
+        .files
+        .iter()
+        .position(|f| f.name == names[0])
+        .unwrap();
+    let original = capture.representations[0]
+        .files
+        .iter()
+        .position(|f| f.name == names[1])
+        .unwrap();
+    assert_eq!(row.track_position, (original + 1) as u16);
+    assert_eq!(
+        resource_bytes(
+            service
+                .representation(&actor, item, source, original)
+                .unwrap()
+        ),
+        wav
+    );
+    assert_eq!(
+        resource_bytes(
+            service
+                .representation(&actor, item, source, alternate)
+                .unwrap()
+        ),
+        b"invalid alternate MP3"
+    );
+    let summaries = service
+        .capture_processing_summaries(&actor, capture.id, source, None, 20)
+        .unwrap();
+    assert!(
+        summaries
+            .items
+            .iter()
+            .flat_map(|summary| &summary.limitations)
+            .any(|warning| warning.contains(names[0]))
+    );
+}
+
+#[test]
+fn large_reviewed_music_package_admits_analysis_without_copying_its_inventory() {
+    let (_root, store, actor, service, collection) = setup();
+    let mp3 = include_bytes!("fixtures/digital-audio/02.mp3").as_slice();
+    let names = (1..=310)
+        .map(|index| {
+            format!(
+                "MP3/{index:03} - {}.mp3",
+                "Long soundtrack filename ".repeat(7)
+            )
+        })
+        .collect::<Vec<_>>();
+    let names_ref = names.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut files: Vec<&[u8]> = vec![b"invalid alternate MP3"; names.len()];
+    files[309] = mp3;
+    let detail = admit_digital_test_package_with_review(
+        &service,
+        &actor,
+        collection.id,
+        &names_ref,
+        &files,
+        |_| None,
+        Some(vec![collector_modules::music::files::MusicImportTrack {
+            file_name: names[309].clone(),
+            disc_position: None,
+            display_position: None,
+        }]),
+    );
+    let job = detail
+        .import
+        .analysis_job_id
+        .expect("analysis job was admitted");
+    assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
+    let item = detail.summary.target_item_id.unwrap();
+    let saved = store.item(item).unwrap();
+    assert_eq!(
+        saved.captures[0].representations[0].files.len(),
+        names.len()
+    );
+    let album = service.album_playback_snapshot(&actor, item, None).unwrap();
+    assert_eq!(album.tracks.len(), 1);
+    assert!(matches!(
+        album.tracks[0].state,
+        collector_app::MusicTrackAvailabilityState::Available {
+            file_index: 309,
+            ..
+        }
+    ));
 }

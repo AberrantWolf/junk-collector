@@ -43,6 +43,7 @@ impl collector_app::LocalOwnershipRecoveryPort for Store {
         collection: CollectionId,
         username: &str,
     ) -> Result<collector_app::GrantView> {
+        let _authority = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -472,7 +473,7 @@ impl Store {
         if credential.len() != 64 {
             return Err(Error::CredentialRevoked);
         }
-        let row: Option<(String, bool, String)> = lock(&self.db)?
+        let row: Option<(String, bool, String)> = self.read_db()?
             .query_row(
                 "SELECT u.id,u.administrator,n.id FROM private.native_credentials n JOIN private.users u ON u.id=n.user_id WHERE n.credential_hash=? AND n.revoked_at IS NULL AND n.expires_at>? AND u.enabled=1",
                 params![Digest::sha256(credential.as_bytes()).hex, self.clock.now().timestamp()],
@@ -494,7 +495,7 @@ impl Store {
     }
 
     pub fn native_devices(&self, user: UserId) -> Result<Vec<NativeDeviceView>> {
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db
             .prepare("SELECT id,label,revision,created_at,expires_at FROM private.native_credentials WHERE user_id=? AND revoked_at IS NULL ORDER BY created_at,id")
             .map_err(storage)?;
@@ -918,6 +919,7 @@ impl Store {
             return Err(Error::Invalid("display name must be 1–256 bytes".into()));
         }
         let now = self.clock.now().timestamp();
+        let _authority = lock(&self.job_publication_gate)?;
         let mut db = lock(&self.db)?;
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -1415,7 +1417,7 @@ impl Store {
         if token.len() != 64 {
             return Err(Error::Unauthenticated);
         }
-        let row:Option<(String,bool,String,i64)>=lock(&self.db)?.query_row("SELECT u.id,u.administrator,s.session_id,s.authenticated_at FROM private.sessions s JOIN private.users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.enabled=1",params![Digest::sha256(token.as_bytes()).hex,self.clock.now().timestamp()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage)?;
+        let row:Option<(String,bool,String,i64)>=self.read_db()?.query_row("SELECT u.id,u.administrator,s.session_id,s.authenticated_at FROM private.sessions s JOIN private.users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.enabled=1",params![Digest::sha256(token.as_bytes()).hex,self.clock.now().timestamp()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage)?;
         let (user, administrator, device, authenticated_at) = row.ok_or(Error::Unauthenticated)?;
         Ok(AuthenticatedPrincipal {
             principal: Principal {
@@ -1442,7 +1444,7 @@ impl Store {
 
     pub fn sessions(&self, user: UserId, current: Option<DeviceId>) -> Result<Vec<SessionView>> {
         let now = self.clock.now().timestamp();
-        let db = lock(&self.db)?;
+        let db = self.read_db()?;
         let mut statement = db
             .prepare(
                 "SELECT session_id,label,created_at,expires FROM private.sessions WHERE user_id=? AND expires>? ORDER BY created_at DESC,session_id",

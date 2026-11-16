@@ -81,10 +81,11 @@ try{
   const upload=await call('POST','/uploads',{item_id:id,expected_revision:item.revision,files:[{name:'tone.wav',bytes:wav.length,sha256:null}]});
   for(let offset=0;offset<wav.length;offset+=1024*1024){const response=await fetch(`/api/v1/uploads/${upload.id}/files/0?offset=${offset}`,{method:'PUT',headers:{'content-type':'application/octet-stream'},body:wav.slice(offset,offset+1024*1024)});if(!response.ok)throw new Error('fixture upload: '+await response.text());}
   await call('POST',`/uploads/${upload.id}/commit`);
-  for(let n=0;n<100;n++){const current=await call('GET','/items/'+id);const rep=current.captures.flatMap(c=>c.representations)[0];if(rep){const track={id:crypto.randomUUID(),itemId:id,collectionId:collection.id,album:'Local fixture',title:'Private route audio',position:1,representationId:rep.id,fileIndex:0,mediaType:'audio/wav'};localStorage.setItem('collector.music-queue.v1.'+me.user_id,JSON.stringify({tracks:[track],current:track.id}));return {track,user:me.user_id,path:`/api/v1/items/${id}/representations/${rep.id}/0`};}await new Promise(r=>setTimeout(r,100));}throw new Error('fixture publication timed out');
+  for(let n=0;n<100;n++){const current=await call('GET','/items/'+id);const rep=current.captures.flatMap(c=>c.representations)[0];if(rep){const track={id:crypto.randomUUID(),itemId:id,collectionId:collection.id,album:'Local fixture',title:'Private route audio',position:1,representationId:rep.id,fileIndex:0,mediaType:'audio/wav',original:true};localStorage.setItem('collector.music-queue.v1.'+me.user_id,JSON.stringify({tracks:[track],current:track.id}));return {track,user:me.user_id,path:`/api/v1/items/${id}/representations/${rep.id}/0`};}await new Promise(r=>setTimeout(r,100));}throw new Error('fixture publication timed out');
  });
  await page.unroute('**/api/v1/items/*');assert.equal(injectedReadContention,true,'fixture must exercise publication-read contention');
  await page.reload();const player=page.getByRole('region',{name:'Music player'});await player.waitFor();
+ await player.getByLabel('Playback format').selectOption('original');
  // Browsing never initiates QUIC or prompts; Play starts trusted discovery.
  assert.equal(await page.locator('audio').getAttribute('src'),null);
  await player.getByRole('button',{name:'Play',exact:true}).click();

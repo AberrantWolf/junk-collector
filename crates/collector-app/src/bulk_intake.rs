@@ -615,13 +615,19 @@ impl CollectionService {
                     {
                         None
                     } else {
-                        Some(intake.session.audio_preparation.unwrap_or_else(|| {
-                            intake
+                        Some(match intake.session.audio_preparation {
+                            Some(ImportAudioPreparation::Flac)
+                                if !member.plan.preparation_available =>
+                            {
+                                ImportAudioPreparation::None
+                            }
+                            Some(choice) => choice,
+                            None => intake
                                 .session
                                 .opus_import
                                 .unwrap_or_default()
-                                .for_package(&member.plan)
-                        }))
+                                .for_package(&member.plan),
+                        })
                     },
                     destination,
                 };

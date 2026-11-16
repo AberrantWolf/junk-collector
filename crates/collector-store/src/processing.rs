@@ -11,6 +11,24 @@ use std::io::{Read, Seek, Write};
 const STREAM_CHUNK: usize = 1024 * 1024;
 const SNAPSHOT_LIMIT: u64 = 512 * 1024 * 1024;
 
+fn open_package_file(
+    root: &Path,
+    path: &Path,
+    bytes: ByteLength,
+) -> Result<Box<dyn collector_app::MediaReader>> {
+    let canonical = fs::canonicalize(path).map_err(storage)?;
+    if !canonical.starts_with(fs::canonicalize(root).map_err(storage)?) {
+        return Err(Error::Storage("package path escapes storage root".into()));
+    }
+    let metadata = canonical.metadata().map_err(storage)?;
+    if !metadata.is_file() || metadata.len() != bytes.0 {
+        return Err(Error::Storage(
+            "package file no longer matches its inventory".into(),
+        ));
+    }
+    Ok(Box::new(File::open(canonical).map_err(storage)?))
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ManifestV4 {
     pub(crate) schema_version: u32,
@@ -217,19 +235,30 @@ impl Store {
             .iter()
             .position(|file| file.id == file_id)
             .ok_or(Error::NotFound)?;
-        let path = match source {
-            PackageScope::Import(id) => self
-                .state
-                .join("imports")
-                .join(id.to_string())
-                .join(format!("{index}.part")),
+        match source {
+            PackageScope::Import(id) => {
+                let uploads = lock(&self.uploads)?;
+                let record = self.import_record(id)?;
+                if record.view.phase == collector_app::ImportPhase::Published {
+                    drop(uploads);
+                    let root = self.published_import_payload_root(&record)?;
+                    let path = Self::published_import_file_path(&root, &record.view.files[index])?;
+                    return Ok(Box::new(File::open(path).map_err(storage)?));
+                }
+                let path = self
+                    .state
+                    .join("imports")
+                    .join(id.to_string())
+                    .join(format!("{index}.part"));
+                open_package_file(&self.state, &path, inventory.files[index].bytes)
+            }
             PackageScope::Representation(id) => {
                 let capture = reference_index::capture_for_representation(
                     &*lock(&self.db)?,
                     collection_id,
                     id,
                 )?;
-                if let Some(item_id) = capture.association.item_id {
+                let path = if let Some(item_id) = capture.association.item_id {
                     self.representation_path(item_id, id, index)?.0
                 } else {
                     let collection = {
@@ -242,24 +271,10 @@ impl Store {
                         .join("payload")
                         .join(id.to_string())
                         .join(inventory.files[index].display_name.as_str())
-                }
+                };
+                open_package_file(&self.archive, &path, inventory.files[index].bytes)
             }
-        };
-        let canonical = fs::canonicalize(&path).map_err(storage)?;
-        let root = match source {
-            PackageScope::Import(_) => &self.state,
-            PackageScope::Representation(_) => &self.archive,
-        };
-        if !canonical.starts_with(fs::canonicalize(root).map_err(storage)?) {
-            return Err(Error::Storage("package path escapes storage root".into()));
         }
-        let metadata = canonical.metadata().map_err(storage)?;
-        if !metadata.is_file() || metadata.len() != inventory.files[index].bytes.0 {
-            return Err(Error::Storage(
-                "package file no longer matches its inventory".into(),
-            ));
-        }
-        Ok(Box::new(File::open(canonical).map_err(storage)?))
     }
 
     fn publish_v4<T: Serialize>(

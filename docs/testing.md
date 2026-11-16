@@ -103,6 +103,27 @@ line between them ends the trailer block, so Git may omit the classification and
 CI will conservatively select broader checks. Omit `Check-Base` when the normal
 push/PR baseline already covers the reviewed diff.
 
+## Local Rust build disk usage
+
+Development and test builds keep source locations for backtraces and disable
+incremental compilation to reduce disk use. Recompiling edited crates can take
+longer, but Cargo still reuses unchanged builds. For a session that needs full
+debugger symbols, use `CARGO_PROFILE_DEV_DEBUG=2` (or `CARGO_PROFILE_TEST_DEBUG=2`
+for `cargo test`); switching settings can leave another set of artifacts.
+
+Cargo can retain old outputs after dependency, feature or toolchain changes, so
+these defaults reduce growth without setting a size limit. To reclaim space, wait
+for local builds and tests to finish, then preview and clear the debug output:
+
+```sh
+cargo clean --profile dev --dry-run
+cargo clean --profile dev
+```
+
+This clears the shared `target/debug` directory, including test binaries, and
+keeps `target/release` and downloaded dependencies. The next dev or test build
+recompiles from source.
+
 ## Standalone CD capture checks
 
 For the standalone operator CD capture helper, use focused offline checks:

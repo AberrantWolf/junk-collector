@@ -11,9 +11,9 @@ Use [implementation status](implementation-status.md) for availability and
 | --- | --- |
 | Latest completed publication | [Beta.28 qualification, publication and deployment](validation/container-beta28-publication-2026-11-12.md) |
 | Withdrawn-publication recovery | [Withdrawn-publication cleanup](validation/cancelled-publication-2026-11-03.md); not part of the published beta.20 image |
-| Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md) |
+| Album intake review | [Album file tree and playback selection](validation/album-import-review-2026-11-11.md), [large package analysis](validation/large-import-analysis-2026-11-13.md) |
 | Matching and metadata | [Incremental matching/review](validation/digital-matching-and-review-2026-11-03.md) |
-| Library and media | [Layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
+| Library and media | [Library access during music imports](validation/import-time-library-2026-11-13.md), [layered refresh review](validation/layered-library-refresh-review-2026-11-02.md) |
 | Security and recovery | [Repository exposure review](validation/repository-exposure-2026-11-11.md), [dependency review](validation/security-review-2026-10-25.md), [backup/restore](validation/backup-restore-2026-10-18.md) |
 | Audio and game support | [Audio matrix](audio-preparation.md), [game matrix](game-identification.md) |
 | Testing and packaging | [Change-based delivery](validation/testing-and-packaging-2026-10-26.md) |
@@ -29,6 +29,16 @@ a different installation. See [documentation maintenance](index.md).
 
 The following dated results retain their original acceptance scope. They are not
 current assignments or a present-day supported-feature matrix.
+
+## Published import staging reclamation — 2026-11-14
+
+Local source checks covered successful publication, archive-backed package reads
+and exact chunk replay, retention when a master is missing, and startup cleanup
+after the master returns. The import and inbox-cleanup store selections,
+store Clippy, server and media builds, and browser smoke and intake-review
+journeys passed. The intake journey included 31 albums and a server restart.
+These checks cover the source change. Release qualification and installation
+were outside this run.
 
 # Validation recorded for the foundation
 

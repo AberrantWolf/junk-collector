@@ -183,7 +183,7 @@ pub(crate) async fn register_start(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let passkeys = state.passkeys.require()?;
     state.service.require_recent_authentication(&actor)?;
     let username = state.service.username(&actor.principal)?;
@@ -217,7 +217,7 @@ pub(crate) async fn register_finish(
     headers: HeaderMap,
     Json(input): Json<Registration>,
 ) -> ApiResult<StatusCode> {
-    let actor = authenticated(&state, &headers)?;
+    let actor = authenticated(&state, &headers).await?;
     let passkeys = state.passkeys.get().ok_or(Error::Unauthenticated)?;
     let pending = passkeys.take(&input.ceremony_id)?;
     if pending.user != actor.principal.user_id {

@@ -1,21 +1,45 @@
 # Architecture
 
+## Catalog reads and import publication — 2026-11-13
+
+The Store must use read-only local connections for catalog and private queries
+that serve browsing, authentication and progress. SQLite WAL must be active on
+both files. The SQL writer must serialize writes, giving lease renewal and
+cancellation priority over queued ordinary writes with room for ordinary
+progress. The archive writer and the authority gate retain publication and
+permission fencing. Normal publication must collect filesystem checkpoint
+observations before applying them in SQLite. Startup recovery still resolves
+interrupted archive and attached-database effects before admitting work.
+
+Guided and provisional imports must stage and verify their Capture payload on
+the archive filesystem before acquiring the archive writer. The production
+scheduler must durably hand off prepared imports to its single publication
+worker. The private handoff binds verified staging to the Job and Import
+revision. The publisher must revalidate ownership, source and permission before
+promotion. If recovery finds a missing or changed staged copy, the original
+Import sources remain the restaging authority. After the immutable revision
+commits, the existing journal and Job reconciliation own recovery. Legacy
+upload commit uses the same Capture staging and promotion mechanism.
+
+The [Library read contract](layered-library-refresh.md) defines the independent
+count, result-membership revision and bounded refresh of visible rows.
+
 ## Live playback format preference — 2026-11-10
 
 Browser preferences are local to the signed-in account on this browser. The
-normal authenticated audio listener accepts a typed format and optional Opus
-bitrate for a source-bound track (or an explicitly queued original file).
-Application services resolve current readable sources, preferring saved FLAC
-and then the original before a lossy derivative. Disc traversal uses the same
-package/PCM reader as durable preparation. List and library reads neither start
-an encoder nor hash audio payloads.
+authenticated audio listener must apply Original, High Bandwidth or Low
+Bandwidth to the selected source-bound track or explicitly queued original
+file. High Bandwidth is the default. A prepared file must match the source
+fingerprint, track and requested output profile. Disc traversal uses the same
+package/PCM reader as durable preparation. Original CD playback exposes a
+seekable WAV view of the track's exact PCM window. List and library reads must
+neither start an encoder nor hash audio payloads.
 
 The encoder adapter feeds bounded blocks to an isolated FFmpeg process for
-each live playback request. The HTTP adapter owns independent live-stream
-admission, cancellation, and periodic access checks. Live streams create no
-Jobs, derivatives, or archive state. An exact saved output can retain ordinary
-byte-range playback. Dedicated media delivery still uses its existing
-authorized saved-file contracts.
+each encoded stream. The HTTP adapter owns admission, cancellation and access
+checks. Playback must create no Jobs, derivatives or archive state. Existing
+files and Original CD WAV support byte ranges. Dedicated media delivery
+continues to use its authorized saved-file contracts.
 
 ## Operator audio connection policy — 2026-11-04
 
@@ -946,7 +970,7 @@ adds observations and derivatives. Previously preserved unanalyzed WAVs need fre
 analysis through the retained digital-audio operation to acquire file-track observations.
 
 Supported inputs are RIFF PCM or checked extensible PCM, 16/24-bit mono/stereo,
-8–192 kHz, at most 24 hours per file and 4,096 chunks. Float/compressed WAV, RF64,
+8–192 kHz, at most 24 hours per file and 4,096 chunks. Compressed WAV, RF64,
 multichannel and continuous image/CUE splitting remain unsupported. WAV INFO/ID3
 metadata, embedded artwork, direct PCM matching, retained-source analysis and
 metadata-aware FLAC export are covered by the completion boundaries below. See
@@ -1687,6 +1711,17 @@ lookup errors propagate; only an explicit missing record permits new publication
 
 ## Ingest and assets
 
+### Published import staging
+
+After an Import's published state is durable, the store must reclaim its known
+private staging parts once the committed preservation master matches the
+recorded inventory and its files are present at the expected sizes. Publication
+already verifies the destination bytes. Cleanup must retain unfinished imports,
+unrecognized entries and parts whose archive master cannot be confirmed.
+Startup and background reconciliation must retry interrupted cleanup. Published
+Import package reads and chunk replays must use the archive master while
+preserving the Import's file identities and replay checks.
+
 ### Explicit inbox source cleanup
 
 Cleanup is an optional local-inbox action, separate from import acceptance. The
@@ -1765,7 +1800,7 @@ available for pre-release callers, while the browser uses the paged path.
 
 Uploads declare a complete file inventory, optional source SHA-256 values, item and expected revision. Names reject traversal, absolute paths, control characters and Windows separators. Chunks are bounded to 8 MiB; browser chunks use 4 MiB. Durable file lengths recover upload cursors after restart. Duplicate identical chunks are idempotent; conflicting overlaps fail. Completed staging still accepts byte-identical chunk replay read-only. Browser resumption validates the reselected inventory and compares retained prefixes before appending remaining bytes. Startup resolves abandoned cancellation acknowledgments atomically with their Import state; once a Capture is committed, recovery completes its existing publication rather than reopening pre-commit Item revision review.
 
-Commit checks complete lengths/digests, copies into archive-local staging, rereads destination SHA-256, publishes files and then item/evidence. Source uploads are retained. Integrity means those bytes match, not catalog identity. Reverification appends evidence. Catalog verification, reconstruction, offsets and audio derivatives require separate providers and independent oracles.
+Commit checks complete lengths/digests, copies into archive-local staging, rereads destination SHA-256, publishes files and then item/evidence. Published private parts follow the [staging cleanup contract](#published-import-staging). Integrity means those bytes match, not catalog identity. Reverification appends evidence. Catalog verification, reconstruction, offsets and audio derivatives require separate providers and independent oracles.
 
 Artwork is stored as an original image plus a bounded PNG thumbnail. Image decoding has dimension/allocation limits. Both asset and original-media requests enforce collection access and asset visibility. Private attachments are not merely hidden in HTML.
 
@@ -2204,6 +2239,15 @@ No compatibility migration or destructive conversion of existing data is require
 Saved export URLs retain read access to authorized historical media when the owner
 module or schema cannot execute: serve the recorded FLAC with ordinary transfer
 integrity checking, without requiring metadata reconstruction or write eligibility.
+
+## Mixed-format import analysis — 2026-11-13
+
+Shared audio readers must own codestream detection and checked metadata bounds.
+Music analysis must use the frozen playback selection to distinguish required
+files from alternates. A failed alternate must preserve its source position and
+report a bounded diagnostic without blocking valid selected tracks. Cancellation
+and source revalidation still apply to the whole operation. See
+[the supported file and conversion rules](digital-purchases.md#mixed-format-import-compatibility--2026-11-13).
 
 ## Inbox audio compatibility — 2026-11-01
 

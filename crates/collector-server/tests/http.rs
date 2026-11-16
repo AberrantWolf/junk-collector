@@ -208,6 +208,9 @@ fn state() -> (tempfile::TempDir, AppState) {
     let root = tempfile::tempdir().unwrap();
     let store =
         Arc::new(Store::open(root.path().join("archive"), root.path().join("state")).unwrap());
+    (root, state_for_store(store))
+}
+fn state_for_store(store: Arc<Store>) -> AppState {
     let id = store.server_id().unwrap();
     let mut state = AppState::new(
         store,
@@ -222,7 +225,7 @@ fn state() -> (tempfile::TempDir, AppState) {
     // is covered by the distinct production listener tests.
     state.direct_media = true;
     state.allowed_origins = Arc::new(vec!["https://collector.example".into()]);
-    (root, state)
+    state
 }
 #[tokio::test]
 async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
@@ -576,9 +579,46 @@ async fn authenticated_descriptors_drive_third_module_create_edit_browse_and_rei
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
 }
 
+struct CaptureProjectionPause {
+    reached: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl collector_store::PublicationFaultInjector for CaptureProjectionPause {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == collector_store::PublicationFaultPoint::ProjectionWriting
+            && let Some(reached) = self.reached.lock().unwrap().take()
+        {
+            reached
+                .send(())
+                .map_err(|_| Error::Unavailable("test request dropped".into()))?;
+            self.resume
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .map_err(|_| {
+                    Error::Unavailable("test request did not resume publication".into())
+                })?;
+        }
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn guided_ingest_routes_resolve_inbox_intent_replay_and_private_history() {
-    let (root, mut state) = state();
+    let root = tempfile::tempdir().unwrap();
+    let (reached, projection_writing) = tokio::sync::oneshot::channel();
+    let (resume, resume_projection) = std::sync::mpsc::channel();
+    let store = Store::open_with_publication_fault(
+        root.path().join("archive"),
+        root.path().join("state"),
+        Arc::new(CaptureProjectionPause {
+            reached: std::sync::Mutex::new(Some(reached)),
+            resume: std::sync::Mutex::new(resume_projection),
+        }),
+    )
+    .unwrap();
+    let mut state = state_for_store(Arc::new(store));
     state.exposure.public_curation = true;
     let owner = state
         .store
@@ -722,7 +762,61 @@ async fn guided_ingest_routes_resolve_inbox_intent_replay_and_private_history() 
 
     assert!(service.run_next_job("guided-http-staging").unwrap());
     assert!(service.run_next_job("guided-http-analysis").unwrap());
-    assert!(service.run_next_job("guided-http-publication").unwrap());
+    use collector_app::JobLane;
+    assert!(
+        !service
+            .run_next_job_in_lane("guided-http", JobLane::Publication)
+            .unwrap()
+    );
+    assert!(
+        service
+            .run_next_job_in_lane("guided-http", JobLane::Background)
+            .unwrap()
+    );
+    let publish = tokio::task::spawn_blocking(move || {
+        service.run_next_job_in_lane("guided-http", JobLane::Publication)
+    });
+    let deadline = std::time::Duration::from_secs(3);
+    tokio::time::timeout(deadline, projection_writing)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let library_request = |filter| {
+        Request::builder()
+            .uri(format!(
+                "/api/v1/library?collection_id={}&filter={filter}",
+                collection.id
+            ))
+            .header("authorization", format!("Bearer {owner_token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let read_page = |request: Request<Body>| async {
+        let response = tokio::time::timeout(deadline, app.clone().oneshot(request))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 128 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+    };
+    let before = read_page(library_request("all")).await;
+    assert_eq!(before["items"].as_array().unwrap().len(), 1);
+    assert!(
+        read_page(library_request("files_attached")).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    resume.send(()).unwrap();
+    assert!(publish.await.unwrap().unwrap());
+    let after = read_page(library_request("files_attached")).await;
+    assert_eq!(after["items"][0]["id"], before["items"][0]["id"]);
+
     let response = app
         .clone()
         .oneshot(
@@ -2350,7 +2444,7 @@ wait
         }
         req.body(Body::empty()).unwrap()
     };
-    let live_flac = "track=1&format=flac";
+    let live_flac = "track=1";
     for (router, token, query, status) in [
         (app.clone(), None, live_flac, StatusCode::UNAUTHORIZED),
         (
@@ -2362,7 +2456,7 @@ wait
         (
             app.clone(),
             Some(viewer_token.as_str()),
-            "track=1&format=opus&bitrate=257",
+            "track=1&mode=low_bandwidth&bitrate=257",
             StatusCode::BAD_REQUEST,
         ),
     ] {
@@ -2372,6 +2466,38 @@ wait
             .unwrap();
         assert_eq!(result.status(), status);
     }
+    let original = app
+        .clone()
+        .oneshot(live_request(
+            "track=1&mode=original",
+            Some(&viewer_token),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(original.status(), StatusCode::OK);
+    assert_eq!(original.headers()["content-type"], "audio/wav");
+    assert_eq!(original.headers()["accept-ranges"], "bytes");
+    let wave = axum::body::to_bytes(original.into_body(), 20000)
+        .await
+        .unwrap();
+    assert_eq!(&wave[..4], b"RIFF");
+    assert_eq!(&wave[8..12], b"WAVE");
+    assert_eq!(&wave[22..28], &[2, 0, 0x44, 0xac, 0, 0]);
+    assert_eq!(&wave[34..36], &[16, 0]);
+    assert_eq!(&wave[44..], pcm.as_slice());
+    let partial = app
+        .clone()
+        .oneshot(live_request(
+            "track=1&mode=original",
+            Some(&viewer_token),
+            Some("bytes=49-77"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+    let bytes = axum::body::to_bytes(partial.into_body(), 32).await.unwrap();
+    assert_eq!(&bytes[..], &pcm[5..34]);
     #[cfg(unix)]
     {
         let response = stalled
@@ -2409,8 +2535,8 @@ wait
                 .oneshot(live_request(query, Some(&viewer_token), None))
         };
         let (lossless, opus) = tokio::join!(
-            request("track=1&format=flac&start_ms=10"),
-            request("track=1&format=opus&bitrate=113")
+            request("track=1&mode=high_bandwidth&start_ms=10"),
+            request("track=1&mode=low_bandwidth")
         );
         let lossless = lossless.unwrap();
         let opus = opus.unwrap();
@@ -2716,7 +2842,7 @@ wait
         .unwrap();
     assert!(matches!(
         opus_source,
-        collector_app::StreamInput::File(_, "flac")
+        collector_app::StreamInput::Pcm(_, 2352)
     ));
     let export_path = format!(
         "/api/v1/items/{}/music-exports/{}/1",

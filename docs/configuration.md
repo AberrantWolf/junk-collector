@@ -109,28 +109,30 @@ rips = "/srv/incoming"
 
 ### Live playback format
 
-Use **Playback format** in the player, or **Account & security → Playback** on
-a phone. Choose **Saved audio**, **FLAC**, or **Opus**. Opus accepts any whole
-target bitrate from 6 to 256 kbps, including on mono sources. The preference
-is saved for this account in this browser and takes effect the next time you
-press Play or start a track.
+Use **Playback format** in the player or **Account & security → Playback**.
+The setting is saved for this account in this browser and takes effect on the
+next Play or track change. The selected source track is the same in each mode.
 
-With normal authenticated audio, Collector can stream a track directly from a
-supported raw CD rip without preparing a file. It prefers saved FLAC for the
-selected track, then its original, and can use a retained Opus copy when the
-original cannot be read. FLAC avoids a new lossy encode; converting MP3 or Opus to FLAC
-does not recover lost detail. Changing format does not change
-the library or its saved files. An existing matching saved file can use regular
-HTTP byte ranges. Live audio seeks by starting a new stream from the requested
-time; the player needs a known duration to show a live seek bar.
+- **Original** serves the selected WAV, FLAC or MP3. For supported raw CD
+  rips it presents the track window as a seekable 16-bit stereo WAV.
+- **High Bandwidth** is the default. It serves existing FLAC and MP3 originals,
+  reuses matching prepared FLAC, and converts WAV and CD audio to FLAC as needed.
+  Float WAV uses the same signed 24-bit PCM conversion as live playback.
+- **Low Bandwidth** uses Opus at 128 kbps VBR by default. It accepts any whole
+  target from 6 to 256 kbps and reuses a matching prepared copy when available.
 
-The server uses FFmpeg (with its FLAC and libopus encoders) for live conversion.
-The container includes it; native installs can set `encoders.ffmpeg` or install it
-on PATH. Each live stream has its own encoder and source reader. A server accepts
-up to eight concurrent live requests, with two per session or native credential
-to allow overlap during seek and track changes. This limit is separate from
-background processing. No conversion is saved. Dedicated WebTransport and
-separate HTTPS media still deliver saved audio; they do not carry live conversion.
+The music stream query accepts `mode=original|high_bandwidth|low_bandwidth`.
+Omitting the mode selects High Bandwidth. Supply `bitrate` only with Low
+Bandwidth. The response's `Content-Type` gives the actual format. Existing
+files and CD WAV support byte ranges. Live encoded streams seek by reopening
+at `start_ms`.
+
+The live encoder uses FFmpeg with FLAC and libopus. The container includes it.
+Native installs can configure `encoders.ffmpeg` or install it on PATH. The
+server admits eight concurrent live requests, with up to two per session or
+native credential for track and seek overlap. Browsing does not start an
+encoder. Playback writes no prepared audio. Dedicated WebTransport and
+separate HTTPS media still deliver existing files under their media policy.
 
 ### CD library defaults
 
@@ -197,7 +199,9 @@ the extra inbox-to-private-staging-to-archive copy.
 
 Both are optional and are probed at startup and by `doctor`. Use absolute executable paths when running as a service, whose `PATH` may differ from your shell. Unavailable tools do not prevent preservation or original-file downloads.
 
-Preparation stores separate audio files in the archive; it does not replace the raw dump. It runs only when requested, either through the optional guided-import checkbox or the music preparation controls. Browsing and playback requests do not start conversion.
+Preparation stores separate audio files in the archive; it does not replace the raw dump. It runs when selected during import or requested in the music preparation controls.
+An explicitly configured Opus import default still applies to eligible albums.
+Live playback can convert audio on demand without saving a file.
 
 ### Online metadata and artwork
 

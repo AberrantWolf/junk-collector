@@ -117,18 +117,81 @@ pub(crate) fn install(connection: &Connection) -> Result<()> {
             }
         }
     }
+    install_cursor_clocks(&tx)?;
     db.execute("DELETE FROM library_entries WHERE NOT EXISTS(SELECT 1 FROM library_track_entries t WHERE t.item_id=library_entries.item_id AND t.namespace=library_entries.namespace AND t.language=library_entries.language AND t.role=library_entries.role AND t.token=library_entries.token)", []).map_err(storage)?;
     tx.commit().map_err(storage)
 }
 
-pub(crate) fn sources(
-    db: &Connection,
-    user: UserId,
-    query: BrowseQuery,
-    namespace: &str,
-    language: &str,
-) -> Result<Page<LibraryEntrySource>> {
-    let page = browse::rows(db, user, query, Some((namespace, language)))?;
+fn install_cursor_clocks(db: &Connection) -> Result<()> {
+    for (schema, clock, tables) in [
+        (
+            "main",
+            "library_cursor_clock",
+            &[
+                "browse_items",
+                "library_entry_basics",
+                "metadata_language_display",
+            ][..],
+        ),
+        (
+            "private",
+            "library_cursor_clock",
+            &["grants", "metadata_preferences", "users"][..],
+        ),
+        (
+            "private",
+            "library_work_clock",
+            &["jobs", "imports", "guided_ingest_intents"][..],
+        ),
+    ] {
+        db.execute_batch(&format!(
+            "CREATE TABLE IF NOT EXISTS {schema}.{clock}(token TEXT NOT NULL);
+             INSERT INTO {schema}.{clock} SELECT hex(randomblob(16))
+               WHERE NOT EXISTS(SELECT 1 FROM {schema}.{clock});"
+        ))
+        .map_err(storage)?;
+        for table in tables {
+            for operation in ["INSERT", "UPDATE", "DELETE"] {
+                let when = match (*table, operation) {
+                    ("jobs", "UPDATE") => {
+                        "WHEN OLD.state IS NOT NEW.state OR OLD.item_id IS NOT NEW.item_id OR OLD.request IS NOT NEW.request"
+                    }
+                    ("imports", "UPDATE") => {
+                        "WHEN OLD.phase IS NOT NEW.phase OR OLD.item_id IS NOT NEW.item_id"
+                    }
+                    ("guided_ingest_intents", "UPDATE") => {
+                        "WHEN OLD.target_item_id IS NOT NEW.target_item_id OR OLD.settled IS NOT NEW.settled OR OLD.cancelled IS NOT NEW.cancelled OR OLD.enrichment_error IS NOT NEW.enrichment_error OR OLD.preparation_error IS NOT NEW.preparation_error"
+                    }
+                    _ => "",
+                };
+                db.execute_batch(&format!(
+                    "CREATE TRIGGER IF NOT EXISTS {schema}.{clock}_{table}_{operation}
+                     AFTER {operation} ON {table} {when}
+                     BEGIN UPDATE {clock} SET token=hex(randomblob(16)); END;"
+                ))
+                .map_err(storage)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn cursor_revision(db: &Connection, filter: BrowseFilter) -> Result<String> {
+    let sql = match filter {
+        BrowseFilter::AlbumPlaybackNeedsAttention => {
+            "SELECT a.token||b.token||w.token||p.token||q.token FROM main.library_cursor_clock a,private.library_cursor_clock b,private.library_work_clock w,main.library_clock p,private.library_clock q"
+        }
+        BrowseFilter::NeedsAttention => {
+            "SELECT a.token||b.token||w.token FROM main.library_cursor_clock a,private.library_cursor_clock b,private.library_work_clock w"
+        }
+        _ => {
+            "SELECT a.token||b.token FROM main.library_cursor_clock a,private.library_cursor_clock b"
+        }
+    };
+    db.query_row(sql, [], |r| r.get(0)).map_err(storage)
+}
+
+pub(crate) fn sources(page: Page<browse::BrowseRow>) -> Result<Page<LibraryEntrySource>> {
     let items = page
         .items
         .into_iter()
@@ -470,13 +533,16 @@ mod tests {
         .unwrap();
         let switched = Arc::new(AtomicBool::new(false));
         let flag = switched.clone();
-        let private = Connection::open(root.path().join("state/private.sqlite")).unwrap();
         let owner = actor.user_id.to_string();
         let joining_user = japanese_user.to_string();
         let joining_collection = saved.collection_id.to_string();
-        lock(&store.db)
-            .unwrap()
-            .authorizer(Some(move |context: AuthContext<'_>| {
+        store.readers.for_each(|db| {
+            let flag = flag.clone();
+            let private = Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let owner = owner.clone();
+            let joining_user = joining_user.clone();
+            let joining_collection = joining_collection.clone();
+            db.authorizer(Some(move |context: AuthContext<'_>| {
                 if matches!(
                     context.action,
                     AuthAction::Read {
@@ -489,12 +555,11 @@ mod tests {
                     private.execute("UPDATE metadata_preferences SET language='en' WHERE user_id=?",[&owner]).unwrap();
                 }
                 Authorization::Allow
-            }));
+            })).unwrap();
+        });
         assert!(service.rebuild_next_library_entry().unwrap());
         assert!(switched.load(Ordering::SeqCst));
-        lock(&store.db)
-            .unwrap()
-            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        allow_details(&store);
         drain(&service);
         let query = BrowseQuery {
             collection_id: Some(saved.collection_id),
@@ -556,25 +621,32 @@ mod tests {
     }
 
     fn deny_details(store: &Store) {
-        lock(&store.db)
-            .unwrap()
-            .authorizer(Some(|context: AuthContext<'_>| match context.action {
-                AuthAction::Read {
-                    table_name,
-                    column_name,
-                } if (table_name == "items" && column_name == "record")
-                    || matches!(table_name, "processing_observations" | "conversion_recipes")
-                    || table_name == "captures" && !matches!(column_name, "id" | "item_id") =>
-                {
-                    Authorization::Deny
-                }
-                _ => Authorization::Allow,
-            }));
+        let deny = |context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name,
+                column_name,
+            } if (table_name == "items" && column_name == "record")
+                || matches!(table_name, "processing_observations" | "conversion_recipes")
+                || table_name == "captures" && !matches!(column_name, "id" | "item_id") =>
+            {
+                Authorization::Deny
+            }
+            _ => Authorization::Allow,
+        };
+        lock(&store.db).unwrap().authorizer(Some(deny)).unwrap();
+        store
+            .readers
+            .for_each(|db| db.authorizer(Some(deny)).unwrap());
     }
     fn allow_details(store: &Store) {
         lock(&store.db)
             .unwrap()
-            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        store.readers.for_each(|db| {
+            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                .unwrap()
+        });
     }
 
     #[test]
@@ -1117,7 +1189,7 @@ mod tests {
     #[test]
     fn failed_additive_install_rolls_back_partial_basic_rows() {
         let (_root, store, _actor, _service, saved) = fixture();
-        let db = lock(&store.db).unwrap();
+        let mut db = lock(&store.db).unwrap();
         db.execute_batch("DROP TABLE library_entry_basics; DROP TABLE library_entry_attempts;")
             .unwrap();
         // Fail the filter calculation after the basic record has been inserted.
@@ -1127,9 +1199,11 @@ mod tests {
                 ..
             } => Authorization::Deny,
             _ => Authorization::Allow,
-        }));
+        }))
+        .unwrap();
         assert!(install(&db).is_err());
-        db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
         assert!(
             !db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='library_entry_basics')",
@@ -1171,21 +1245,7 @@ mod tests {
                 .unwrap()
                 .revision
         );
-        store
-            .db
-            .lock()
-            .unwrap()
-            .authorizer(Some(|context: AuthContext<'_>| match context.action {
-                AuthAction::Read {
-                    table_name: "items",
-                    column_name: "record",
-                }
-                | AuthAction::Read {
-                    table_name: "captures" | "processing_observations",
-                    ..
-                } => Authorization::Deny,
-                _ => Authorization::Allow,
-            }));
+        deny_details(&store);
         let header = service.metadata_read_revision(&actor, saved.id);
         let rows = service.metadata_care(
             &actor,
@@ -1198,11 +1258,7 @@ mod tests {
                 limit: Some(50),
             },
         );
-        store
-            .db
-            .lock()
-            .unwrap()
-            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        allow_details(&store);
         assert!(header.is_ok());
         assert_eq!(rows.unwrap().items[0].title, changed.title);
         assert_eq!(
@@ -1216,14 +1272,132 @@ mod tests {
         );
     }
     #[test]
-    fn interactive_catalog_contention_is_typed_and_recovers_after_writer_release() {
+    fn interactive_reader_contention_is_typed_and_recovers_when_a_reader_returns() {
         let (_root, store, actor, service, saved) = fixture();
-        let writer = store.db.lock().unwrap();
+        let mut readers = (0..read_pool::CONNECTIONS)
+            .map(|_| store.read_db().unwrap())
+            .collect::<Vec<_>>();
         assert!(matches!(
             service.metadata_read_revision(&actor, saved.id),
             Err(Error::CatalogBusy)
         ));
-        drop(writer);
+        drop(readers.pop());
         assert!(service.metadata_read_revision(&actor, saved.id).is_ok());
+    }
+
+    #[test]
+    fn library_read_rejects_a_role_downgraded_during_its_snapshot() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (root, store, _owner, service, saved) = fixture();
+        let user = store
+            .create_user("curator", "a long curator password", false)
+            .unwrap();
+        Catalog::grant(&*store, saved.collection_id, user, Role::Curator).unwrap();
+        let actor = Principal {
+            user_id: user,
+            administrator: false,
+            device_id: None,
+        };
+        let query = BrowseQuery {
+            collection_id: Some(saved.collection_id),
+            ..Default::default()
+        };
+        let changed = Arc::new(AtomicBool::new(false));
+        store.readers.for_each(|db| {
+            let changed = changed.clone();
+            let private = Connection::open(root.path().join("state/private.sqlite")).unwrap();
+            let collection = saved.collection_id;
+            db.authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(context.action, AuthAction::Read { table_name: "browse_items", .. })
+                    && !changed.swap(true, Ordering::SeqCst)
+                {
+                    private.execute(
+                        "UPDATE grants SET role=0,revision=revision+1 WHERE collection_id=? AND user_id=?",
+                        params![collection.to_string(), user.to_string()],
+                    ).unwrap();
+                }
+                Authorization::Allow
+            })).unwrap();
+        });
+        assert!(matches!(
+            service.library_entries(&actor, query.clone()),
+            Err(Error::Conflict)
+        ));
+        assert!(changed.load(Ordering::SeqCst));
+        allow_details(&store);
+        let page = service.library_entries(&actor, query).unwrap();
+        assert_eq!(page.items[0].id, saved.id);
+        assert!(!page.items[0].can_edit);
+    }
+
+    #[test]
+    fn visible_rows_and_cursors_survive_summary_writes_but_fence_membership_changes() {
+        let (_root, store, actor, service, first) = fixture();
+        let second = Catalog::save(
+            &*store,
+            Item {
+                id: ItemId::new(),
+                revision: Revision(0),
+                title: "Second album".into(),
+                ..first.clone()
+            },
+            Revision(0),
+        )
+        .unwrap();
+        let query = BrowseQuery {
+            collection_id: Some(first.collection_id),
+            limit: Some(1),
+            ..Default::default()
+        };
+        let old = service.library_entries(&actor, query.clone()).unwrap();
+        assert_eq!(old.items[0].id, first.id);
+        assert_eq!(
+            old.items[0].summary_state,
+            collector_app::LibrarySummaryState::Pending
+        );
+        drain(&service);
+        let updated = service
+            .refresh_library_rows(
+                &actor,
+                query.clone(),
+                vec![first.id],
+                &old.membership_revision,
+            )
+            .unwrap();
+        assert_eq!(
+            updated.items[0].summary_state,
+            collector_app::LibrarySummaryState::Ready
+        );
+        assert_ne!(updated.catalog_revision, old.catalog_revision);
+        let next = service
+            .library_entries(
+                &actor,
+                BrowseQuery {
+                    cursor: old.next_cursor.clone(),
+                    ..query.clone()
+                },
+            )
+            .unwrap();
+        assert_eq!(next.items[0].id, second.id);
+        Catalog::set_item_removed(&*store, second.id, second.revision, true).unwrap();
+        assert!(matches!(
+            service.refresh_library_rows(
+                &actor,
+                query.clone(),
+                vec![first.id],
+                &old.membership_revision
+            ),
+            Err(Error::Conflict)
+        ));
+        assert!(matches!(
+            service.library_entries(
+                &actor,
+                BrowseQuery {
+                    cursor: old.next_cursor,
+                    ..query
+                }
+            ),
+            Err(Error::Conflict)
+        ));
     }
 }

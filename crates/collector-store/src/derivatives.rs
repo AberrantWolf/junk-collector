@@ -157,7 +157,7 @@ impl Store {
         }
         output.sync_all().map_err(storage)?;
         if bytes != validation.bytes.0
-            || hash_publication_file(&encoded, checkpoint)? != validation.digest
+            || files::hash_file_checked(&encoded, u64::MAX, checkpoint)?.1 != validation.digest
         {
             return Err(Error::Invalid(
                 "validated derivative scratch changed".into(),

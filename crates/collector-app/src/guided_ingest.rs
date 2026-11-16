@@ -1,6 +1,36 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn set_import_analysis_files(
+    selection: &mut serde_json::Value,
+    module: &ModuleId,
+    inventory: &PackageInventory,
+    files: &[ImportDeclaredFile],
+) {
+    if module.0 == "org.junk.music"
+        && collector_modules::music::files::is_file_package(
+            &inventory
+                .files
+                .iter()
+                .map(|file| file.display_name.clone())
+                .collect::<Vec<_>>(),
+        )
+    {
+        // The ordered inventory supplies names. Its fingerprint binds file IDs and bytes.
+        // Only explicit playback choices need to be carried into the worker.
+        if files.iter().any(|file| file.album_selected.is_some()) {
+            selection["album_selection"] = serde_json::json!(
+                files
+                    .iter()
+                    .map(|file| file.album_selected)
+                    .collect::<Vec<_>>()
+            );
+        }
+    } else {
+        selection["files"] = serde_json::json!(files);
+    }
+}
+
 fn completed_snapshot_id(result: Option<&serde_json::Value>) -> Option<SnapshotId> {
     let result = result?;
     result
@@ -137,6 +167,9 @@ impl CollectionService {
     /// closes the crash window between a durable transition and its next job.
     pub fn resume_guided_ingests(&self) -> Result<()> {
         self.provisional_imports.reconcile_removed_item_work()?;
+        let staging_result = self
+            .provisional_imports
+            .reconcile_import_publication_stages();
         let cleanup_result = self.provisional_imports.reconcile_guided_cleanup();
         self.jobs
             .reconcile_work_history(&mut |user, target| self.settle_work_clear(user, target))?;
@@ -153,7 +186,7 @@ impl CollectionService {
                 self.reconcile_guided_ingest(id)?;
             }
         }
-        cleanup_result
+        staging_result.and(cleanup_result)
     }
 
     pub fn resumable_guided_inbox_imports(
@@ -1106,8 +1139,14 @@ impl CollectionService {
         );
         let mut selection = serde_json::json!({
             "import_id":record.view.id,"representation_id":record.view.representation_id,
-            "files":record.view.files,"snapshot_id":snapshot_id,"system":null,"domain":null
+            "snapshot_id":snapshot_id,"system":null,"domain":null
         });
+        set_import_analysis_files(
+            &mut selection,
+            &eligibility.owner,
+            &inventory,
+            &record.view.files,
+        );
         if let Some(anchor_file_index) = intent.anchor_file_index {
             selection
                 .as_object_mut()

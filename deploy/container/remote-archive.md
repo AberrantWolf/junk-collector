@@ -54,8 +54,10 @@ Inputs/encoding scratch stay local, then copy into archive-local staging and syn
 before renames. A committed revision rename is the authority boundary; a Job is
 not complete merely because encoding or copying finished. Startup classifies known
 journals, validates staged/committed bytes and completes projections; unknown
-staging is retained. Private upload sources are retained after publication. The
-catalog is derived; private accounts/grants/Jobs are not reconstructible from it.
+staging is retained. [Published import staging](../../docs/architecture.md#published-import-staging)
+is reclaimed from live private state. Existing read-only recovery snapshots can
+still retain those bytes. The catalog is derived; private accounts/grants/Jobs
+are not reconstructible from it.
 
 Previously ordinary startup could mkdir a missing archive and rebuild from an
 empty directory. Normal executable commands now require an enrolled installation:

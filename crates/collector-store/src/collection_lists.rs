@@ -90,9 +90,9 @@ impl CollectionListPort for Store {
     ) -> Result<CollectionListSummary> {
         list.validate()?;
         let _writer = lock(&self.writer)?;
-        // Retain the database mutex through the commit: grant changes cannot
-        // slip between the authorization check and the archive rename.
-        let mut db = lock(&self.db)?;
+        // Fence authority through the archive commit without occupying SQLite.
+        let _authority = lock(&self.job_publication_gate)?;
+        let db = self.read_db()?;
         let path = {
             let role: Option<u8> = db
                 .query_row(
@@ -184,6 +184,7 @@ impl CollectionListPort for Store {
             can_edit: true,
         };
         let scoped = self.with_command_result(&result)?;
+        drop(db);
         let transaction = publish_v3_revision(
             &scoped,
             V3RevisionTarget {
@@ -198,12 +199,12 @@ impl CollectionListPort for Store {
             vec![],
         )?;
         {
+            let mut db = lock(&self.db)?;
             let tx = db.transaction().map_err(storage)?;
             project(&tx, &list)?;
             self.record_command(&tx, &result)?;
             tx.commit().map_err(storage)?;
         }
-        drop(db);
         finish_v3_publication(self, transaction)?;
         Ok(result)
     }

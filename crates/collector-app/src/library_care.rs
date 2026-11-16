@@ -42,6 +42,7 @@ pub trait LibraryCarePort: Send + Sync {
         tracks: &[collector_api_types::MusicTrackAvailability],
     ) -> Result<()>;
     fn library_revision(&self) -> Result<String>;
+    fn library_read_revisions(&self, filter: BrowseFilter) -> Result<(String, String)>;
     fn library_count(
         &self,
         user: UserId,
@@ -58,6 +59,7 @@ pub trait LibraryCarePort: Send + Sync {
         query: BrowseQuery,
         namespace: &str,
         language: &str,
+        ids: Option<&[ItemId]>,
     ) -> Result<Page<LibraryEntrySource>>;
     fn cache_library_entry(
         &self,

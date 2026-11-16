@@ -313,7 +313,7 @@ pub(crate) async fn routes(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> ApiResult<Json<LocalPlaybackDescriptor>> {
-    principal(&state, &headers)?;
+    principal(&state, &headers).await?;
     let allowed = state
         .service
         .audio_connection_policy(state.remote_media_allowed)?
@@ -353,7 +353,7 @@ pub(crate) async fn browser_grant(
     headers: HeaderMap,
     Json(target): Json<PlaybackTarget>,
 ) -> ApiResult<Json<BrowserPlaybackGrant>> {
-    authenticated(&state, &headers)?;
+    authenticated(&state, &headers).await?;
     let origin = headers
         .get(header::ORIGIN)
         .and_then(|v| v.to_str().ok())

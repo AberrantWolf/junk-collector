@@ -5,6 +5,14 @@ published release and installation acceptance are separate states. This document
 makes no claim about any reader's installed version. The [ADRs](decisions/README.md)
 define architectural rules rather than implementation or qualification status. See [documentation authority](index.md).
 
+## Playback modes
+
+Original serves the selected file or a seekable PCM WAV view of a raw CD
+track. High Bandwidth defaults to existing compatible audio or live FLAC.
+Low Bandwidth defaults to Opus 128 kbps VBR with a configurable target.
+Imports require an explicit FLAC selection for saved FLAC preparation.
+See [playback settings and API](configuration.md#live-playback-format).
+
 ## Live playback format preference — 2026-11-10
 
 The web player and Account settings share a browser/account preference for
@@ -36,9 +44,9 @@ installation passed deployment acceptance. See the
 | Capability | Implemented behavior | Limits / evidence |
 | --- | --- | --- |
 | Preservation and inventory | Exact originals, physical/digital inventory, manual authority, unknown-data retention, removal/restoration and reindex | No generic history pruning; [retention policy](retention-audit.md) |
-| Intake | Browser resumable uploads, configured inboxes, grouped package review, durable progress/recovery and explicit source cleanup | [Getting started](getting-started.md), [cleanup](inbox-cleanup.md) |
+| Intake | Browser resumable uploads, configured inboxes, grouped package review, durable progress/recovery and explicit source cleanup. Current source reclaims published private staging and serves published replays from archive masters. | [Getting started](getting-started.md), [inbox cleanup](inbox-cleanup.md), [staging contract](architecture.md#published-import-staging), [source validation](validation.md#published-import-staging-reclamation--2026-11-14) |
 | Games | Manual DAT upload/review/activation and automatic identification | Finite [system/format matrix](game-identification.md); no universal container support |
-| Digital music | FLAC/MP3 originals, integer PCM WAV analysis and FLAC preparation, tags/artwork and retained-audio analysis. Source review supports preferred-format playback, file ordering, and disc and track number assignments. | [Supported inputs](digital-purchases.md), [audio matrix](audio-preparation.md) |
+| Digital music | FLAC/MP3 originals, integer and 32-bit float PCM WAV analysis, integer WAV FLAC preparation, tags/artwork and retained-audio analysis. Source review supports preferred-format playback, file ordering, and disc and track number assignments. Guided analysis accepts large reviewed inventories without duplicating file metadata in the analysis request. | [Supported inputs](digital-purchases.md), [audio matrix](audio-preparation.md) |
 | CD audio | Supported raw/CUE layouts, explicit FLAC/Opus preparation, durable AccurateRip workflows and defaults | Named algorithms/coverage; [audio qualification](audio-preparation.md) |
 | Digital album matching | Source-bound fingerprints, AcoustID/MusicBrainz discovery, incremental candidates, expansion and reviewed full mapping | Bounded identity suggestions; [latest source delivery](validation/digital-matching-and-review-2026-11-03.md) |
 | Metadata/artwork | Automatic/manual authority, independent digital source and artwork choices, retained candidate history | Source/revision fences; [latest review](validation/github-metadata-review-2026-11-03.md) |
@@ -51,6 +59,7 @@ installation passed deployment acceptance. See the
 | Packaging | Native AMD64/ARM64 images, exact-byte validation/promotion, pinned install bundles | [Release pipeline](container-release-pipeline.md); candidate success is not publication |
 | Withdrawn publication cleanup | Cancellation, lost-claim and typed-contention exits settle their own uncommitted V4 journal/staging while holding the writer; non-missing observation lookup errors propagate | [Repair/recovery evidence](validation/cancelled-publication-2026-11-03.md); committed revisions and uncertain-failure recovery remain protected |
 | Contention/error handling | Typed contention yields/retries and differentiated mutation/refresh outcomes | [Contention review](validation/github-background-contention-2026-11-03.md), [error review](validation/github-error-presentation-2026-11-03.md) |
+| Import-time catalog reads | Source uses separate read-only WAL connections for Library, authentication and shared query paths. Production imports hand verified Capture preparation to a single publication worker. | [Architecture](architecture.md#catalog-reads-and-import-publication--2026-11-13) · [Library contract](layered-library-refresh.md) · [Source validation](validation/import-time-library-2026-11-13.md). Installed performance remains to be measured. |
 
 Trash Amp has separate source, packaging and device acceptance. Collector changes
 cannot establish which native app is installed. Reuse its dated transport/offline

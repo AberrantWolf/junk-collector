@@ -64,17 +64,18 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const merged=await page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()))),ids);
  assert.equal(merged[0].merged_into,destinationId);assert.equal(merged[1].specimens.length,2);assert.equal(merged[1].captures.length,2);
  await page.setViewportSize({width:1440,height:1000});
- // Playback is an explicit read; unprepared audio cannot replace a working queue.
+ // The default mode plays the CD originals before preparation.
  await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
  await page.locator('.collection-row').filter({hasText:'Bulk resolved album'}).click();
  const unprepared=page.getByRole('region',{name:'Album tracks'});
  await unprepared.locator('.music-track').first().waitFor();
- const beforeUnprepared=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.')));
+ const live=page.waitForResponse(response=>response.request().method()==='GET'
+  &&response.url().includes('/music-stream/')&&response.url().includes('mode=high_bandwidth'));
  await unprepared.getByRole('button',{name:'Play album',exact:true}).click();
- await expect(unprepared.getByRole('alert')).toContainText(/Track \d+ is unavailable or unsupported/);
- assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),beforeUnprepared);
- await expect(unprepared.locator('.music-track').first().getByRole('button',{name:/^Play track /})).toBeDisabled();
+ assert.equal((await live).headers()['content-type'],'audio/flac');
+ const livePlayer=page.getByRole('region',{name:'Music player'});
+ await expect.poll(()=>livePlayer.locator('audio').evaluate(audio=>!audio.paused&&audio.currentTime>0)).toBe(true);
  if(hasFlac){
   await nav.getByRole('button',{name:'Prepare audio',exact:true}).click();
   const preparation=page.getByRole('region',{name:'Prepare audio workspace'});

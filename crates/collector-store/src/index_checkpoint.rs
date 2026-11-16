@@ -59,7 +59,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn stamp(path: &Path) -> Result<String> {
+pub(crate) fn stamp(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path).map_err(storage)?;
     if !metadata.is_file() {
         return Err(Error::Storage(
@@ -148,10 +148,10 @@ fn inventory(archive: &Path) -> Result<BTreeMap<String, String>> {
     Ok(files)
 }
 
-fn seal(db: &Connection, archive: &Path) -> Result<()> {
+fn seal(db: &Connection, archive: &str) -> Result<()> {
     db.execute("INSERT INTO catalog_checkpoint SELECT 1,?1,?2,epoch FROM catalog_index_state WHERE singleton=1
                 ON CONFLICT(singleton) DO UPDATE SET format=excluded.format,archive=excluded.archive,epoch=excluded.epoch",
-        params![FORMAT, archive.canonicalize().map_err(storage)?.to_string_lossy()]).map_err(storage)?;
+        params![FORMAT, archive]).map_err(storage)?;
     Ok(())
 }
 
@@ -188,31 +188,46 @@ pub(crate) fn rebuilt(db: &Connection, archive: &Path) -> Result<usize> {
     for (path, stamp) in &files {
         statement.execute(params![path, stamp]).map_err(storage)?;
     }
-    seal(db, archive)?;
+    seal(
+        db,
+        &archive.canonicalize().map_err(storage)?.to_string_lossy(),
+    )?;
     Ok(files.len())
 }
 
-/// Called only after the publication's projection has committed, while the
-/// archive writer is held. The journal remains until this transaction commits.
-pub(crate) fn published(db: &mut Connection, archive: &Path, paths: &[String]) -> Result<()> {
-    let tx = db.transaction().map_err(storage)?;
-    published_in_transaction(&tx, archive, paths)?;
-    tx.commit().map_err(storage)
+/// Observe published metadata under the archive writer before taking the SQL
+/// connection. The journal remains until these stamps commit.
+pub(crate) struct PublishedCheckpoint {
+    archive: String,
+    files: Vec<(String, String)>,
 }
 
-pub(crate) fn published_in_transaction(
-    db: &Connection,
-    archive: &Path,
-    paths: &[String],
-) -> Result<()> {
-    for path in paths {
-        publication::validate_relative_path(path)?;
-        if tracked(Path::new(path)) {
-            db.execute("INSERT INTO archive_index_files VALUES(?,?) ON CONFLICT(path) DO UPDATE SET stamp=excluded.stamp",
-                params![path, stamp(&archive.join(path))?]).map_err(storage)?;
+impl PublishedCheckpoint {
+    pub(crate) fn observe(archive: &Path, paths: &[String]) -> Result<Self> {
+        let mut files = Vec::new();
+        for path in paths {
+            publication::validate_relative_path(path)?;
+            if tracked(Path::new(path)) {
+                files.push((path.clone(), stamp(&archive.join(path))?));
+            }
         }
+        Ok(Self {
+            archive: archive
+                .canonicalize()
+                .map_err(storage)?
+                .to_string_lossy()
+                .into_owned(),
+            files,
+        })
     }
-    seal(db, archive)
+
+    pub(crate) fn apply(self, db: &Connection) -> Result<()> {
+        for (path, stamp) in self.files {
+            db.execute("INSERT INTO archive_index_files VALUES(?,?) ON CONFLICT(path) DO UPDATE SET stamp=excluded.stamp",
+                params![path, stamp]).map_err(storage)?;
+        }
+        seal(db, &self.archive)
+    }
 }
 
 /// Retain corrupt or obsolete catalog files for diagnosis. Private state lives

@@ -59,7 +59,9 @@ try{
  await page.getByRole('button',{name:'Account & security',exact:true}).click();
  const account=page.getByRole('dialog',{name:'Account & security'});
  await account.getByRole('button',{name:'Playback',exact:true}).click();
- await account.getByLabel('Playback format').selectOption('opus');
+ await expect(account.getByLabel('Playback format')).toHaveValue('high_bandwidth');
+ await account.getByLabel('Playback format').selectOption('low_bandwidth');
+ await expect(account.getByLabel('Opus bitrate (kbps)')).toHaveValue('128');
  await account.getByLabel('Opus bitrate (kbps)').fill('113');
  await account.getByRole('button',{name:'Apply bitrate',exact:true}).click();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -68,7 +70,7 @@ try{
  await page.reload();
  await page.locator(`[data-item-id="${imported.target_item_id}"]`).click();
  const player=page.getByRole('region',{name:'Music player'});
- await expect(player.getByLabel('Playback format')).toHaveValue('opus');
+ await expect(player.getByLabel('Playback format')).toHaveValue('low_bandwidth');
  await expect(player.getByLabel('Opus bitrate (kbps)')).toHaveValue('113');
  const tracks=page.getByRole('region',{name:'Album tracks'});
  const liveResponse=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('bitrate=113'));
@@ -88,10 +90,18 @@ try{
  await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
  await player.getByRole('button',{name:'Pause',exact:true}).click();
  await expect.poll(()=>audio.evaluate(a=>a.paused&&!a.hasAttribute('src'))).toBe(true);
- await player.getByLabel('Playback format').selectOption('flac');
- const flac=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('format=flac'));
+ await player.getByLabel('Playback format').selectOption('high_bandwidth');
+ const flac=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('mode=high_bandwidth'));
  await player.getByRole('button',{name:'Play',exact:true}).click();
  assert.equal((await flac).headers()['content-type'],'audio/flac');
  await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
- assert.deepEqual(errors,[]);console.log('CD library UI passed: saved collection defaults, preserved uninspected original without acquisition, one-click library batch, automatic structure/response/audio confirmation, refreshed verified library row, no excluded rows or empty result pages across 104 skipped entries, mobile format settings, and real Opus/FLAC playback and seek from the raw original.');
+ await player.getByRole('button',{name:'Pause',exact:true}).click();
+ await player.getByLabel('Playback format').selectOption('original');
+ const original=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('mode=original'));
+ await player.getByRole('button',{name:'Play',exact:true}).click();
+ const wav=await original;
+ assert.equal(wav.headers()['content-type'],'audio/wav');
+ assert.equal(wav.headers()['accept-ranges'],'bytes');
+ await expect.poll(()=>audio.evaluate(a=>!a.paused&&a.currentTime>.1)).toBe(true);
+ assert.deepEqual(errors,[]);console.log('CD library UI passed: saved collection defaults, preserved uninspected original without acquisition, one-click library batch, automatic structure/response/audio confirmation, refreshed verified library row, no excluded rows or empty result pages across 104 skipped entries, mobile format settings, and real Original WAV, Opus and FLAC playback from the raw CD, and live seek.');
 }catch(e){console.error(logs);if(page)console.error(await page.locator('body').innerText({timeout:2000}).catch(()=>''));throw e;}finally{await browser?.close();await stopProcess(server);await closeHttpFixture(provider,'CD provider fixture');await rm(scratch,{recursive:true,force:true});}

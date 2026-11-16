@@ -96,6 +96,11 @@ if('serviceWorker'in navigator)navigator.serviceWorker.addEventListener('message
 
 // Permission-free control check: polling must not trigger a local-network prompt.
 export async function checkPlaybackAccess(path:string,signal:AbortSignal){
+ if(/^\/api\/v1\/items\/[^/]+\/music-stream\/[^/?]+\?mode=original&track=\d+$/.test(path)){
+  const response=await fetch(path,{method:'HEAD',credentials:'same-origin',redirect:'error',cache:'no-store',signal});
+  if(!response.ok)throw new ApiRequestError(response.status,`http_${response.status}`,'The original track could not be accessed.');
+  return;
+ }
  const grant=await api<Grant>('/playback/grants',{method:'POST',body:JSON.stringify(targetFromPath(path)),signal});
  if(grants.size>=8)grants.delete(grants.keys().next().value!);grants.set(path,grant);
 }
