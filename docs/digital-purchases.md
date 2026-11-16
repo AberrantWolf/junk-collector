@@ -85,6 +85,11 @@ Guided analysis must carry reviewed playback choices by position in the frozen
 inventory. It must use the inventory for filenames and the source fingerprint
 for byte validation, keeping analysis admission independent of filename length.
 
+When automatic identification was skipped because its Job could not be queued,
+open **Review import** and choose **Retry this step** under **Identify files**.
+Retry must analyze the preserved files and apply the saved album selection, disc
+assignments and track numbers. Existing manual track edits retain precedence.
+
 32-bit IEEE-float WAV supports mono/stereo at 8–192 kHz in the same bounded
 RIFF layout. Analysis must reject non-finite samples. Live FLAC and Opus and
 saved Opus use signed 24-bit PCM rounded and clipped to the representable

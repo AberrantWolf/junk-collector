@@ -11779,6 +11779,7 @@ export interface operations {
     music_stream: {
         parameters: {
             query?: {
+                /** @description Select a playback mode. Defaults to High Bandwidth. */
                 mode?: "original" | "high_bandwidth" | "low_bandwidth";
                 /** @description Low Bandwidth Opus target in kbps, 6–256. Defaults to 128. */
                 bitrate?: number;

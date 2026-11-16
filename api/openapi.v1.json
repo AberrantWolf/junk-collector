@@ -6174,6 +6174,7 @@
           {
             "name": "mode",
             "in": "query",
+            "description": "Select a playback mode. Defaults to High Bandwidth.",
             "required": false,
             "schema": {
               "type": "string",
