@@ -57,7 +57,7 @@ catalog metadata in Metadata.
 
 The UI links to [DAT-o-MATIC](https://datomatic.no-intro.org/), the official
 [No-Intro download guide](https://wiki.no-intro.org/index.php?title=Database_Navigation_Guide),
-and [Redump downloads](http://redump.org/downloads/). The No-Intro page and guide
+and [Redump downloads](https://redump.info/downloads). The No-Intro page and guide
 were checked on October 9; the guide describes Download → system → settings.
 The Redump page timed out during this check, so availability is not claimed.
 No DAT download, form submission, scraping or provider retry was performed.

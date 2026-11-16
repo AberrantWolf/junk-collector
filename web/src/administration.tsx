@@ -94,7 +94,7 @@ export default function Administration({collections,collectionTypes,onClose,onSe
   <h3>Game DAT catalogs</h3>
   <p>Game reference catalogs identify saved dumps by matching their checksums. Upload a catalog, review its platform, version and contents, then activate it for the selected collection.</p>
   <details><summary>Download a game catalog manually</summary><ol>
-   <li>Open <a href="https://datomatic.no-intro.org/" target="_blank" rel="noreferrer">No-Intro DAT-o-MATIC</a> for cartridges or <a href="http://redump.org/downloads/" target="_blank" rel="noreferrer">Redump downloads</a> for discs in your browser. No-Intro’s <a href="https://wiki.no-intro.org/index.php?title=Database_Navigation_Guide" target="_blank" rel="noreferrer">download guide</a> explains its Download section and system selection. Collector does not download catalogs.</li>
+   <li>Open <a href="https://datomatic.no-intro.org/" target="_blank" rel="noreferrer">No-Intro DAT-o-MATIC</a> for cartridges or <a href="https://redump.info/downloads" target="_blank" rel="noreferrer">Redump downloads</a> for discs in your browser. No-Intro’s <a href="https://wiki.no-intro.org/index.php?title=Database_Navigation_Guide" target="_blank" rel="noreferrer">download guide</a> explains its Download section and system selection. Collector does not download catalogs.</li>
    <li>Select standard No-Intro or Redump DAT files, or ZIPs containing them (up to 64 MiB each). Collector detects document format, system and supported byte interpretation.</li>
    <li>Review detected catalogs, import recognized entries, then activate them. Unsupported or contradictory documents remain visibly unavailable.</li>
   </ol></details>
