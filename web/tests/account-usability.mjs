@@ -32,6 +32,12 @@ try{
  const completed=await context.request.post(`${base}/api/v1/enrollments/${enrollment.id}/complete`,{data:{completion_secret:enrollment.completion_secret}});assert.equal(completed.status(),200);const credential=await completed.json();
  await page.getByRole('link',{name:'Open library',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).click();
  const security=page.getByRole('dialog',{name:'Account & security'});await expect(security.getByText('Signed in as',{exact:false})).toContainText('owner');
+ const accountNav=page.getByRole('navigation',{name:'Your account'});
+ const displayName=security.getByLabel('Display name',{exact:true});
+ await expect(accountNav.getByText(await displayName.inputValue(),{exact:true})).toBeAttached();
+ await displayName.fill('Owner on the sidebar');
+ await security.getByRole('button',{name:'Save profile',exact:true}).click();
+ await expect(accountNav.getByText('Owner on the sidebar',{exact:true})).toBeAttached();
  await security.getByRole('button',{name:'Password',exact:true}).click();await security.getByLabel('New password',{exact:true}).fill(password+'-changed');await security.getByLabel('Confirm new password',{exact:true}).fill('mismatched password');await expect(security.getByRole('alert').filter({hasText:'confirmation does not match'})).toBeVisible();await security.getByLabel('Confirm new password',{exact:true}).fill(password+'-changed');await security.getByRole('button',{name:'Change password',exact:true}).click();await security.getByRole('status').filter({hasText:'Password changed.'}).waitFor();
  assert.equal(await nativeStatus(credential.credential),200);
  await security.getByRole('button',{name:'Recovery',exact:true}).click();await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').first().waitFor();const codes=await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').allTextContents();assert.equal(codes.length,10);

@@ -16,10 +16,12 @@ Use a destination rail with Browse (Library, Lists), Organize (Imports, Metadata
 Music preparation, Activity), Manage (collection access and server administration) and a
 separate account footer. Keep existing application services, permissions,
 listener exposure, routes, history, request cancellation and playback ownership.
-Move the collection filter to a searchable, paginated disclosure above workspace
-content. Its current value is visible even when closed; changing it preserves
-workspace routing and clears obsolete selected entries/lists through the existing
-navigation controller. Activity has one navigation entry. Remove the misleading Manage collections
+The collection filter must appear in a searchable, paginated disclosure at the
+top of the sidebar. Its current value must remain visible when the disclosure
+or the mobile menu is closed. Changing the collection must preserve workspace
+routing and clear obsolete selected entries and lists through the existing
+navigation controller. The account footer must show the signed-in display name
+and reflect a saved profile change. Activity has one navigation entry. Remove the misleading Manage collections
 command: it opened an entry editor. Add / import remains a contextual workspace
 action, and collection creation remains in Administration. Management dialogs
 remain commands rather than receiving false destination selection indicators.
@@ -36,7 +38,7 @@ new font dependency, or generic card dashboard.
 ```
 Desktop                           Phone
 ┌──────────────┬────────────────┐  ┌────────────────────────┐
-│ Brand        │ Collection ▾   │  │ Brand             Menu │
+│ Brand        │ Workspace title│  │ Brand             Menu │
 │ Browse       │                │  ├────────────────────────┤
 │  Library     │ Workspace title│  │ Collection ▾           │
 │  Lists       │ Search/actions │  │ Workspace title        │
