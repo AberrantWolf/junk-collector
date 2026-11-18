@@ -1588,6 +1588,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/acoustid-submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["submit_acoustid_fingerprints"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/activity": {
         parameters: {
             query?: never;
@@ -2953,6 +2969,14 @@ export interface components {
             source_id: components["schemas"]["RepresentationId"];
             status: components["schemas"]["AudioVerificationStatus"];
         };
+        AcoustIdSubmissionOutcome: {
+            /** @enum {string} */
+            status: "accepted";
+            submission_ids: number[];
+        } | {
+            /** @enum {string} */
+            status: "unknown";
+        };
         AcquireAccurateRipCommand: {
             representation_id: components["schemas"]["RepresentationId"];
             structure_observation_id: components["schemas"]["ObservationId"];
@@ -3627,6 +3651,7 @@ export interface components {
             result: Record<string, never>;
             result_revision?: string | null;
             stale: boolean;
+            submission_files: string[];
         };
         /** @description Acquisition facts belong to the purchased package, independently of physical copies. */
         DigitalPurchase: {
@@ -6146,6 +6171,12 @@ export interface components {
             digest: components["schemas"]["Digest"];
             name: string;
             visibility?: components["schemas"]["Visibility"];
+        };
+        SubmitAcoustIdFingerprints: {
+            job_id: components["schemas"]["JobId"];
+            release_id: string;
+            track_assignments: components["schemas"]["DigitalTrackAssignment"][];
+            user_key: string;
         };
         TrackPage: {
             items: components["schemas"]["MusicTrackAvailability"][];
@@ -10815,6 +10846,69 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    submit_acoustid_fingerprints: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitAcoustIdFingerprints"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcoustIdSubmissionOutcome"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Payload Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

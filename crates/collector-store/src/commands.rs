@@ -316,6 +316,15 @@ pub(super) fn recover(db: &mut Connection, archive: &Path, state: &Path) -> Resu
             )?;
         }
     }
+    // AcoustID has no request key to reconcile a POST interrupted after delivery.
+    // Preserve the indeterminate outcome so replay cannot send a second batch.
+    tx.execute(
+        "UPDATE private.command_receipts SET state='completed',result=? WHERE state='in_progress' AND operation=?",
+        params![
+            serde_json::to_string(&collector_app::AcoustIdSubmissionOutcome::Unknown).map_err(storage)?,
+            collector_app::ACOUSTID_SUBMISSION_COMMAND,
+        ],
+    ).map_err(storage)?;
     tx.execute("DELETE FROM private.command_outcomes WHERE (user_id,api_major,operation,idempotency_key) IN (SELECT user_id,api_major,operation,idempotency_key FROM private.command_receipts WHERE state='in_progress')",[]).map_err(storage)?;
     tx.execute(
         "DELETE FROM private.command_receipts WHERE state='in_progress'",

@@ -5126,6 +5126,67 @@
         }
       }
     },
+    "/api/v1/items/{id}/acoustid-submissions": {
+      "post": {
+        "operationId": "submit_acoustid_fingerprints",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitAcoustIdFingerprints"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 49152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcoustIdSubmissionOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "413": {
+            "description": "Payload Too Large"
+          },
+          "429": {
+            "description": "Too Many Requests"
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/activity": {
       "get": {
         "operationId": "activity",
@@ -9712,6 +9773,47 @@
           }
         }
       },
+      "AcoustIdSubmissionOutcome": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "submission_ids",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "accepted"
+                ]
+              },
+              "submission_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "AcquireAccurateRipCommand": {
         "type": "object",
         "required": [
@@ -12543,7 +12645,8 @@
         "required": [
           "stale",
           "job",
-          "result"
+          "result",
+          "submission_files"
         ],
         "properties": {
           "job": {
@@ -12570,6 +12673,12 @@
           },
           "stale": {
             "type": "boolean"
+          },
+          "submission_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -23331,6 +23440,34 @@
             "$ref": "#/components/schemas/Visibility"
           }
         }
+      },
+      "SubmitAcoustIdFingerprints": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "release_id",
+          "track_assignments",
+          "user_key"
+        ],
+        "properties": {
+          "job_id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "release_id": {
+            "type": "string"
+          },
+          "track_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DigitalTrackAssignment"
+            }
+          },
+          "user_key": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false
       },
       "TrackPage": {
         "type": "object",

@@ -13,6 +13,7 @@ Commands can commit while their responses are lost. Retrying against newly resol
 - Application commands using receipts must bind retry identity to the submitted typed inputs before resolving mutable configuration.
 - Repeated matching requests must recover the committed result; reusing the identity with changed inputs must be rejected. Expected revisions must independently reject stale mutations.
 - Receipts and effects must share their owning transaction or an explicit recoverable publication-marker protocol. A success receipt must not precede its committed effect.
+- AcoustID contributions must claim a receipt before sending. AcoustID cannot replay the request by Collector's command key, so an interrupted delivery must recover as unknown. The same command must replay that outcome without sending again.
 - Interrupted command outcomes must be reconciled before a new attempt performs the effect. Malformed or inconsistent receipts must not be silently discarded to start a fresh command.
 - Shared effects must use one effect implementation rather than nesting independently committed commands. Authentication ceremonies, upload offsets and one-time issuance must retain their explicit alternative retry semantics.
 

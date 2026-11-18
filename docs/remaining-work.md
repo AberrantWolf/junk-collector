@@ -52,7 +52,6 @@ are complete. The deployment used a paired recovery point under the
   storefronts, richer DSP, smart/personal lists, broader document rendering/formats, mobile ports (including
   SwiftUI/UniFFI), PriceCharting after API/permission research, video, emulators,
   ripping hardware, replication, runtime plugins and cross-collection deduplication require separate complete designs.
-  Digital album fingerprint matching and explicit full mapping review are delivered.
 - **HL-14 hardening:** persistent/distributed limiting, exhaustive platform/load
   matrices and stronger power-loss qualification are conditional. The retained large-scale target is
   100,000 items/one million file-evidence records/five users on a recorded four-core,

@@ -47,6 +47,42 @@ struct Checkpoint {
     progress: DigitalMatchingProgress,
     result: Option<serde_json::Value>,
 }
+
+pub(crate) fn acoustid_submission_audio(
+    checkpoint: &serde_json::Value,
+) -> Result<BTreeMap<String, DigitalFileFingerprint>> {
+    let mut eligible = BTreeMap::new();
+    let Some(local) = checkpoint.get("local").and_then(|v| v.as_object()) else {
+        return Ok(eligible);
+    };
+    let Some(fingerprints) = checkpoint.get("fingerprints").and_then(|v| v.as_object()) else {
+        return Ok(eligible);
+    };
+    let by_file: BTreeMap<_, _> = fingerprints
+        .values()
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| Some((v.get("file_id")?.as_str()?, v)))
+        .collect();
+    for (key, track) in local {
+        if !track
+            .get("recordings")
+            .and_then(|v| v.as_array())
+            .is_some_and(Vec::is_empty)
+        {
+            continue;
+        }
+        let Some(value) = key.split_once(':').and_then(|(_, file)| by_file.get(file)) else {
+            continue;
+        };
+        let fingerprint: DigitalFileFingerprint =
+            serde_json::from_value((*value).clone()).map_err(|e| Error::Storage(e.to_string()))?;
+        if fingerprint.audio.usable() {
+            eligible.insert(key.clone(), fingerprint);
+        }
+    }
+    Ok(eligible)
+}
 impl CollectionService {
     pub(crate) fn digital_fingerprint_cache_key(
         &self,

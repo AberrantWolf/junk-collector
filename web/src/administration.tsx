@@ -101,7 +101,21 @@ export default function Administration({collections,collectionTypes,onClose,onSe
    if(!background&&isCurrent())setSnapshotLoading(false);
   }
  }
- async function moreSnapshots(){if(!catalogCollection||!snapshotCursor||snapshotLoading)return;const scope=catalogCollection;snapshotReadVersion.current++;setSnapshotLoading(true);try{const page=await api<CatalogPage>(`/admin/collections/${scope}/catalog-snapshots?limit=50&cursor=${encodeURIComponent(snapshotCursor)}`);if(catalogScope.current===scope){snapshotPages.current++;setSnapshots(current=>[...current,...page.items.filter(value=>!current.some(previous=>previous.snapshot.id===value.snapshot.id))]);setSnapshotCursor(page.next_cursor??null);}}catch(error){if(catalogScope.current===scope)fail(error);}finally{if(catalogScope.current===scope)setSnapshotLoading(false);}}
+ async function moreSnapshots(){
+  if(!catalogCollection||loadedSnapshotCollection!==catalogCollection||!snapshotCursor||snapshotLoading)return;
+  const scope=catalogCollection;
+  const version=++snapshotReadVersion.current;
+  const isCurrent=()=>catalogScope.current===scope&&snapshotReadVersion.current===version;
+  setSnapshotLoading(true);
+  try{
+   const page=await api<CatalogPage>(`/admin/collections/${scope}/catalog-snapshots?limit=50&cursor=${encodeURIComponent(snapshotCursor)}`);
+   if(!isCurrent())return;
+   snapshotPages.current++;
+   setSnapshots(current=>[...current,...page.items.filter(value=>!current.some(previous=>previous.snapshot.id===value.snapshot.id))]);
+   setSnapshotCursor(page.next_cursor??null);
+  }catch(error){if(isCurrent())fail(error);}
+  finally{if(isCurrent())setSnapshotLoading(false);}
+ }
  async function importCatalog(){if(!catalogCollection||!catalogSource)return;setBusy(true);setFeedback(undefined);try{const accepted=await api<{job_id:string}>(`/admin/collections/${catalogCollection}/catalog-snapshots`,{method:'POST',body:JSON.stringify({source:catalogSource})});setCatalogJobId(accepted.job_id);setCatalogJobCollection(catalogCollection);setCatalogJob(undefined);setFeedback({kind:'success',text:'Catalog import started. You can continue managing other settings while it runs.'});}catch(error){fail(error);}finally{setBusy(false);}}
  async function uploadCatalogFile(){
   if(!catalogCollection||!uploadFiles.length)return;const scope=catalogCollection;

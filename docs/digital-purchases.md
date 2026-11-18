@@ -296,6 +296,19 @@ Coverage and track mapping remain visible beside artwork; applying requires ever
 selected file and every release track to have an unambiguous assignment without
 conflicting known durations. Application retains the chosen source snapshot,
 uses the existing metadata/artwork workflow and preserves originals and manual
-values. Later inventory, source or metadata-authority edits require a fresh search.
-Partial matches can inform manual MusicBrainz selection but cannot apply an entire
-track mapping automatically. These suggestions do not establish catalog verification.
+values. The mapping editor compares each local file and duration beside its
+selected release track. It labels AcoustID scores and tentative assignments.
+Tentative assignments require a unique unused release slot supported by a
+matching title or by track number and duration. Review and confirm the entire
+one-to-one mapping before applying a partial result. Later inventory, source or
+metadata-authority edits require a fresh search. These suggestions do not establish
+catalog verification.
+
+After confirming the mapping, use **Contribute missing fingerprints to AcoustID**
+before applying the album if you want to contribute to AcoustID's public database.
+Enter your personal [AcoustID user API key](https://acoustid.org/api-key) and submit.
+Collector sends usable fingerprints with no recording candidates, their full file
+durations, and the reviewed MusicBrainz recording IDs. The action uses the
+completed lookup and its current source and release evidence. A successful receipt
+includes AcoustID submission IDs for asynchronous processing. After AcoustID
+processes the contribution, use **Refresh lookups** to bypass cached misses.

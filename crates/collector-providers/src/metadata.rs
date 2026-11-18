@@ -1,7 +1,7 @@
 use collector_app::{
-    CatalogParserPort, ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderPort,
-    ProviderRequest, ProviderResponse, ProviderStreamResponse, SnapshotRecord,
-    StreamingProviderPort,
+    AcoustIdContribution, AcoustIdSubmissionOutcome, AcoustIdSubmissionPort, CatalogParserPort,
+    ParsedCatalogSnapshot, ProcessingExecutionContext, ProviderPort, ProviderRequest,
+    ProviderResponse, ProviderStreamResponse, SnapshotRecord, StreamingProviderPort,
 };
 use collector_core::{ByteLength, Digest, Error, RawJson, Result};
 use collector_modules::music::{
@@ -446,14 +446,21 @@ impl MusicBrainzProvider {
         &'a self,
         execution: &dyn ProcessingExecutionContext,
     ) -> Result<std::sync::MutexGuard<'a, Option<Instant>>> {
+        self.wait_for_rate_limit_checked(&mut || checkpoint(execution))
+    }
+
+    fn wait_for_rate_limit_checked(
+        &self,
+        check: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<std::sync::MutexGuard<'_, Option<Instant>>> {
         // Hold admission until the actual start time; reservations made before
         // sleeping can bunch requests when threads wake late or are cancelled.
         let mut next = loop {
-            checkpoint(execution)?;
+            check()?;
             match self.next_request.try_lock() {
                 Ok(guard) => break guard,
                 Err(std::sync::TryLockError::WouldBlock) => {
-                    wait_cancellable(Duration::from_millis(10), execution)?
+                    wait_checked(Duration::from_millis(10), check)?
                 }
                 Err(_) => return Err(Error::Unavailable("MusicBrainz limiter lock failed".into())),
             }
@@ -463,8 +470,9 @@ impl MusicBrainzProvider {
             if remaining > MAX_RETRY_DELAY {
                 return Err(Error::RateLimited(remaining.as_secs().saturating_add(1)));
             }
-            wait_cancellable(remaining, execution)?;
+            wait_checked(remaining, check)?;
         }
+        check()?;
         *next = Some(Instant::now() + self.minimum_interval);
         Ok(next)
     }
@@ -1687,9 +1695,13 @@ fn checkpoint(execution: &dyn ProcessingExecutionContext) -> Result<()> {
 }
 
 fn wait_cancellable(delay: Duration, execution: &dyn ProcessingExecutionContext) -> Result<()> {
+    wait_checked(delay, &mut || checkpoint(execution))
+}
+
+fn wait_checked(delay: Duration, check: &mut dyn FnMut() -> Result<()>) -> Result<()> {
     let deadline = Instant::now() + delay;
     loop {
-        checkpoint(execution)?;
+        check()?;
         let now = Instant::now();
         if now >= deadline {
             return Ok(());
@@ -1747,6 +1759,42 @@ impl AcoustIdProvider {
             key: key.into(),
         })
     }
+
+    fn post(
+        &self,
+        path: &str,
+        form: &[(&str, &str)],
+        check: &mut dyn FnMut() -> Result<()>,
+        before_send: impl FnOnce() -> Result<()>,
+    ) -> Result<std::result::Result<Response, reqwest::Error>> {
+        let url = self
+            .transport
+            .origin
+            .join(path)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        self.transport.policy.validate_destination(&url)?;
+        let mut admission = self.transport.wait_for_rate_limit_checked(check)?;
+        before_send()?;
+        let response = self
+            .transport
+            .client
+            .as_ref()
+            .expect("client")
+            .post(url)
+            .form(form)
+            .send();
+        let delay = response
+            .as_ref()
+            .ok()
+            .filter(|r| r.status() == StatusCode::TOO_MANY_REQUESTS || r.status().is_server_error())
+            .map_or(self.transport.minimum_interval, |r| {
+                retry_after(r.headers())
+                    .unwrap_or(Duration::from_secs(60))
+                    .max(self.transport.minimum_interval)
+            });
+        *admission = Instant::now().checked_add(delay);
+        Ok(response)
+    }
 }
 impl ProviderPort for AcoustIdProvider {
     fn acquire(
@@ -1766,42 +1814,22 @@ impl ProviderPort for AcoustIdProvider {
         }
         let query: AcoustIdQuery = request.query.parse()?;
         query.validate()?;
-        let url = self
-            .transport
-            .origin
-            .join("/v2/lookup")
-            .map_err(|e| Error::Invalid(e.to_string()))?;
-        self.transport.policy.validate_destination(&url)?;
-        checkpoint(execution)?;
-        let mut admission = self.transport.wait_for_rate_limit(execution)?;
+        let form = [
+            ("client", self.key.as_str()),
+            ("duration", &query.duration.to_string()),
+            ("fingerprint", query.fingerprint.as_str()),
+            ("meta", "recordings"),
+            ("format", "json"),
+        ];
         let response = self
-            .transport
-            .client
-            .as_ref()
-            .expect("client")
-            .post(url)
-            .form(&[
-                ("client", self.key.as_str()),
-                ("duration", &query.duration.to_string()),
-                ("fingerprint", query.fingerprint.as_str()),
-                ("meta", "recordings"),
-                ("format", "json"),
-            ])
-            .send();
-        *admission = Some(Instant::now() + self.transport.minimum_interval);
-        drop(admission);
-        let response =
-            response.map_err(|e| Error::Unavailable(format!("AcoustID request: {e}")))?;
+            .post(
+                "/v2/lookup",
+                &form,
+                &mut || checkpoint(execution),
+                || Ok(()),
+            )?
+            .map_err(|e| Error::Unavailable(format!("AcoustID request: {e}")))?;
         let status = response.status();
-        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-            let delay = retry_after(response.headers()).unwrap_or(Duration::from_secs(60));
-            *self
-                .transport
-                .next_request
-                .lock()
-                .map_err(|_| Error::Unavailable("AcoustID limiter".into()))? =
-                Instant::now().checked_add(delay);
-        }
         if status != StatusCode::OK {
             return Err(Error::Unavailable(format!(
                 "AcoustID HTTP {status}; lookup stopped"
@@ -1828,9 +1856,130 @@ impl ProviderPort for AcoustIdProvider {
     }
 }
 
+impl AcoustIdSubmissionPort for AcoustIdProvider {
+    fn submit(
+        &self,
+        user_key: &str,
+        tracks: &[AcoustIdContribution],
+        before_send: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<AcoustIdSubmissionOutcome> {
+        use AcoustIdSubmissionOutcome::{Accepted, Unknown};
+        let mut form = vec![
+            ("client".into(), self.key.clone()),
+            ("user".into(), user_key.into()),
+            ("format".into(), "json".into()),
+        ];
+        for (index, track) in tracks.iter().enumerate() {
+            if track.query.duration > 0x7fff {
+                return Err(Error::Invalid(
+                    "A track exceeds AcoustID’s submission duration limit".into(),
+                ));
+            }
+            form.extend([
+                (
+                    format!("duration.{index}"),
+                    track.query.duration.to_string(),
+                ),
+                (
+                    format!("fingerprint.{index}"),
+                    track.query.fingerprint.clone(),
+                ),
+                (format!("mbid.{index}"), track.recording_id.clone()),
+            ]);
+        }
+        let form: Vec<_> = form
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        let Ok(response) = self.post("/v2/submit", &form, &mut || Ok(()), before_send)? else {
+            return Ok(Unknown);
+        };
+        match response.status() {
+            StatusCode::TOO_MANY_REQUESTS => {
+                return Err(Error::RateLimited(
+                    retry_after(response.headers()).map_or(60, |d| d.as_secs()),
+                ));
+            }
+            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                return Err(Error::Invalid(
+                    "AcoustID refused the contribution. Check your AcoustID user key.".into(),
+                ));
+            }
+            StatusCode::PAYLOAD_TOO_LARGE => {
+                return Err(Error::Invalid("AcoustID refused the batch size".into()));
+            }
+            StatusCode::OK => {}
+            _ => return Ok(Unknown),
+        }
+        let confirmed =
+            read_bounded_with_progress(response, 64 * 1024, &mut |_| Ok(()), "AcoustID")
+                .ok()
+                .and_then(|bytes| acoustid_submission_ids(&bytes, tracks.len()));
+        Ok(confirmed.map_or(Unknown, |submission_ids| Accepted { submission_ids }))
+    }
+}
+
+fn acoustid_submission_ids(bytes: &[u8], count: usize) -> Option<Vec<u64>> {
+    #[derive(Deserialize)]
+    struct ResponseBody {
+        status: String,
+        submissions: Vec<Submission>,
+    }
+    #[derive(Deserialize)]
+    struct Submission {
+        id: u64,
+        index: serde_json::Value,
+        status: String,
+    }
+    let response: ResponseBody = serde_json::from_slice(bytes).ok()?;
+    if response.status != "ok" || response.submissions.len() != count {
+        return None;
+    }
+    let mut ids = vec![0; count];
+    for submission in response.submissions {
+        let index = submission
+            .index
+            .as_u64()
+            .and_then(|v| usize::try_from(v).ok())
+            .or_else(|| submission.index.as_str()?.parse().ok())?;
+        let entry = ids.get_mut(index)?;
+        if *entry != 0
+            || submission.id == 0
+            || !matches!(submission.status.as_str(), "pending" | "imported")
+        {
+            return None;
+        }
+        *entry = submission.id;
+    }
+    Some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acoustid_submission_stops_when_preflight_denies_delivery() {
+        let provider = AcoustIdProvider::with_test_origin(
+            "CollectorTests/1 (tests@example.invalid)",
+            "fixture-client",
+            "http://127.0.0.1:1",
+        )
+        .unwrap();
+        let result = provider.submit("fixture-user", &[], &mut || Err(Error::Forbidden));
+        assert!(matches!(result, Err(Error::Forbidden)));
+    }
+
+    #[test]
+    fn acoustid_receipt_requires_an_acknowledgment_for_every_index() {
+        let reply = br#"{"status":"ok","submissions":[{"id":243,"status":"pending","index":"1"},{"id":185,"status":"pending","index":0}]}"#;
+        assert_eq!(acoustid_submission_ids(reply, 2), Some(vec![185, 243]));
+        let partial =
+            br#"{"status":"ok","submissions":[{"id":243,"status":"pending","index":"1"}]}"#;
+        assert_eq!(acoustid_submission_ids(partial, 2), None);
+        let duplicate = br#"{"status":"ok","submissions":[{"id":185,"status":"pending","index":"0"},{"id":243,"status":"pending","index":0}]}"#;
+        assert_eq!(acoustid_submission_ids(duplicate, 2), None);
+    }
 
     #[test]
     fn musicbrainz_tracks_remain_bound_to_their_medium() {

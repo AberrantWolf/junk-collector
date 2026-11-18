@@ -1108,10 +1108,15 @@ async fn main() -> Result<()> {
                         };
                     #[cfg(not(debug_assertions))]
                     let acoustid = collector_providers::AcoustIdProvider::new(user_agent, key)?;
-                    state.service = state.service.clone().with_streaming_provider(
-                        ModuleId(collector_modules::music::ACOUSTID_PROVIDER_ID.into()),
-                        Arc::new(collector_app::BoundedProviderAdapter(Arc::new(acoustid))),
-                    )?;
+                    let acoustid = Arc::new(acoustid);
+                    state.service = state
+                        .service
+                        .clone()
+                        .with_acoustid_submitter(acoustid.clone())
+                        .with_streaming_provider(
+                            ModuleId(collector_modules::music::ACOUSTID_PROVIDER_ID.into()),
+                            Arc::new(collector_app::BoundedProviderAdapter(acoustid)),
+                        )?;
                 }
                 let musicbrainz_id =
                     ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into());

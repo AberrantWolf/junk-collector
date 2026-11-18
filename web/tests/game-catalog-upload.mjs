@@ -64,6 +64,52 @@ try{
  await expect.poll(async()=>(await read(`/items/${item.id}`)).title,{timeout:45000}).toBe('Final Fantasy & Tactics (USA)');
  await admin.locator('.catalog-snapshot').filter({hasText:'Nintendo - Game Boy'}).filter({has:page.getByRole('button',{name:'Activate',exact:true})}).getByRole('button',{name:'Activate',exact:true}).click();await expect(admin.getByRole('button',{name:'Active',exact:true})).toHaveCount(2);
  await expect.poll(async()=>{const rows=(await read(`/admin/collections/${collection.id}/catalog-snapshots?limit=50`)).items;return rows.filter(r=>r.active).length;}).toBe(2);
+ // A pagination response from an earlier visit cannot append to the reopened collection.
+ await page.evaluate(async()=>{
+  const response=await fetch('/api/v1/admin/collections',{method:'POST',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({name:'Other games',module:'org.junk.games'})});
+  if(!response.ok)throw Error(await response.text());
+ });
+ const catalogPath=`/api/v1/admin/collections/${collection.id}/catalog-snapshots`;
+ const savedCatalogs=await read(`/admin/collections/${collection.id}/catalog-snapshots?limit=50`);
+ const delayedCatalog=structuredClone(savedCatalogs.items[0]);
+ delayedCatalog.snapshot.id=crypto.randomUUID();
+ let notifyPage,finishPage,allowPage;
+ const pageRequested=new Promise(resolve=>notifyPage=resolve);
+ const pageFinished=new Promise(resolve=>finishPage=resolve);
+ const pageGate=new Promise(resolve=>allowPage=resolve);
+ let includeCursor=true;
+ const catalogRoute=url=>url.pathname===catalogPath;
+ await page.route(catalogRoute,async route=>{
+  if(!new URL(route.request().url()).searchParams.has('cursor')){
+   await route.fulfill({json:{...savedCatalogs,next_cursor:includeCursor?'delayed-page':null}});
+   return;
+  }
+  notifyPage();
+  await pageGate;
+  try{await route.fulfill({json:{items:[delayedCatalog],next_cursor:null}});}
+  finally{finishPage();}
+ });
+ try{
+  await admin.getByRole('button',{name:'Refresh catalogs'}).click();
+  await admin.getByRole('button',{name:'More catalog versions'}).click();
+  await pageRequested;
+  const search=admin.getByRole('searchbox',{name:'Game collection',exact:true});
+  await search.fill('Other games');
+  await admin.getByRole('button',{name:/^Other games/}).click();
+  await expect(admin.locator('.catalog-snapshot')).toHaveCount(0);
+  includeCursor=false;
+  await search.fill('Game fixtures');
+  await admin.getByRole('button',{name:/^Game fixtures/}).click();
+  await expect(admin.locator('.catalog-snapshot')).toHaveCount(2);
+  await expect(admin.getByRole('button',{name:'Refresh catalogs'})).toBeEnabled();
+  const delayedResponse=page.waitForResponse(response=>catalogRoute(new URL(response.url()))&&new URL(response.url()).searchParams.has('cursor'));
+  allowPage();
+  await pageFinished;
+  await (await delayedResponse).finished();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.evaluate(id=>document.body.textContent.includes(id),delayedCatalog.snapshot.id),false,
+   'the delayed catalog must not appear after switching away and back');
+ }finally{allowPage();await page.unroute(catalogRoute);}
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'/tmp/collector-game-dat-mobile.png',fullPage:true});await page.setViewportSize({width:1360,height:980});
  await admin.getByRole('button',{name:'Close administration',exact:true}).click();
  await page.goto(`${origin}/library-care/metadata?collection=${collection.id}&item=${item.id}&attention=all`);const review=page.getByRole('region',{name:'Metadata review',exact:true});await review.getByRole('heading',{name:'Current and detected fields'}).waitFor();

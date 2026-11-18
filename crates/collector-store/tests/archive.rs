@@ -2157,6 +2157,30 @@ fn concurrent_receipt_claim_has_one_executor_and_replays_completion() {
 }
 
 #[test]
+fn interrupted_acoustid_submission_replays_without_sending_again() {
+    let (root, store, actor, service, _) = setup();
+    let operation = collector_app::ACOUSTID_SUBMISSION_COMMAND;
+    let key = "interrupted-acoustid-submission";
+    let digest = Digest::sha256(b"reviewed mapping").hex;
+    assert!(matches!(
+        store.begin_command(actor.user_id, 1, operation, key, &digest),
+        Ok(ReceiptDecision::Execute)
+    ));
+    drop(service);
+    drop(store);
+
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(matches!(
+        store.begin_command(actor.user_id, 1, operation, key, &digest),
+        Ok(ReceiptDecision::Replay(value)) if value == serde_json::json!({"status":"unknown"})
+    ));
+    assert!(matches!(
+        store.begin_command(actor.user_id, 1, operation, key, "changed mapping"),
+        Err(Error::IdempotencyConflict)
+    ));
+}
+
+#[test]
 fn stale_revision_abandons_receipt_without_publishing() {
     let (root, store, actor, service, collection) = setup();
     let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();

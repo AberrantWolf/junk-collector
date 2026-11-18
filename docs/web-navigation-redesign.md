@@ -38,12 +38,13 @@ new font dependency, or generic card dashboard.
 ```
 Desktop                           Phone
 ┌──────────────┬────────────────┐  ┌────────────────────────┐
-│ Brand        │ Workspace title│  │ Brand             Menu │
-│ Browse       │                │  ├────────────────────────┤
-│  Library     │ Workspace title│  │ Collection ▾           │
-│  Lists       │ Search/actions │  │ Workspace title        │
-│ Organize     │                │  │ Search/actions         │
-│  Imports …   │ Artwork + text │  │ Artwork + text         │
+│ Brand        │                │  │ Brand             Menu │
+│ Collection ▾ │                │  ├────────────────────────┤
+│ Browse       │                │  │ Collection ▾           │
+│  Library     │ Workspace title│  │ Workspace title        │
+│  Lists       │ Search/actions │  │ Search/actions         │
+│ Organize     │                │  │ Artwork + text         │
+│  Imports …   │ Artwork + text │  │                        │
 │ Manage       │                │  │                        │
 │  Access      │                │  └────────────────────────┘
 │ Account      │                │  Menu expands labelled

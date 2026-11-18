@@ -4,7 +4,9 @@ pub use email_purchases::*;
 mod disc_audio;
 mod local_playback;
 pub use disc_audio::game_audio_search_projection;
+mod acoustid_submission;
 mod digital_matching;
+pub use acoustid_submission::*;
 mod digital_pipeline;
 pub use digital_matching::*;
 pub use digital_pipeline::DigitalMatchingProgress;
@@ -1759,6 +1761,7 @@ pub struct CollectionService {
     mail_setup: Option<Arc<dyn MailSetupPort>>,
     catalog_inspector: Option<Arc<dyn CatalogUploadInspectionPort>>,
     streaming_providers: Arc<std::collections::BTreeMap<String, Arc<dyn StreamingProviderPort>>>,
+    acoustid_submitter: Option<Arc<dyn AcoustIdSubmissionPort>>,
     catalog_parsers: Arc<std::collections::BTreeMap<String, Arc<dyn CatalogParserPort>>>,
     modules: Arc<Registry>,
 }
@@ -2544,6 +2547,7 @@ impl CollectionService {
             mail_setup: None,
             catalog_inspector: None,
             streaming_providers: Arc::new(Default::default()),
+            acoustid_submitter: None,
             catalog_parsers: Arc::new(Default::default()),
             modules,
         }

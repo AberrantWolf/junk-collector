@@ -620,6 +620,14 @@ Explicit user-reviewed file/slot assignments remain application policy. They are
 validated against the frozen file set and retained complete release snapshot,
 then enter the same durable reviewed metadata input as automatic mappings. The
 frontend presents assignments without inventing audio-recognition evidence.
+Tentative filename and duration suggestions must remain visibly distinct from
+recording matches and require a complete user-reviewed mapping. An AcoustID
+contribution must be an explicit curator command against a current completed
+lookup and the same verified release and file assignments. It must disclose
+only eligible shared-file fingerprints, durations and reviewed recording IDs.
+The AcoustID adapter must share lookup throttling and use the personal key only
+for the request. Receipt recovery must preserve a known acceptance or an
+indeterminate delivery without replaying the external effect.
 Resumed resolution stages recover their outcome from validated provider input,
 independently of disposable authority observation lists. Filling absent artwork
 may advance a selected immutable candidate only when its other content is
@@ -1549,7 +1557,7 @@ Collection reads cross `CollectionReadPort`, whose methods receive durable ident
 
 Application mutations carry a validated `CommandContext`. Private SQLite schema 3 claims receipts by `(UserId, API major, operation, Idempotency-Key)` and binds the claim to a SHA-256 digest of the validated typed request, path identities, and operation. Authorization and validation run before a claim. A completed receipt replays its non-secret serialized result across restart; a changed digest or active claim returns a stable conflict; an effect error abandons an unprepared claim; a prepared publication remains recoverable until startup resolves its commit marker. Authentication ceremonies, logout, resumable upload chunks, and internal failure bookkeeping use their own single-use or offset state machines instead. The HTTP and React layers transport keys but never decide replay policy.
 
-Command execution creates an explicit `CommandEffects` scope bound to a typed `CommandReceipt`. The scope shares the Store's locks and connections; it carries no Principal, thread-local state, or ambient authorization. Private mutations complete the response receipt in the effect's SQLite transaction. Filesystem mutations durably prepare the exact response in private `command_outcomes`, bound to a root-relative publication marker and digest before publishing. Startup validates the marker and replays committed results, or releases uncommitted claims, before opening services. Upload bookkeeping and committed artwork scratch cleanup are reconciled after projection rebuild. An operation must use one of these two commit mechanisms; returning an effect and subsequently writing its first durable receipt is not an acceptable adapter implementation.
+Command execution creates an explicit `CommandEffects` scope bound to a typed `CommandReceipt`. The scope shares the Store's locks and connections; it carries no Principal, thread-local state, or ambient authorization. Private mutations complete the response receipt in the effect's SQLite transaction. Filesystem mutations durably prepare the exact response in private `command_outcomes`, bound to a root-relative publication marker and digest before publishing. Startup validates the marker and replays committed results, or releases uncommitted claims, before opening services. Upload bookkeeping and committed artwork scratch cleanup are reconciled after projection rebuild. A local operation must use one of these two commit mechanisms. It must durably record its result as part of the effect or prepare its receipt before publishing. AcoustID submissions must claim the command before contacting the provider. Recovery must preserve an unknown outcome if delivery may have occurred, and replay must return that outcome without sending again.
 
 Failed manual metadata updates can reserve an immutable revision before a filesystem
 error prevents journal creation. Under the archive writer lock, the storage adapter

@@ -19,6 +19,17 @@ let releaseArtwork;let artworkStarted=false;const artworkGate=new Promise(resolv
 const provider=createServer(async(req,res)=>{
  try{let body='';for await(const b of req)body+=b;requests.push(`${req.method} ${req.url} ${body}`);const url=new URL(req.url,'http://fixture');let result;
  if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');const known={'67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df':1,'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8':2};const recording=known[createHash('sha256').update(fp).digest('hex')];assert.ok(recording,'unknown fingerprint');fingerprints.set(fp,recording);if(recording===2)await recognitionGate;result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))},...(recording===1?[{id:id(31)},{id:id(32)}]:[])]}]};}
+ else if(url.pathname==='/v2/submit'){
+  assert.equal(req.method,'POST');
+  const form=new URLSearchParams(body);
+  assert.deepEqual([...form.keys()].sort(),['client','duration.0','fingerprint.0','format','mbid.0','user']);
+  assert.equal(form.get('client'),'fixture-key');
+  assert.equal(form.get('user'),'fixture-user-key');
+  assert.equal(form.get('mbid.0'),id(2),'submit the reviewed recording ID, not the release or another track');
+  assert.equal(form.get('duration.0'),'12');
+  assert.equal(createHash('sha256').update(form.get('fingerprint.0')).digest('hex'),'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8');
+  result={status:'ok',submissions:[{index:'0',id:4321,status:'pending'}]};
+ }
  else if(url.pathname.startsWith('/ws/2/release')){if(url.searchParams.has('recording'))result={'release-count':1,'release-offset':0,releases:[{id:release,title:'Matched album'}]};else result={id:release,title:'Matched album',disambiguation:'Steam',date:'2020-09-15',country:'XW','artist-credit':[{name:'Matched artist',artist:{id:id(99),name:'Matched artist'}}],media:[{id:id(98),position:1,format:'Digital Media','track-count':2,tracks:[{id:id(97),position:1,number:'1',title:'Matched first',length:12000,recording:{id:id(1),title:'Matched first',length:12000}},{id:id(96),position:2,number:'2',title:'Matched second',length:12000,recording:{id:id(2),title:'Matched second',length:12000}}]}]};}
  else if(url.pathname===`/release/${id(93)}`)result={release:`https://musicbrainz.org/release/${id(93)}`,images:[]};
  else if([`/release/${release}`,`/release/${id(92)}`].includes(url.pathname)){const artRelease=url.pathname.split('/').pop();if(artRelease===id(92)){artworkStarted=true;await artworkGate;}result={release:`https://musicbrainz.org/release/${artRelease}`,images:[{id:1,front:true,back:false,approved:true,types:['Front'],comment:'Generated fixture',image:`https://coverartarchive.org/release/${artRelease}/1`}]};}
@@ -139,8 +150,9 @@ try{
  await matching.getByRole('button',{name:'Edit track mapping'}).click();
  const editor=matching.getByRole('group',{name:'Map every file to a release track'});
  await expect(editor.getByRole('combobox')).toHaveCount(2);
- await expect(editor.getByRole('checkbox')).toBeDisabled();
- await editor.getByRole('button',{name:'Assign in file order'}).click();
+ await expect(editor.getByRole('combobox',{name:'Release track for 01.wav'})).toHaveValue('1:1');
+ await expect(editor.getByRole('combobox',{name:'Release track for 02.mp3'})).toHaveValue('1:2');
+ await expect(editor.getByText(/Tentative/)).toBeVisible();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  await editor.getByRole('checkbox').check();
  // Duplicate assignments invalidate confirmation; correcting them requires fresh review.
@@ -148,7 +160,26 @@ try{
  await expect(editor.getByRole('checkbox')).not.toBeChecked();await expect(editor.getByRole('checkbox')).toBeDisabled();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  await editor.getByRole('combobox').nth(1).selectOption('1:2');
+ await editor.getByText('Contribute missing fingerprints to AcoustID',{exact:true}).click();
+ await editor.getByLabel('AcoustID user API key').fill('fixture-user-key');
+ const contribute=editor.getByRole('button',{name:'Submit 1 fingerprint to AcoustID'});
+ await expect(contribute).toBeDisabled();
  await editor.getByRole('checkbox').check();
+ const contributionRequest=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/acoustid-submissions'));
+ await contribute.click();
+ const firstContribution=await contributionRequest;
+ await expect(editor.getByText(/Submission IDs 4321/)).toBeVisible();
+ const sentBody=firstContribution.postDataJSON();
+ const sentKey=firstContribution.headers()['idempotency-key'];
+ const replay=await page.evaluate(async ({item,sentBody,sentKey})=>{
+  const response=await fetch(`/api/v1/items/${item}/acoustid-submissions`,{
+   method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':sentKey},body:JSON.stringify(sentBody),
+  });
+  return {status:response.status,result:await response.json()};
+ },{item,sentBody,sentKey});
+ assert.deepEqual(replay,{status:200,result:{status:'accepted',submission_ids:[4321]}});
+ assert.equal(requests.filter(r=>r.startsWith('POST /v2/submit ')).length,1,'a contribution retry must not send another provider request');
+ assert.deepEqual((await metadataReview(item)).authority,beforeListing.authority,'contributing fingerprints must not apply album metadata');
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'manual mapping overflows mobile');
  await page.screenshot({path:path.join(root,'web/test-results/digital-matching-manual-mobile.png'),fullPage:true});
@@ -160,6 +191,11 @@ try{
  const submitted=(await submission).postDataJSON();assert.equal(submitted.lookup.assignments.length,2);
 
  await expect.poll(async()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title,item),{timeout:60000}).toBe('Matched album');
+ const staleContribution=await page.evaluate(async ({item,sentBody})=>(await fetch(`/api/v1/items/${item}/acoustid-submissions`,{
+  method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(sentBody),
+ })).status,{item,sentBody});
+ assert.equal(staleContribution,409,'a mapping from before an item edit must not admit another contribution');
+ assert.equal(requests.filter(r=>r.startsWith('POST /v2/submit ')).length,1);
  // A visible preview must become saved, effective artwork in the same adoption workflow.
  await expect.poll(async()=>(await metadataReview(item)).display.artwork,{timeout:60000}).not.toBeNull();
  const adopted=await metadataReview(item);

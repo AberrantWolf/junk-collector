@@ -211,6 +211,9 @@ restart the server after changing provider configuration. The matching panel
 explains the disclosure before submission: fingerprints and durations go to
 AcoustID; original audio, paths and private purchase data are not sent. Matching
 is available to curators through the configured curation listener/API exposure.
+Fingerprint contributions also require the reviewer’s personal AcoustID user API
+key. Enter that key in the review panel for the requested contribution. Collector
+uses it for the outbound request and keeps the submission receipt without the key.
 
 `[providers].musicbrainz_user_agent` enables MusicBrainz and Cover Art Archive acquisition. Set it to a versioned application name with a real contact address, for example `"JunkCollector/0.1.0 (your-real-address@example.org)"`.
 

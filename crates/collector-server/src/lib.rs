@@ -826,6 +826,10 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(identify_game_entry))
         .routes(routes!(resolve_metadata, metadata_resolutions))
         .routes(routes!(find_digital_albums, digital_album_matches))
+        .routes(
+            routes!(submit_acoustid_fingerprints)
+                .layer(DefaultBodyLimit::max(ACOUSTID_SUBMISSION_BODY_LIMIT)),
+        )
         .routes(routes!(metadata_care))
         .routes(routes!(preparation_care))
         .routes(routes!(preparation_revision))
@@ -917,6 +921,8 @@ pub fn openapi() -> OpenApi {
             || path == "/api/v1/purchase-suggestions/{id}/accept"
         {
             16 * 1024
+        } else if path.ends_with("/acoustid-submissions") {
+            ACOUSTID_SUBMISSION_BODY_LIMIT
         } else if path.ends_with("/catalog-upload/inspect") {
             512 * 1024 * 1024 + 1024 * 1024
         } else if path.ends_with("/catalog-upload") {
@@ -1977,6 +1983,27 @@ async fn find_digital_albums(
     })
     .await?;
     Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
+}
+
+const ACOUSTID_SUBMISSION_BODY_LIMIT: usize = 48 * 1024;
+
+#[utoipa::path(post,path="/api/v1/items/{id}/acoustid-submissions",params(("id"=ItemId,Path),("Idempotency-Key"=String,Header)),request_body=collector_app::SubmitAcoustIdFingerprints,responses((status=200,body=collector_app::AcoustIdSubmissionOutcome),(status=400),(status=403),(status=409),(status=413),(status=429)))]
+async fn submit_acoustid_fingerprints(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<collector_app::SubmitAcoustIdFingerprints>,
+) -> ApiResult<Json<collector_app::AcoustIdSubmissionOutcome>> {
+    let actor = principal(&state, &headers).await?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .submit_acoustid_fingerprints(&actor, id, command, &context)
+        })
+        .await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/api/v1/items/{id}/metadata/resolutions", params(("id" = ItemId, Path)), responses((status = 200, body = Vec<MetadataResolutionView>), (status = 401), (status = 403)))]

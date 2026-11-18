@@ -28,6 +28,11 @@ Mutable resources carry an `expected_revision`; zero means create. A stale
 revision returns `revision_conflict` without publishing a revision or consuming a
 new command receipt.
 
+AcoustID contributions bind the receipt to the item, completed lookup, release
+and reviewed file assignments. The personal key authorizes delivery and is not
+stored in the receipt. Replay returns the accepted submission IDs or an
+`unknown` outcome for a contribution that may have reached AcoustID.
+
 ## Item-save compatibility
 
 New clients send the following envelope (command fields abbreviated here):

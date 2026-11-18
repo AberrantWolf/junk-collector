@@ -875,18 +875,18 @@ label.intake-select {
 
 .digital-mapping-table { max-width:100%; overflow-x:auto; margin-block:1rem; }
 .digital-mapping-table table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:.8rem; }
-.digital-mapping-table th, .digital-mapping-table td { text-align:left; padding:.5rem .4rem; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+.digital-mapping-table th, .digital-mapping-table td { box-sizing:border-box; text-align:left; padding:.5rem .4rem; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
 .digital-mapping-table th { font-weight:700; background:var(--accent); }
 .digital-mapping-table th:first-child { width:30%; }
-.digital-mapping-table th:nth-child(2) { width:38%; }
-.digital-mapping-table th:nth-child(3) { width:18%; }
-.digital-mapping-table th:last-child { width:14%; white-space:nowrap; }
+.digital-mapping-table th:nth-child(2) { width:36%; }
+.digital-mapping-table th:nth-child(3) { width:16%; }
+.digital-mapping-table th:last-child { width:18%; }
 .digital-mapping-table tr:nth-child(even) { background:var(--surface-warm); }
 .mapping-position { display:block; font-size:.8rem; color:var(--muted); white-space:nowrap; }
 .digital-track-counts { padding-left:1.25rem; }
 .digital-album-matching .candidate > div { min-width:0; }
 
-.digital-mapping-table td:last-child { white-space:nowrap; }
+
 @media(max-width:600px) {
  .digital-mapping-table table, .digital-mapping-table tbody { display:block; }
  .digital-mapping-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
@@ -906,6 +906,23 @@ label.intake-select {
 .metadata-search { margin-block:20px; }
 .metadata-search > p:first-of-type { margin:0 0 16px; }
 .metadata-search > h4 { margin-bottom:8px; }
+
+.digital-review-heading, .digital-review-pair {
+ display:grid;
+ grid-template-columns:minmax(0, 4fr) minmax(0, 5fr);
+ gap:clamp(.5rem, 2vw, 1.25rem);
+ padding:.65rem .5rem;
+}
+.digital-review-heading { margin-top:.75rem; background:var(--accent); font-size:.8rem; }
+.digital-review-pair { align-items:start; border-bottom:1px solid var(--line); }
+.digital-review-pair:nth-of-type(odd) { background:var(--surface-warm); }
+.digital-review-file, .digital-review-track { min-width:0; display:grid; gap:.25rem; }
+.digital-review-pair strong { font-size:.85rem; overflow-wrap:anywhere; }
+.digital-review-evidence { display:flex; gap:.2rem .6rem; flex-wrap:wrap; align-items:baseline; }
+.candidate .digital-review-tentative { color:var(--warning); font-weight:650; }
+.digital-mapping-editor .inline-check { margin-top:1rem; }
+.acoustid-contribution { margin-top:1rem; padding:.75rem; border:1px solid var(--line); }
+.acoustid-contribution input { min-width:0; max-width:24rem; }
 
 .modal > .close, .detail > .close {
  position: sticky;

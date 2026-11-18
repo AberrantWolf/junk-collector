@@ -106,6 +106,7 @@ pub struct DigitalMatchingView {
     pub job: JobView,
     #[schema(value_type=Object)]
     pub result: Option<serde_json::Value>,
+    pub submission_files: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct DigitalMatchingStatus {
@@ -155,6 +156,7 @@ impl CollectionService {
                     .map(present_digital_matching_result);
                 let result = if sent_result { None } else { result };
                 sent_result |= result.is_some();
+                let includes_result = result.is_some();
                 let result_revision = result
                     .as_ref()
                     .map(|v| serde_json::to_vec(v).map(|bytes| Digest::sha256(&bytes).hex))
@@ -168,12 +170,25 @@ impl CollectionService {
                 } else {
                     result
                 };
+                let submission_files = if includes_result
+                    && !stale
+                    && j.state == JobState::Completed
+                    && self.acoustid_submitter.is_some()
+                    && let Some(checkpoint) = &checkpoint
+                {
+                    crate::digital_pipeline::acoustid_submission_audio(checkpoint)?
+                        .into_keys()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 Ok(DigitalMatchingView {
                     stale,
                     progress,
                     result_revision,
                     result,
                     job: j.into(),
+                    submission_files,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -604,6 +619,18 @@ impl CollectionService {
         release_id: &str,
         assignments: Option<&[DigitalTrackAssignment]>,
     ) -> Result<ReviewedDigitalMatch> {
+        self.resolve_digital_assignments(user, item, job_id, release_id, assignments)
+            .map(|(review, _)| review)
+    }
+
+    pub(crate) fn resolve_digital_assignments(
+        &self,
+        user: UserId,
+        item: &Item,
+        job_id: JobId,
+        release_id: &str,
+        assignments: Option<&[DigitalTrackAssignment]>,
+    ) -> Result<(ReviewedDigitalMatch, BTreeMap<String, String>)> {
         let job = self.jobs.job_record(job_id, user)?;
         if job.kind != "digital_album_matching"
             || job.item_id != Some(item.id)
@@ -713,6 +740,7 @@ impl CollectionService {
         let mut seen = BTreeSet::new();
         let mut slots = BTreeSet::new();
         let mut tracks = Vec::new();
+        let mut recordings = BTreeMap::new();
         for map in assignments {
             let local = f
                 .tracks
@@ -730,6 +758,9 @@ impl CollectionService {
                 .find(|m| m.position == Some(map.medium))
                 .and_then(|m| m.tracks.iter().find(|t| t.position == map.position))
                 .ok_or(Error::Conflict)?;
+            if let Some(recording) = &track.recording_id {
+                recordings.insert(map.key.clone(), recording.clone());
+            }
             tracks.push(collector_modules::disc_audio::TrackMetadataOverride {
                 source_representation_id: local.source,
                 track_position: local.source_position,
@@ -739,11 +770,14 @@ impl CollectionService {
                 album_selected: Some(true),
             });
         }
-        Ok(ReviewedDigitalMatch {
-            snapshot_id,
-            release_id: release_id.into(),
-            tracks,
-        })
+        Ok((
+            ReviewedDigitalMatch {
+                snapshot_id,
+                release_id: release_id.into(),
+                tracks,
+            },
+            recordings,
+        ))
     }
 }
 
