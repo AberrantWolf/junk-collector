@@ -71,7 +71,18 @@ try{
  await page.locator(`[data-item-id="${imported.target_item_id}"]`).click();
  const player=page.getByRole('region',{name:'Music player'});
  await expect(player.getByLabel('Playback format')).toHaveValue('low_bandwidth');
+ await page.setViewportSize({width:320,height:640});
+ await expect(player.getByLabel('Playback format')).toBeVisible();
+ const bitrateSettings=player.getByLabel('Opus bitrate settings');
+ await bitrateSettings.focus();
+ await page.keyboard.press('Enter');
  await expect(player.getByLabel('Opus bitrate (kbps)')).toHaveValue('113');
+ await expect(player.getByLabel('Opus bitrate (kbps)')).toBeVisible();
+ assert.equal(await player.evaluate(dock=>dock.scrollWidth>dock.clientWidth),false,'player settings overflow on a narrow screen');
+ await player.getByLabel('Opus bitrate (kbps)').press('Escape');
+ await expect(bitrateSettings).toBeFocused();
+ await expect(player.getByLabel('Opus bitrate (kbps)')).toBeHidden();
+ await page.setViewportSize({width:1440,height:1000});
  const tracks=page.getByRole('region',{name:'Album tracks'});
  const liveResponse=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('bitrate=113'));
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();

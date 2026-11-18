@@ -6,6 +6,17 @@ import {prepareLocalPlayback,checkPlaybackAccess,playbackUrl,remotePlaybackExpir
 import {useMusicMediaSession,clearMusicMediaSession} from './music-media-session';
 const time=(n:number)=>`${Math.floor(n/60)}:${String(Math.floor(n%60)).padStart(2,'0')}`;
 
+const dockIcons={
+ previous:'M5 5h2v14H5z M19 5v14L8 12z',
+ play:'M8 5v14l12-7z',
+ pause:'M7 5h4v14H7z M14 5h4v14h-4z',
+ next:'M17 5h2v14h-2z M5 5v14l11-7z',
+ queue:'M3 5h18v2H3z M3 11h14v2H3z M3 17h10v2H3z',
+};
+function DockIcon({name}:{name:keyof typeof dockIcons}){
+ return <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={dockIcons[name]}/></svg>;
+}
+
 export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMusic:boolean;onSessionExpired:()=>void}){
  const queue=useMusicQueue();const current=queue.tracks.find(t=>t.id===queue.current);const index=queue.tracks.findIndex(t=>t.id===queue.current);
  const [routeLabel,setRouteLabel]=useState('');
@@ -19,7 +30,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  const pendingSeek=useRef<{element:HTMLAudioElement;position:number}|undefined>(undefined);
  const expired=useRef(onSessionExpired);expired.current=onSessionExpired;
  const bindAudio=React.useCallback((element:HTMLAudioElement|null)=>{if(audio.current!==element){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();const previous=audio.current;if(previous){clearMusicMediaSession();previous.pause();previous.removeAttribute('src');previous.load();}audio.current=element;loaded.current='';active.current=null;}},[]);
- function release(){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;clearMusicMediaSession();pendingSeek.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();active.current=null;loaded.current='';const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}setPosition(0);setDuration(0);setState('Ready');}
+ function release(){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;clearMusicMediaSession();pendingSeek.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();active.current=null;loaded.current='';const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}setPosition(0);setDuration(0);setRouteLabel('');setState('Ready');}
  useEffect(()=>{if(active.current!==current?.id){release();setError('');}},[current?.id]);
  const visible=browsingMusic||queue.tracks.length>0;
  useEffect(()=>{if(!visible)return;const element=dock.current;if(!element)return;const observer=new ResizeObserver(()=>document.documentElement.style.setProperty('--music-dock-height',`${element.getBoundingClientRect().height}px`));observer.observe(element);document.body.classList.add('has-music-dock');return()=>{observer.disconnect();document.body.classList.remove('has-music-dock');document.documentElement.style.removeProperty('--music-dock-height');};},[visible]);
@@ -124,12 +135,29 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  function move(delta:number,automatic=false){const track=queue.tracks[index+delta];if(track)void play(track);else if(automatic)setState('Queue finished');}
  useMusicMediaSession({track:current,audio,enabled:visible&&!!current&&active.current===current.id&&state!=='Ready'&&state!=='Queue finished',play:()=>{if(current)void play(current);},pause,stop:release,previous:index>0?()=>move(-1):undefined,next:index>=0&&index<queue.tracks.length-1?()=>move(1):undefined});
  if(!visible)return null;
+ const pauseAction=state==='Now playing'||state==='Loading';
  return <section ref={dock} className="music-player music-dock" aria-label="Music player">
   <audio ref={bindAudio} crossOrigin="anonymous" preload="none" data-representation-id={current?.representationId} onLoadedMetadata={e=>{setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0));const pending=pendingSeek.current;if(pending?.element===e.currentTarget){pendingSeek.current=undefined;try{e.currentTarget.currentTime=pending.position;}catch{setError('This browser could not restore the playback position.');}}}} onDurationChange={e=>setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0))} onTimeUpdate={e=>{if(loaded.current&&!liveSeek.current)setPosition((live.current?.offset||0)+e.currentTarget.currentTime);}} onPlay={e=>{if(!e.currentTarget.paused)setState('Now playing');}} onPause={e=>{if(e.currentTarget.paused&&!e.currentTarget.ended&&e.currentTarget.currentSrc)setState('Paused');}} onEnded={e=>{if(e.currentTarget.ended)move(1,true);}} onError={e=>{if(e.currentTarget.error&&e.currentTarget.currentSrc&&current){if(!live.current&&remotePlaybackActive(musicTrackUrl(current))&&!recoveredGrant.current){recoveredGrant.current=true;void play(current,true);return;}loaded.current='';setState('Paused');setError('Playback failed. Use Play to retry, or download the track from its album.');if(!e.currentTarget.currentSrc.includes('/music-stream/'))void diagnosePlaybackFailure(current,e.currentTarget,generation.current);}}}/>
   {expanded&&<section className="music-queue" aria-label="Currently playing list" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setExpanded(false);queueButton.current?.focus();}}}><header><div><h3>Currently playing</h3><small>Queue saved in this browser.</small></div><button onClick={()=>{clearMusicQueue();setExpanded(false);queueButton.current?.focus();}}>Clear queue</button></header>{!queue.tracks.length?<p>Add tracks from an album’s info view.</p>:<ol>{queue.tracks.map((track,i)=><li key={track.id} aria-current={track.id===queue.current?'true':undefined}><button className="queue-track" onClick={()=>void play(track)}><strong>{track.position}. {track.title}</strong><small>{track.album}</small></button><div className="queue-actions"><button aria-label={`Move ${track.title} up`} disabled={i===0} onClick={()=>reorderMusicTrack(track.id,-1)}>↑</button><button aria-label={`Move ${track.title} down`} disabled={i===queue.tracks.length-1} onClick={()=>reorderMusicTrack(track.id,1)}>↓</button><button aria-label={`Remove ${track.title} from queue`} onClick={()=>{removeMusicTrack(track.id);requestAnimationFrame(()=>{const buttons=dock.current?.querySelectorAll<HTMLButtonElement>('.queue-track');(buttons?.[Math.min(i,(buttons?.length||1)-1)]||queueButton.current)?.focus();});}}>Remove</button></div></li>)}</ol>}</section>}
-  <div className="dock-main"><div className="dock-track">{current?.artwork&&<img src={`/api/v1/collections/${current.collectionId}/assets/${current.artwork}/thumbnail`} alt=""/>}<p className="now-playing" role="status"><span>{current?state:'Your music queue'}</span><strong>{current?`${current.position}. ${current.title}`:'Add tracks from an album'}</strong>{current&&<small>{current.album}</small>}</p></div>
-   <div><div className="transport"><button aria-label="Previous track" disabled={index<=0} onClick={()=>move(-1)}>Previous</button><button className="primary" aria-label={state==='Now playing'||state==='Loading'?'Pause':'Play'} disabled={!current} onClick={toggle}>{state==='Now playing'||state==='Loading'?'Pause':'Play'}</button><button aria-label="Next track" disabled={index<0||index>=queue.tracks.length-1} onClick={()=>move(1)}>Next</button></div><label className="seek"><span>{time(position)}</span><input aria-label={`Seek in ${current?.title||'track'}`} type="range" min="0" max={duration||0} step="0.05" value={Math.min(position,duration||0)} disabled={(!loaded.current&&!live.current)||duration<=0} onChange={e=>seekTo(Number(e.target.value))}/><span>{time(duration)}</span></label></div>
-   <div className="dock-options"><button ref={queueButton} className="queue-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>Queue ({queue.tracks.length})</button><PlaybackFormatControl compact/></div>
-  </div>{routeLabel&&<small>{routeLabel}</small>}{error&&<p role="alert" className="error dock-error">{error}</p>}
+  <div className="dock-main">
+   <div className="dock-track">
+    {current?.artwork&&<img src={`/api/v1/collections/${current.collectionId}/assets/${current.artwork}/thumbnail`} alt=""/>}
+    <p className="now-playing" role="status">
+     {current&&<small title={[state,current.album,routeLabel].filter(Boolean).join(' · ')}>{[state,current.album,routeLabel].filter(Boolean).join(' · ')}</small>}
+     <strong title={current?.title}>{current?`${current.position}. ${current.title}`:'Add tracks from an album'}</strong>
+    </p>
+   </div>
+   <div className="dock-playback">
+    <div className="transport">
+     <button aria-label="Previous track" title="Previous track" disabled={index<=0} onClick={()=>move(-1)}><DockIcon name="previous"/></button>
+     <button className="primary" aria-label={pauseAction?'Pause':'Play'} title={pauseAction?'Pause':'Play'} disabled={!current} onClick={toggle}><DockIcon name={pauseAction?'pause':'play'}/></button>
+     <button aria-label="Next track" title="Next track" disabled={index<0||index>=queue.tracks.length-1} onClick={()=>move(1)}><DockIcon name="next"/></button>
+    </div>
+    <label className="seek"><span>{time(position)}</span><input aria-label={`Seek in ${current?.title||'track'}`} type="range" min="0" max={duration||0} step="0.05" value={Math.min(position,duration||0)} disabled={(!loaded.current&&!live.current)||duration<=0} onChange={e=>seekTo(Number(e.target.value))}/><span>{time(duration)}</span></label>
+   </div>
+   <PlaybackFormatControl compact/>
+   <button ref={queueButton} className="queue-toggle" aria-label={`Queue (${queue.tracks.length})`} title={`Queue (${queue.tracks.length})`} aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}><DockIcon name="queue"/></button>
+  </div>
+  {error&&<p role="alert" className="error dock-error">{error}</p>}
  </section>;
 }
