@@ -179,8 +179,10 @@ When a release changes only the Collector and media images:
 1. Read the release notes. Pull the new image before downtime with
    `docker pull --platform linux/amd64 ghcr.io/aberrantwolf/junk-collector:<tag>`
    and keep the old one locally. The digest for `remote.env` is printed by
-   `docker image inspect --format '{{index .RepoDigests 0}}' <image>`. Keep
-   imports idle.
+   `docker image inspect --format '{{index .RepoDigests 0}}' <image>`, and
+   `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' <image>`
+   should print the release's commit. Keep imports idle, and note the current
+   image digests and the item, Job and import counts for step 4.
 2. `systemctl stop junk-collector-remote.service`, confirm every writer on both
    hosts has stopped, and take a [paired recovery point](#paired-recovery-points).
 3. Edit only `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` in `remote.env`, then
