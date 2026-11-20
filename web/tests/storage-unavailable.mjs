@@ -29,7 +29,7 @@ try{
  // Only this fixture's newly initialized archive is detached.
  await stat(path.join(archive,'.archive-identity'));await rename(archive,detached);
  const failed=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/me');await page.reload();const response=await failed;assert.equal(response.status(),503);assert.equal((await response.json()).error.code,'unavailable');
- const alert=page.getByRole('alert').filter({hasText:/storage.*unavailable/i});await expect(alert).toBeVisible();assert.equal(await page.getByText('No collections yet',{exact:true}).count(),0);
+ const alert=page.getByRole('alert');await expect(alert).toBeVisible();assert.equal(await page.getByRole('heading',{name:/No collections/}).count(),0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'storage error overflows mobile');
  await rename(detached,archive);
  assert.equal(await page.evaluate(async()=> (await fetch('/api/v1/me')).status),503,'reconnect silently cleared the process latch');

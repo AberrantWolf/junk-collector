@@ -1,141 +1,30 @@
 name: Container release
-run-name: ${{ (github.event_name == 'release' || inputs.retry_release_tag != '') && 'Publish validated container' || (inputs.validation_run_id != '' && 'Rehearse validated container promotion' || 'Validate container candidate') }}
 on:
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      base_ref:
-        description: Previously qualified published version tag (unverified or empty requires full checks)
-        required: false
-        default: ''
-        type: string
-      classification:
-        description: Reviewed classification; use ui-copy only after reviewing the complete diff
-        required: false
-        default: auto
-        type: choice
-        options: [auto, docs, ui-copy, cli-copy, style, ui, rust, infra]
-      check_level:
-        description: Full functional qualification is required for RC and stable
-        required: false
-        default: beta
-        type: choice
-        options: [beta, full]
-      journeys:
-        description: Comma-separated affected browser journeys
-        required: false
-        default: ''
-        type: string
-      qualify_runtime:
-        description: Run the extended Compose and media proxy qualification on both platforms
-        default: false
-        type: boolean
-      retry_release_tag:
-        description: Existing published release tag to retry using exact-source validated images
-        required: false
-        default: ''
-        type: string
-
-      validation_run_id:
-        description: Successful exact-source validation run; empty discovers it for publication or builds a new validation candidate
-        required: false
-        default: ''
-        type: string
-
 permissions:
   contents: read
-  actions: read
-
 concurrency:
-  group: collector-container-release
+  group: container-release
   cancel-in-progress: false
-
+env:
+  IMAGE: ghcr.io/aberrantwolf/junk-collector
 jobs:
-  plan:
+  checks:
+    uses: ./.github/workflows/check.yml
+
+  version:
     runs-on: ubuntu-24.04
-    outputs:
-      reference: ${{ steps.release.outputs.reference }}
-      version: ${{ steps.release.outputs.version }}
-      revision: ${{ steps.release.outputs.revision }}
-      source: ${{ steps.release.outputs.source }}
-      channel: ${{ steps.release.outputs.channel }}
-      publish: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' }}
-      reuse: ${{ github.event_name == 'release' || inputs.retry_release_tag != '' || inputs.validation_run_id != '' }}
-      tag: ${{ github.event.release.tag_name || inputs.retry_release_tag }}
-      runtime_scope: ${{ steps.runtime.outputs.scope }}
-      base: ${{ steps.runtime.outputs.base }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.retry_release_tag && format('refs/tags/{0}', inputs.retry_release_tag) || github.sha }}
-          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && inputs.retry_release_tag == '' && inputs.validation_run_id == '' && '0' || '1' }}
-      - name: Select version and stable or preview channel
-        id: release
+      - name: Release tag matches the workspace version
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RETRY_RELEASE_TAG: ${{ inputs.retry_release_tag }}
-        run: |
-          if [ -n "$RETRY_RELEASE_TAG" ]; then
-            python3 - <<'PYTHON'
-          import os
-          from scripts.container_release import version_key
-          tag = os.environ['RETRY_RELEASE_TAG']
-          if not tag.startswith('v'):
-              raise ValueError('Retry requires a versioned release tag')
-          version_key(tag[1:])
-          PYTHON
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RETRY_RELEASE_TAG" --jq '{release: .}' > /tmp/collector-release-event.json
-            GITHUB_EVENT_NAME=release GITHUB_EVENT_PATH=/tmp/collector-release-event.json GITHUB_SHA="$(git rev-parse HEAD)" python3 scripts/container_release.py plan
-          else
-            python3 scripts/container_release.py plan
-          fi
-      - name: Select native runtime coverage
-        id: runtime
-        if: github.event_name == 'workflow_dispatch' && inputs.retry_release_tag == '' && inputs.validation_run_id == ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BASE_REF: ${{ inputs.base_ref }}
-          CHECK_LEVEL: ${{ inputs.check_level }}
-          QUALIFY_RUNTIME: ${{ inputs.qualify_runtime }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          base=
-          if [[ "$BASE_REF" == v* ]] &&
-             candidate_base=$(git rev-parse --verify --end-of-options "refs/tags/$BASE_REF^{commit}") &&
-             [[ "$candidate_base" != "$(git rev-parse HEAD)" ]] &&
-             git merge-base --is-ancestor "$candidate_base" HEAD &&
-             python3 scripts/container_validation.py published-baseline "$GITHUB_REPOSITORY" "$BASE_REF" "$candidate_base"; then
-            base=$candidate_base
-          fi
-          scope=full
-          if [[ -n "$base" && "$CHECK_LEVEL" != full && "$QUALIFY_RUNTIME" != true && "$RELEASE_VERSION" =~ -(alpha|beta)(\.|$) ]] &&
-             git diff --quiet "$base" HEAD -- Dockerfile .dockerignore deploy/container/ \
-               scripts/check_container.py scripts/check_media_container.py scripts/inbox_cleanup_qualification.py \
-               .github/workflows/container-release.yml ':(exclude,glob)deploy/container/**/*.md'; then
-            scope=smoke
-          fi
-          echo "scope=$scope" >> "$GITHUB_OUTPUT"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-plan-${{ github.run_attempt }}
-          path: release-plan.json
-  checks:
-    if: needs.plan.outputs.reuse != 'true'
-    needs: plan
-    uses: ./.github/workflows/check.yml
-    with:
-      source_ref: ${{ needs.plan.outputs.revision }}
-      base_ref: ${{ needs.plan.outputs.base }}
-      classification: ${{ inputs.classification || 'auto' }}
-      level: ${{ inputs.check_level || 'beta' }}
-      journeys: ${{ inputs.journeys }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: test "$TAG" = "v$(python3 -c "import tomllib;print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")"
+
   build:
-    if: needs.plan.outputs.reuse != 'true'
-    needs: plan
+    needs: [checks, version]
     strategy:
-      fail-fast: false
       matrix:
         include:
           - architecture: amd64
@@ -146,217 +35,86 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.revision }}
       - uses: docker/setup-buildx-action@v3
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-plan-${{ github.run_attempt }}
-      - name: Build labelled native OCI export once
-        id: image
+      - name: Build for smoke test
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/${{ matrix.architecture }}
-          outputs: type=oci,dest=/tmp/collector-${{ matrix.architecture }}.oci.tar
-          labels: |
-            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
-            org.opencontainers.image.revision=${{ needs.plan.outputs.revision }}
-            org.opencontainers.image.source=${{ needs.plan.outputs.source }}
+          load: true
+          tags: junk-collector:smoke
           cache-from: type=gha,scope=collector-${{ matrix.architecture }}
           cache-to: type=gha,scope=collector-${{ matrix.architecture }},mode=max
-      - name: Smoke the runtime from that exact export
-        env:
-          ARCHITECTURE: ${{ matrix.architecture }}
-          RUNTIME_SCOPE: ${{ needs.plan.outputs.runtime_scope }}
-        run: |
-          bash scripts/use-ci-ubuntu-archive.sh
-          sudo apt-get update && sudo apt-get install -y skopeo
-          skopeo copy --override-os linux --override-arch "$ARCHITECTURE" "oci-archive:/tmp/collector-$ARCHITECTURE.oci.tar" docker-daemon:junk-collector:release-smoke
-          python3 scripts/container_validation.py smoke-identity "/tmp/collector-$ARCHITECTURE.oci.tar" "$ARCHITECTURE"
-          case "$RUNTIME_SCOPE" in
-            smoke)
-              python3 scripts/check_container.py junk-collector:release-smoke --smoke
-              python3 scripts/check_media_container.py junk-collector:release-smoke
-              ;;
-            full)
-              python3 scripts/check_container.py junk-collector:release-smoke --proxy --inbox --inbox-cleanup
-              python3 scripts/check_media_container.py junk-collector:release-smoke --proxy
-              ;;
-            *) echo "Missing runtime qualification scope" >&2; exit 1 ;;
-          esac
-      - uses: actions/setup-node@v4
-        if: matrix.architecture == 'amd64'
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Browser acceptance against the release image
-        if: matrix.architecture == 'amd64'
-        run: |
-          npm --prefix web ci
-          npm --prefix web exec -- playwright install --with-deps chromium
-          python3 scripts/container_browser_smoke.py junk-collector:release-smoke
-      - name: Record platform digest
-        env:
-          ARCHITECTURE: ${{ matrix.architecture }}
-          BUILD_DIGEST: ${{ steps.image.outputs.digest }}
-          RUNTIME_SCOPE: ${{ needs.plan.outputs.runtime_scope }}
-        run: |
-          mkdir -p "/tmp/platform-$ARCHITECTURE"
-          python3 - <<'PYTHON'
-          import json, os, re
-          from pathlib import Path
-          digest = os.environ['BUILD_DIGEST']
-          if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
-              raise ValueError('Missing platform build digest')
-          Path('/tmp/platform-' + os.environ['ARCHITECTURE'] + '/' + os.environ['ARCHITECTURE'] + '.json').write_text(json.dumps(dict(digest=digest, runtime='passed', runtime_scope=os.environ['RUNTIME_SCOPE'], browser='passed' if os.environ['ARCHITECTURE'] == 'amd64' else 'covered-on-amd64')))
-          PYTHON
-          if [ -f "/tmp/collector-$ARCHITECTURE.oci.tar" ]; then
-            mv "/tmp/collector-$ARCHITECTURE.oci.tar" "/tmp/platform-$ARCHITECTURE/"
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: platform-${{ matrix.architecture }}-${{ github.run_attempt }}
-          path: /tmp/platform-${{ matrix.architecture }}/
-  container:
-    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.reuse == 'true' || (needs.build.result == 'success' && needs.checks.result == 'success')) }}
-    needs: [plan, checks, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: write
-      actions: read
-      packages: write
-    env:
-      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
-      RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.revision }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-plan-${{ github.run_attempt }}
-      - uses: actions/download-artifact@v4
-        if: needs.plan.outputs.reuse != 'true'
-        with:
-          pattern: platform-*-${{ github.run_attempt }}
-          path: /tmp/platforms
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        if: needs.plan.outputs.reuse != 'true'
-        with:
-          name: source-checks-${{ github.run_attempt }}
-          path: /tmp/source-checks
-      - run: |
-          bash scripts/use-ci-ubuntu-archive.sh
-          sudo apt-get update && sudo apt-get install -y skopeo
-      - name: Check rootless OCI transport before consuming exports
-        if: needs.plan.outputs.reuse != 'true'
-        env:
-          COLLECTOR_TEST_ROOTLESS_OCI: '1'
-        run: python3 -B scripts/check_container_validation.py ValidationTests.test_rootless_oci_transport_preserves_merged_digest_and_both_platforms
-      - uses: docker/setup-buildx-action@v3
-      - name: Assemble exports from accepted native smoke jobs
-        if: needs.plan.outputs.reuse != 'true'
-        id: exported
-        run: python3 scripts/container_validation.py assemble /tmp/platforms /tmp/collector-multiarch.oci.tar
-      - name: Restore authenticated successful exact-source validation
-        if: needs.plan.outputs.reuse == 'true'
-        id: restored
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
-        run: python3 scripts/container_validation.py restore /tmp/restored
-      - name: Reverify immutable OCI platforms and source labels before any registry write
-        env:
-          BUILD_DIGEST: ${{ steps.restored.outputs.digest || steps.exported.outputs.digest }}
-          REUSE: ${{ needs.plan.outputs.reuse }}
-        run: |
-          ARCHIVE=/tmp/collector-multiarch.oci.tar
-          if [ "$REUSE" = true ]; then ARCHIVE=/tmp/restored/collector-multiarch.oci.tar; fi
-          python3 scripts/container_release.py verify "oci-archive:$ARCHIVE" "$BUILD_DIGEST"
-          if [ "$REUSE" = true ]; then python3 scripts/container_validation.py compare /tmp/restored/validation.json; fi
-      - name: Seal reusable validation after all checks and both native smoke jobs
-        if: needs.plan.outputs.reuse != 'true'
-        run: python3 scripts/container_validation.py seal --checks /tmp/source-checks/check-report.json --platform-checks /tmp/platforms
-      - uses: actions/upload-artifact@v4
-        if: needs.plan.outputs.reuse != 'true'
-        with:
-          name: validated-container-${{ github.run_attempt }}
-          path: /tmp/validation/
-          retention-days: 30
-          compression-level: 0
-          if-no-files-found: error
-      - name: Log in to GHCR only after validated export acceptance
-        if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@v3
+      - run: python3 scripts/check_container.py junk-collector:smoke --smoke
+      - run: python3 scripts/check_media_container.py junk-collector:smoke
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish validated bytes preserving every digest
-        if: needs.plan.outputs.publish == 'true'
-        run: skopeo copy --all --preserve-digests --authfile "$HOME/.docker/config.json" oci-archive:/tmp/restored/collector-multiarch.oci.tar "docker://$RELEASE_IMAGE"
-      - name: Check out publication verifier from the dispatch workflow revision
-        if: needs.plan.outputs.publish == 'true'
-        uses: actions/checkout@v4
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@v6
         with:
-          ref: ${{ github.workflow_sha }}
-          path: release-control
-          persist-credentials: false
-      - name: Require anonymous version pulls, both platforms and matching source labels
-        if: needs.plan.outputs.publish == 'true'
+          context: .
+          platforms: linux/${{ matrix.architecture }}
+          labels: |
+            org.opencontainers.image.version=${{ github.event.release.tag_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=collector-${{ matrix.architecture }}
+      - run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
         env:
-          RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
-          BUILD_DIGEST: ${{ steps.restored.outputs.digest }}
-        run: python3 release-control/scripts/container_release.py verify "docker://$RELEASE_IMAGE" "$BUILD_DIGEST"
-      - name: Retain consumed validation provenance in the pinned image record
-        if: needs.plan.outputs.reuse == 'true'
-        run: python3 scripts/container_validation.py record-provenance /tmp/restored
-      - name: Select channel promotion without downgrading to an older release
-        if: needs.plan.outputs.publish == 'true'
-        id: channel
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > release-pages.json
-          python3 scripts/container_release.py promote
-      - name: Promote verified digest to its moving channel
-        if: needs.plan.outputs.publish == 'true' && steps.channel.outputs.promote == 'true'
-        env:
-          RELEASE_IMAGE: ${{ needs.plan.outputs.reference }}
-          CHANNEL: ${{ needs.plan.outputs.channel }}
-          BUILD_DIGEST: ${{ steps.restored.outputs.digest }}
-        run: |
-          IMAGE="${RELEASE_IMAGE%:*}"
-          docker buildx imagetools create --tag "$IMAGE:$CHANNEL" "$IMAGE@$BUILD_DIGEST"
-          docker buildx imagetools inspect "$IMAGE:$CHANNEL" --format '{{json .Manifest}}' > channel-index.json
-          python3 - <<'PYTHON'
-          import json, os
-          with open('channel-index.json') as source:
-              assert json.load(source)['digest'] == os.environ['BUILD_DIGEST'], 'Channel digest changed'
-          PYTHON
-      - name: Package installation bundle with exact digest and evidence
-        run: |
-          python3 scripts/container_release.py bundle /tmp/collector-bundle/junk-collector-container
-          tar -czf junk-collector-container.tar.gz -C /tmp/collector-bundle junk-collector-container
-          if [ -f /tmp/restored/provenance.json ]; then cp /tmp/restored/provenance.json validation-provenance.json; fi
-          sha256sum junk-collector-container.tar.gz release-image.json > SHA256SUMS
+          DIGEST: ${{ steps.push.outputs.digest }}
       - uses: actions/upload-artifact@v4
         with:
-          name: junk-collector-container-${{ github.run_attempt }}
-          path: |
-            junk-collector-container.tar.gz
-            release-image.json
-            SHA256SUMS
-            release-plan.json
-            validation-provenance.json
-      - name: Attach installation bundle and image record to release
-        if: needs.plan.outputs.publish == 'true'
+          name: digest-${{ matrix.architecture }}
+          path: /tmp/digests/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag multi-platform image
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          CHANNEL: ${{ github.event.release.prerelease && 'preview' || 'latest' }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:$TAG" -t "$IMAGE:$CHANNEL" \
+            $(printf "$IMAGE@sha256:%s " $(ls /tmp/digests))
+          docker buildx imagetools inspect "$IMAGE:$TAG"
+      - name: Attach installation bundle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" junk-collector-container.tar.gz release-image.json SHA256SUMS --clobber
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          bundle=/tmp/bundle/junk-collector-container
+          mkdir -p "$bundle/scripts"
+          cp -r deploy/container/. "$bundle/"
+          cp -r deploy/proton-bridge "$bundle/proton-bridge"
+          cp scripts/configure_proton_mail.py scripts/bridge_status.py "$bundle/scripts/"
+          sed -i "s|^COLLECTOR_IMAGE=.*|COLLECTOR_IMAGE=$IMAGE:$TAG|" "$bundle/.env.example"
+          sed -i -e "s|\.\./proton-bridge/|proton-bridge/|g" -e "s|\.\./container/|../|g" \
+                 -e "s|\.\./\.\./docs/|https://github.com/$GITHUB_REPOSITORY/blob/$TAG/docs/|g" "$bundle"/*.md "$bundle"/proton-bridge/*.md
+          tar -czf junk-collector-container.tar.gz -C /tmp/bundle junk-collector-container
+          gh release upload "$TAG" junk-collector-container.tar.gz --clobber

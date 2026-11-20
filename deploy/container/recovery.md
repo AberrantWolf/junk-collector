@@ -1,36 +1,24 @@
-# Recover a previous container installation
+# Restore a full backup
 
-Architectural rules: [ADR 0003](../../docs/decisions/0003-portable-and-private-authority.md), [ADR 0004](../../docs/decisions/0004-single-writer-publication-and-recovery.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
+This restores a backup made with `cli backup`. For Btrfs snapshots or tar
+increments see [snapshot-recovery.md](snapshot-recovery.md); for an NFS archive
+split see [remote-archive.md](remote-archive.md).
 
-For a local-state/NFS-archive split, use the [remote archive runbook](remote-archive.md).
-Its paired recovery point replaces the single-root snapshot assumption.
+Use the image that made the backup, and restore archive, state and config together
+into a fresh data directory. Do not just downgrade the image against upgraded data.
 
-For Btrfs local points or GNU tar increments, use the separate
-[snapshot/incremental recovery procedure](snapshot-recovery.md). The commands below
-consume Collector's sealed full-backup format.
-
-Use the full backup made before updating and the exact image used to create it.
-Restore archive, state and configuration together into a fresh data directory;
-do not just downgrade an image against upgraded state.
-
-From the installation directory, stop the current service:
+Stop the current server and keep its data and `.env` for diagnosis:
 
 ```sh
 docker compose stop collector
 ```
 
-Retain the current data and `.env` for diagnosis. Edit `.env` to set
-`COLLECTOR_IMAGE` to the earlier image and `COLLECTOR_DATA` to a **new, empty**
-absolute directory, e.g. `/volume1/junk-collector-recovered`. Do not start the
-service yet, and do not run the default initializer or setup: restore supplies the configuration
-and account/TLS identity restored from the backup. The old instance must remain stopped even
-if it lives on another host. Local locks cannot enforce that across hosts or
-when old paths are hidden by different mounts.
+In `.env`, set `COLLECTOR_IMAGE` to the earlier image and `COLLECTOR_DATA` to a
+**new, empty** directory, e.g. `/volume1/junk-collector-recovered`. Do not run the
+initializer or setup: the backup supplies config, accounts and TLS identity. The
+old instance must stay stopped, including on other hosts.
 
-Create the selected host bind source first (DSM rejects a missing directory),
-then only the destination children, without creating a config file:
+Create the directory and its empty children:
 
 ```sh
 mkdir -p /volume1/junk-collector-recovered
@@ -39,35 +27,30 @@ docker compose run --rm --entrypoint install initialize \
   /data/config /data/archive /data/state /data/backups
 ```
 
-Use the exact new absolute `COLLECTOR_DATA` path for `mkdir`, with host administrator
-privileges if required. For a Portainer-managed installation, keep its Collector
-service stopped and use SSH Compose only for these one-shot tools; do not replace
-the live stack or its tunnel services.
-
-Replace `/absolute/path/to/old/backups/before-update-UNIQUE` below with the
-actual sealed backup directory, outside the new data directory:
+Validate and restore from the backup directory (outside the new data directory):
 
 ```sh
 docker compose run --rm \
-  -v /absolute/path/to/old/backups/before-update-UNIQUE:/backup:ro \
+  -v /absolute/path/to/backups/before-update-UNIQUE:/backup:ro \
   cli validate-backup --backup /backup
 
 docker compose run --rm \
-  -v /absolute/path/to/old/backups/before-update-UNIQUE:/backup:ro \
+  -v /absolute/path/to/backups/before-update-UNIQUE:/backup:ro \
   cli restore --backup /backup --archive /data/archive --state /data/state
 
 docker compose run --rm cli doctor
 docker compose up -d collector
 ```
 
-The CLI entrypoint supplies `--config /data/config/collector.toml`; restore writes
-that file last. Abort if any command fails. An interrupted restore leaves markers
-that prevent serving partial data; retry using a newly empty destination, not an
-overlay. After success check fresh login, collection access, original download
-and playback as applicable. Retain the source/backup until acceptance is complete.
-Only one copy of a restored server identity may run.
+Restore writes the config file last. Stop if any command fails; an interrupted
+restore leaves markers that prevent serving partial data, so retry into a new empty
+directory rather than over it. Afterward check login, collection access, an
+original download and playback. Keep the backup until you are satisfied. Only one
+copy of a restored server may run.
 
-The point's old image may predate `enroll-archive`; restore and accept it using
-its own commands. When subsequently adopting an image with archive guards, follow
-the one-time enrollment step in the [upgrade procedure](README.md#update) against
-the verified restored pair, before starting that newer image.
+For a Portainer-managed installation, keep its Collector service stopped and use
+Compose only for these one-shot commands.
+
+If the restored image predates `enroll-archive`, run the newer image's
+`enroll-archive` against the restored data before starting that newer image
+(see [update](README.md#update)).

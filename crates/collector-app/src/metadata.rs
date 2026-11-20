@@ -122,8 +122,7 @@ pub struct ProviderArtworkLink {
 pub struct RefreshProviderMetadataCommand {
     pub expected_revision: Revision,
     pub snapshot_id: SnapshotId,
-    /// Required for DAT-backed metadata so descriptive rows remain bound to the
-    /// exact D04 catalog result that selected them.
+    /// Required for DAT-backed metadata: the catalog match that selected it.
     pub source_observation_id: Option<ObservationId>,
     #[serde(default)]
     pub artwork: Vec<ProviderArtworkLink>,
@@ -536,9 +535,7 @@ impl CollectionService {
         )
     }
 
-    /// Publish a previously acquired CAA image through the existing authorized
-    /// Asset command effect. Metadata candidates can cite the returned active
-    /// item Asset only in a later refresh command.
+    /// Publish a previously acquired Cover Art Archive image as an item Asset.
     pub fn publish_provider_artwork(
         &self,
         actor: &Principal,
@@ -781,9 +778,8 @@ impl CollectionService {
                     "the configured DAT provider does not supply artwork".into(),
                 ));
             }
-            let source_id = source_observation_id.ok_or_else(|| {
-                Error::Invalid("DAT metadata requires its D04 catalog observation".into())
-            })?;
+            let source_id = source_observation_id
+                .ok_or_else(|| Error::Invalid("DAT metadata requires its catalog match".into()))?;
             let source = self.processing.processing_record(source_id)?.observation;
             if source.collection_id != item.collection_id
                 || source.snapshot_id != Some(snapshot.id)
@@ -897,8 +893,7 @@ impl CollectionService {
         })
     }
 
-    /// Curator detail. Raw candidate observations are intentionally not part of
-    /// the viewer item DTO.
+    /// Curator detail, including raw candidate observations.
     pub fn metadata_view(&self, actor: &Principal, item_id: ItemId) -> Result<MetadataView> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
@@ -1537,9 +1532,7 @@ impl CollectionService {
         })
     }
 
-    /// Dispatch one completed acquisition to its application-owned result action.
-    /// Image publication does not require another network lookup or silently alter
-    /// metadata authority: the published image is available for explicit selection.
+    /// Dispatch one completed acquisition to its result action.
     pub fn complete_metadata_acquisition(
         &self,
         actor: &Principal,

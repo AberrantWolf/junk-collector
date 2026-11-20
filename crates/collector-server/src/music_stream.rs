@@ -95,7 +95,7 @@ fn allowed(state: &AppState) -> collector_core::Result<()> {
             .remote_media_allowed
     {
         return Err(Error::Unavailable(
-            "Playback modes need normal authenticated audio or a direct Collector listener".into(),
+            "Playback is not available on this connection".into(),
         ));
     }
     Ok(())
@@ -122,14 +122,14 @@ pub(crate) async fn music_stream(
         }
         _ => {
             return Err(
-                Error::Invalid("Bitrate applies only to Low Bandwidth playback".into()).into(),
+                Error::Invalid("Bitrate is only valid for low-bandwidth playback".into()).into(),
             );
         }
     };
     let coordinate = match (query.track, query.file) {
         (Some(track), None) => StreamCoordinate::Track(track),
         (None, Some(file)) => StreamCoordinate::File(file),
-        _ => return Err(Error::Invalid("Choose exactly one track or original file".into()).into()),
+        _ => return Err(Error::Invalid("Specify exactly one track or file".into()).into()),
     };
     let start_ms = query.start_ms.unwrap_or(0);
     // Bound concurrent source opens, including HEAD; passthrough releases this
@@ -193,9 +193,9 @@ pub(crate) async fn music_stream(
     let builder = Response::builder()
         .header(
             header::CONTENT_TYPE,
-            codec.media_type().ok_or_else(|| {
-                Error::Invalid("Original playback requires a playable source".into())
-            })?,
+            codec
+                .media_type()
+                .ok_or_else(|| Error::Invalid("This file cannot be played".into()))?,
         )
         .header(header::ACCEPT_RANGES, "none")
         .header(header::CACHE_CONTROL, "private, no-store")
@@ -260,8 +260,7 @@ pub(crate) async fn music_stream(
         Ok(Some(Ok(bytes))) => bytes,
         _ => {
             return Err(Error::Unavailable(
-                "Live audio could not start. Check the original audio and the server encoder."
-                    .into(),
+                "Playback could not start; check the server log".into(),
             )
             .into());
         }

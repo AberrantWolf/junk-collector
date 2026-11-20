@@ -1605,9 +1605,9 @@ impl ContentPort for Store {
         item: ItemId,
         limit: u16,
     ) -> Result<Vec<(AssetId, Revision)>> {
-        if !(1..=4097).contains(&limit) {
+        if limit == 0 {
             return Err(Error::Invalid(
-                "archived cover limit must be 1..=4097".into(),
+                "archived cover limit must be positive".into(),
             ));
         }
         let db = lock(&self.db)?;
@@ -2872,7 +2872,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         .map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    // Guided intent and cleanup state. Checkpoint numbers reserve no future schemas.
+    // Guided intent and cleanup state.
     if private_version < 13 {
         let tx = db.transaction().map_err(storage)?;
         tx.execute_batch(
@@ -2912,7 +2912,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
         tx.execute_batch("CREATE TABLE private.work_history(user_id TEXT NOT NULL,target TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,pending INTEGER NOT NULL DEFAULT 0,action TEXT NOT NULL,error TEXT,PRIMARY KEY(user_id,target)); CREATE INDEX private.work_history_pending ON work_history(pending,target); CREATE INDEX private.jobs_import_owner ON jobs(user_id,json_extract(request,'$.import_id'),id); PRAGMA private.user_version=15;").map_err(storage)?;
         tx.commit().map_err(storage)?;
     }
-    // Preserve actual LA1 preview state without creating a checkpoint-only version.
+    // Some existing databases already have these columns without a version bump.
     for column in ["settled", "cancelled"] {
         let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('guided_ingest_intents','private') WHERE name=?)", [column], |row| row.get(0)).map_err(storage)?;
         if !exists {

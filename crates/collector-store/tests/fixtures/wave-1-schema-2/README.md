@@ -15,7 +15,7 @@ standalone Capture was advanced once. It therefore contains:
 Regenerate into a new directory with:
 
 ```sh
-cargo run -p collector-store --example materialize_wave1_fixture -- \
+cargo run -p collector-store --example materialize_schema2_fixture -- \
   crates/collector-store/tests/fixtures/schema-1 NEW_DIRECTORY
 ```
 

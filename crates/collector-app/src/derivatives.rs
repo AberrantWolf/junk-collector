@@ -10,9 +10,7 @@ use collector_core::{
 
 use crate::ProcessingExecutionContext;
 
-/// Resolve a user-readable preset to one immutable recipe after the music module
-/// has established exact track ownership. Verification evidence is intentionally
-/// not an input: conversion eligibility comes from the supported PCM layout.
+/// Resolve a preset to one immutable recipe for a track the music module owns.
 pub fn build_music_conversion_recipe(
     id: RecipeId,
     source_fingerprint: SourceFingerprint,
@@ -71,8 +69,7 @@ pub fn build_music_conversion_recipe(
     .seal()
 }
 
-/// Opaque scratch handle. Infrastructure owns concrete file creation/cleanup;
-/// provider adapters never receive archive roots or package labels.
+/// Opaque scratch handle; adapters never see archive paths.
 pub trait ConversionScratch: Read + Write + Seek + Send {
     fn discard_partial(&mut self) -> std::io::Result<()>;
 }
@@ -106,13 +103,9 @@ pub struct ConversionValidation {
     pub end_padding_frames: u32,
 }
 
-/// Optional encoder-process mechanism. Authorization, durable Job identity,
-/// source currency and publication stay in application services; the adapter
-/// receives only a sealed recipe, an authorized integer PCM reader and scratch.
+/// Optional encoder process. It receives a sealed recipe, a PCM reader and scratch.
 pub trait AudioConversionPort: Send + Sync {
-    /// Probe the currently configured server-owned tool for a readable preset.
-    /// The returned complete report is authoritative recipe input; clients never
-    /// supply executable paths or version claims.
+    /// Probe the configured tool for a preset; the report becomes recipe input.
     fn configured_availability(&self, profile: &ConversionProfile) -> EncoderAvailability {
         let encoder = match profile {
             ConversionProfile::Flac => "flac",
@@ -990,8 +983,7 @@ impl CollectionService {
         }
     }
 
-    /// Prepare one track using only server-owned encoder configuration and the
-    /// music module's package detection. This is the command used by HTTP clients.
+    /// Prepare one track with the server's configured encoder.
     pub fn prepare_configured_music_track(
         &self,
         actor: &Principal,
@@ -1070,9 +1062,7 @@ impl CollectionService {
         )
     }
 
-    /// Ordered, viewer-safe track/profile availability. Published outputs are
-    /// described from immutable Capture/recipe records even when the music module
-    /// or current encoder is absent.
+    /// Viewer-safe track/profile availability, in track order.
     pub fn music_track_availability(
         &self,
         actor: &Principal,
@@ -1672,10 +1662,7 @@ impl CollectionService {
         let inventory = self
             .processing
             .package_inventory(collection_id, PackageScope::Representation(source))?;
-        // Selection and availability are catalog reads, not integrity checks.
-        // Rehashing here rereads the entire disc on every poll and once per
-        // track during album admission. Workers validate actual bytes before
-        // encoding and again before publication.
+        // Catalog read only; workers validate bytes before encoding and publishing.
         let source_fingerprint = self
             .processing
             .recorded_source(collection_id, PackageScope::Representation(source))?;
@@ -2125,13 +2112,10 @@ pub(crate) fn resolve_music_medium<'a>(
     (Some(medium), state)
 }
 
-fn profile_order(profile: &ConversionProfile) -> u8 {
+fn profile_order(profile: &ConversionProfile) -> u32 {
     match profile {
         ConversionProfile::Flac => 0,
-        ConversionProfile::Opus { bitrate_kbps: 96 } => 1,
-        ConversionProfile::Opus { bitrate_kbps: 128 } => 2,
-        ConversionProfile::Opus { bitrate_kbps: 192 } => 3,
-        ConversionProfile::Opus { .. } => 4,
+        ConversionProfile::Opus { bitrate_kbps } => 1 + u32::from(*bitrate_kbps),
     }
 }
 

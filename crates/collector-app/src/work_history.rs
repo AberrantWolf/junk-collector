@@ -100,7 +100,7 @@ pub fn work_action_allowed(entry: &WorkEntry, action: WorkHistoryAction) -> Resu
         Ok(())
     } else {
         Err(Error::Invalid(
-            "This action is not eligible in the current state. Refresh the work entry.".into(),
+            "This action isn't available now. Refresh and try again.".into(),
         ))
     }
 }
@@ -230,7 +230,9 @@ impl CollectionService {
     pub(crate) fn settle_work_clear(&self, user: UserId, target: &WorkTarget) -> Result<bool> {
         let entry = self.jobs.work_entry(user, target)?;
         if entry.shared {
-            return Err(Error::Unavailable("Independent requests still need this work. Cancel those requests before clearing staging.".into()));
+            return Err(Error::Unavailable(
+                "Other requests still need this work. Cancel them first.".into(),
+            ));
         }
         match target {
             WorkTarget::Job(id) => {

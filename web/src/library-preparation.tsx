@@ -132,26 +132,25 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
    <label>Show<select aria-label="Show" value={attention?'missing':'all'} disabled={starting} onChange={e=>onQuery({attention:e.target.value==='missing',item:'',batch:''})}>
     <option value="missing">Albums needing {profile.codec==='opus'?'Opus':'FLAC'}</option><option value="all">All music albums</option>
    </select></label>
-   <p>Prepare {label} files for your albums. You can follow or cancel the batch in Activity.</p>
    {error&&<p role="alert" className="notice error">{error}</p>}
    {listError&&<p role="alert" className="notice error">{listError} <button onClick={()=>setReload(v=>v+1)}>Retry loading albums</button></p>}
    <div className="care-selection">
     <strong>{selection.all?'All matching results':`${selection.selected.length} albums selected`}{selection.all&&selection.exclusions.length?` · ${selection.exclusions.length} excluded`:''}</strong>
     <button disabled={starting||!rows.length||attention&&current?.state!=='ready'} onClick={()=>updateSelection(v=>({...v,all:true,selected:[],exclusions:[]}))}>Select all matching results</button>
-    <button disabled={starting||loading||selection.all&&attention&&current?.state!=='ready'||!selection.all&&!selection.selected.length} className="primary" onClick={()=>void start()}>{starting?'Starting preparation…':`Start ${label} preparation`}</button>
+    <button disabled={starting||loading||selection.all&&attention&&current?.state!=='ready'||!selection.all&&!selection.selected.length} className="primary" onClick={()=>void start()}>{starting?'Starting…':`Start ${label} preparation`}</button>
     <button disabled={starting} onClick={()=>updateSelection(v=>({...v,selected:[],all:false,exclusions:[]}))}>Clear selection</button>
    </div>
    {rows.map(({item:i,readiness})=><div className="care-selectable-row" key={i.id}>
     <input type="checkbox" aria-label={`Select ${i.title}`} checked={selection.all?!selection.exclusions.includes(i.id):selection.selected.includes(i.id)} disabled={starting} onChange={e=>toggle(i.id,e.target.checked)}/>
     <button className="care-row" data-item-id={i.id} onClick={()=>onQuery({item:i.id,batch:''})}>
      {i.artwork?<img loading="lazy" src={`/api/v1/collections/${i.collection_id}/assets/${i.artwork.id}/thumbnail`} alt={i.artwork.alt_text||`${i.title} artwork`}/>:<span className="care-cover-empty">◇</span>}
-     <span><strong>{i.title}</strong>{readiness?<small>{readiness.tracks} {readiness.incomplete_coverage?'known ':''}tracks · {readiness.ready} ready{readiness.incomplete_coverage?' · Track coverage incomplete':''}{readiness.preparing>0?` · ${readiness.preparing} preparing`:''}</small>:<small>Updating readiness…</small>}</span>
+     <span><strong>{i.title}</strong>{readiness?<small>{readiness.tracks} {readiness.incomplete_coverage?'known ':''}tracks · {readiness.ready} ready{readiness.incomplete_coverage?' · some tracks unknown':''}{readiness.preparing>0?` · ${readiness.preparing} preparing`:''}</small>:<small>Updating…</small>}</span>
     </button>
    </div>)}
-   {!rows.length&&!loading&&!error&&!listError&&current?.state==='ready'&&<p>No albums match these preparation filters.</p>}
+   {!rows.length&&!loading&&!error&&!listError&&current?.state==='ready'&&<p>No matching albums.</p>}
    {current?.cursor&&<MoreButton loading={loading} loadingText="Loading albums…" disabled={starting} onClick={onMore}>More albums</MoreButton>}
-   {loading&&<p role="status">Loading preparation…</p>}
-   {!loading&&current&&current.state!=='ready'&&<p role="status">{current.state==='retrying'?'Retrying preparation summaries…':'Updating preparation summaries…'}</p>}
+   {loading&&<p role="status">Loading albums…</p>}
+   {!loading&&current&&current.state!=='ready'&&<p role="status">{current.state==='retrying'?'Retrying…':'Updating…'}</p>}
   </div>
   {batchId?<div>
    <button className="care-return" onClick={()=>onQuery({batch:''})}>Back to preparation results</button>

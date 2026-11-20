@@ -1,68 +1,40 @@
-# Audio-CD capture: optional Q refinement and independent audio checks
+# Audio-CD capture: optional Q refinement
 
-Accepted user direction, 2026-10-27. This applies the
-[home-lab scope](home-lab-scope.md) to ordinary music-CD capture. It records an
-accepted preservation tradeoff, not a new ripping subsystem or a claim that
-incomplete captures are perfect disc archives.
+Status: proposed, not yet reviewed by the owner.
 
-Status: Accepted (original direction 2026-10-27; normative wording formalized
-2026-11-03). See [ADR 0006](0006-source-bound-evidence-and-coverage.md) for claim
-coverage and [ADR 0008](0008-meaningful-provenance-and-bounded-lookup-history.md)
-for preservation. The specialized rules below apply to ordinary music-CD capture.
+For ordinary music CDs, Collector keeps the complete raw capture and relies on
+AccurateRip to check the audio, accepting Q-subchannel errors rather than requiring
+perfect subchannel recovery.
 
 ## Decision
 
-- The complete captured redumper package must be preserved, including raw masters,
-  SUBCODE, STATE, TOC and other sidecars/logs. Unresolved Q errors must remain
-  visible; subchannels must not be discarded or synthesized to imply completeness.
-- Automatic refinement in `scripts/rip-cd.sh` must remain conditional on initial
-  SCSI/C2 errors.
-  Q-only errors must not trigger normal automatic refinement. Additional Q recovery
-  may be an explicit operator action, but must not become an ordinary capture,
-  import or listening gate or a requirement to buy another drive.
-- Independent audio assessment under this tradeoff must use Collector's existing
-  AccurateRip workflow. Results must be interpreted within their actual source, reference,
-  algorithm/version, track and offset-search coverage. Whole-disc claims must meet
-  complete expected-track and justified-offset conditions; one matching track
-  must not establish a whole-disc claim.
-- An audio match must not be presented as proof of complete/correct subchannels,
-  all index/control information or samples outside coverage. Missing references,
-  partial coverage, ambiguity or a mismatch must not alone be presented as proof
-  of damaged audio. Results must remain available for investigation. A clean
-  SCSI/C2 summary must not be presented as proof of complete subchannels, all
-  index/control information or samples outside the reported coverage.
-- Persistent Q-only counts must not by themselves reopen mandatory recovery work.
-  Concrete conflicting evidence must prompt reassessment: unresolved audio-read
-  errors, suspicious track/index boundaries or control flags, audible problems,
-  or required subchannel content such as CD+G. Existing structural validation and
-  unsupported-format restrictions must still apply.
+- Keep the complete redumper package: raw masters, SUBCODE, STATE, TOC and logs.
+  Unresolved Q errors stay visible; subchannels are never discarded or synthesized.
+- `scripts/rip-cd.sh` only refines automatically when the first pass has SCSI/C2
+  errors. Q-only errors don't trigger refinement. Extra Q recovery is an optional
+  manual step, never a gate on importing or listening.
+- Audio is checked with Collector's AccurateRip workflow, within its actual
+  coverage. A whole-disc claim needs every expected track and a justified offset;
+  one matching track is not enough.
+- An AccurateRip match doesn't prove the subchannels, index/control data or
+  samples outside coverage are correct. A missing reference, partial coverage or
+  mismatch doesn't by itself prove damaged audio.
+- Persistent Q-only errors don't reopen recovery work. Reassess when there are
+  audio read errors, suspicious track/index boundaries or control flags, audible
+  problems, or subchannel content that matters (such as CD+G).
 
-## Why this tradeoff is acceptable
+## Why
 
-Q carries control/position information rather than PCM audio. Its CRC detects
-errors, but Q does not receive the audio's CIRC error correction. Occasional bad
-Q packets can coexist with correctly recovered audio, and repeated/predictable
-position information can keep ordinary playback working. Music-ripping workflows
-commonly retain lossless audio, a log and optionally a CUE sheet instead of every
-raw subchannel packet. The project retains the fuller raw package while accepting
-documented subchannel imperfections for the user's hobbyist music archive.
+Q carries position and control data, not audio. It has a CRC but isn't covered by
+the audio's CIRC error correction, so occasional bad Q packets can coexist with
+correctly recovered audio. Normal music-ripping workflows keep lossless audio plus
+a log; this project keeps more than that. Mastering-plant subcode error averages
+are not a standard for consumer-drive captures.
 
-This is an explicit scope choice, not a numerical manufacturing certification.
-Historical StageTech EC2 mastering guidance gives instrument-dependent acceptable
-bad-subcode averages; it is not a universal pressed-CD Q-error allowance or a
-calibrated comparison with a consumer-drive capture. The commonly quoted BLER
-limit concerns C1-input blocks, not the Q count. Whole-disc averages do not
-establish correctness of track boundaries or control data.
+## Manual Q refinement
 
-See the [operator observation](../validation/raw-cd-capture-2026-10-25.md#accepted-q-only-tradeoff--2026-10-27)
-for the owned-disc example that prompted this decision. It includes no claimed
-AccurateRip result.
-
-## Optional manual Q refinement (fish)
-
-Find the intended drive with `diskutil list` on macOS; confirm a candidate with
-`diskutil info /dev/diskN`. Keep the same disc inserted. Replace these example
-values with the existing capture folder and the intended current drive:
+Find the drive (`diskutil list`, then `diskutil info /dev/diskN` on macOS), keep
+the same disc inserted, and run against the existing capture folder (fish syntax):
 
 ```fish
 set q_drive diskN
@@ -77,17 +49,13 @@ redumper refine \
   --verbose
 ```
 
-This updates that capture in place. Omit `--speed=8` to request the drive's
-default optimal speed. A requested speed, including the speed printed in
-redumper's drive information, is not a measurement that the drive obeyed it.
-Under **correction statistics**, Q counts sectors repaired during that pass,
-not errors remaining; zero means no additional Q corrections. Keep the log
-and stop repeating passes when the operator judges the remaining benefit too low.
+This updates the capture in place. Drop `--speed=8` to use the drive's default;
+the drive may not honor the requested speed. Under **correction statistics**, Q
+counts sectors repaired in that pass, not errors remaining. Stop when further
+passes aren't worth it.
 
-## Supporting references
+## References
 
-- [CD format and Q CRC/CIRC separation (ECMA-130, sections 17, 18 and 22.3)](https://ecma-international.org/wp-content/uploads/ECMA-130_2nd_edition_june_1996.pdf).
-- [Redumper raw subchannel preservation and refinement](https://github.com/superg/redumper),
-  [refinement implementation and correction statistics](https://github.com/superg/redumper/blob/main/cd/cd_dump.ixx).
-- [Music-ripping workflow (Hydrogenaudio)](https://wiki.hydrogenaudio.org/index.php?title=EAC_Lossless_Backup).
-- [StageTech EC2 manual, pages 71 and 85 (archived manufacturer guidance)](https://manualzilla.com/doc/6864989/user-s-manual-v-1.08-us---stagetech-developments).
+- [ECMA-130](https://ecma-international.org/wp-content/uploads/ECMA-130_2nd_edition_june_1996.pdf) (sections 17, 18, 22.3: Q CRC vs. CIRC)
+- [redumper](https://github.com/superg/redumper)
+- [Hydrogenaudio: EAC lossless backup](https://wiki.hydrogenaudio.org/index.php?title=EAC_Lossless_Backup)

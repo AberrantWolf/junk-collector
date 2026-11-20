@@ -44,8 +44,7 @@ impl ProcessingQuery {
     }
 }
 
-/// All identities and decision inputs required for one processing attempt are
-/// allocated before execution. W4.2 persists this value without changing it.
+/// Identities and inputs for one processing attempt, fixed before execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenProcessingJob {
@@ -216,8 +215,7 @@ pub trait ProcessingReadPort: Send + Sync {
 
 pub trait SnapshotPort: Send + Sync {
     fn snapshot(&self, query: SnapshotQuery) -> Result<SnapshotRecord>;
-    /// The adapter enforces the same collection scope for metadata and bytes.
-    /// Large DAT snapshots must not become a Vec in the shared application DTO.
+    /// Streams bytes so large DAT snapshots are never buffered.
     fn snapshot_bytes(&self, query: SnapshotQuery) -> Result<Box<dyn std::io::Read + Send>>;
     fn snapshots(
         &self,
@@ -341,8 +339,7 @@ pub struct ActivateCatalogSnapshotCommand {
     pub snapshot_id: SnapshotId,
 }
 
-/// JSON/dBAR providers enforce an 8 MiB cap; buffered responses are capped at
-/// 20 MiB. Original artwork and large catalogs use StreamingProviderPort directly.
+/// Buffered provider responses. Artwork and large catalogs use StreamingProviderPort.
 pub trait ProviderPort: Send + Sync {
     fn acquire(
         &self,
@@ -417,9 +414,7 @@ impl FrozenJobInput {
     }
 }
 
-/// Reader is bounded by the adapter to the validated request limit. The snapshot
-/// writer hashes what it consumes and enforces the same limit before publishing.
-/// Content is never trusted solely from provider-declared length/digest headers.
+/// Bounded reader; the snapshot writer hashes and re-checks the limit itself.
 pub struct ProviderStreamResponse {
     pub media_type: String,
     pub bytes: ByteLength,
@@ -436,8 +431,7 @@ pub trait StreamingProviderPort: Send + Sync {
     ) -> Result<ProviderStreamResponse>;
 }
 
-/// Adapt a bounded response into the single acquisition/publication pipeline.
-/// This adapter owns no registry, scheduling or provider policy.
+/// Adapt a bounded response into the acquisition pipeline.
 pub struct BoundedProviderAdapter(pub std::sync::Arc<dyn ProviderPort>);
 
 impl StreamingProviderPort for BoundedProviderAdapter {
@@ -606,8 +600,7 @@ impl From<&collector_core::Item> for MetadataInventoryState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetadataAuthorityRecord {
-    /// Historical materializations retain their original decision algorithm.
-    /// New publications freeze the evidence-aware automatic edition (v4).
+    /// Decision algorithm version; older records keep the one they used.
     #[serde(default = "legacy_metadata_policy")]
     pub resolution_policy: u32,
     /// Current versions used for automatic resolution; history remains selectable.
@@ -623,8 +616,7 @@ pub struct MetadataAuthorityRecord {
     /// the resulting display. Authority-only changes leave this empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observations: Vec<collector_core::MetadataRefreshObservation>,
-    /// Old W4 contract-only records did not materialize a display. D06.1 writes
-    /// this for every application-produced revision while retaining those bytes.
+    /// Absent on older records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<collector_core::ResolvedMetadataDisplay>,
     pub updated_at: DateTime<Utc>,
@@ -723,8 +715,7 @@ pub struct MetadataMaintenanceCandidate {
     pub user_id: collector_core::UserId,
 }
 
-/// Mechanism-only persistence and package access. Authorization and currency
-/// policy remain in CollectionService.
+/// Persistence and package access; authorization stays in CollectionService.
 pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
     fn ensure_snapshot_current(
         &self,

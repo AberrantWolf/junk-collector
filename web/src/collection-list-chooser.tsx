@@ -43,7 +43,7 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
  }
  function report(e:unknown){
   if(isApiRequestError(e)&&e.status===401)onSessionExpired();
-  else setError(isApiRequestError(e)&&e.status===409?'This list changed. Reload lists, review the destination, then try again.':requestErrorMessage(e,'You need Curator access to edit collection lists.'));
+  else setError(isApiRequestError(e)&&e.status===409?'This list was changed elsewhere. Reload lists and try again.':requestErrorMessage(e,'You need Curator access to edit lists.'));
  }
  function applyPage(page:ListPage,append=false){
   setRows(value=>append?[...value,...page.items]:page.items);
@@ -80,7 +80,7 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
    if(!submission){
     if(selected)submission={stage:'append',list:selected,key:crypto.randomUUID()};
     else{
-     if(!name.trim())throw new Error('Choose a list or enter a name for a new list.');
+     if(!name.trim())throw new Error('Choose a list or enter a new list name.');
      submission={stage:'create',name:name.trim(),kind:targetKind,key:crypto.randomUUID()};
     }
     remember(submission);
@@ -112,7 +112,6 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
  return <div className="modal-backdrop"><section ref={dialog.ref} className="modal" role="dialog" aria-modal="true" aria-labelledby="list-chooser-title" aria-busy={busy} data-unsaved={!pending&&!selected&&!!name.trim()}>
   <button className="close" aria-label="Close" onClick={dialog.dismiss}>×</button>
   <h2 id="list-chooser-title">Add to list</h2>
-  <p>{label} will be appended at the end. Repeated additions are allowed.</p>
   <label>Find a list<input type="search" value={search} onChange={e=>setSearch(e.target.value)} maxLength={256}/></label>
   <label>Destination list<select value={selected?.id||''} disabled={busy||!!pending} onChange={e=>{setSelected(rows.find(row=>row.id===e.target.value));setNotice('');}}>
    <option value="">Create a new list</option>
@@ -121,7 +120,7 @@ export default function CollectionListChooser({userId,collectionId,itemId,label,
   {cursor&&<button disabled={loading||busy} onClick={()=>void more()}>More lists</button>}
   {!selected&&<label>New list name<input value={name} maxLength={256} disabled={busy||!!pending} onChange={e=>setName(e.target.value)}/></label>}
   {loading&&<p role="status">Loading lists…</p>}
-  {pending&&!busy&&<p className="notice">The last addition is unconfirmed. Retry to check whether it succeeded before adding again.</p>}
+  {pending&&!busy&&<p className="notice">The last add may not have gone through. Retry to check.</p>}
   {error&&<p role="alert" className="error">{error}<button disabled={busy} onClick={()=>setReload(value=>value+1)}>Reload lists</button></p>}
   {notice&&<p role="status">{notice}</p>}
   <div className="profile-actions">

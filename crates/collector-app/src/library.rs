@@ -152,13 +152,13 @@ impl CollectionService {
     pub(crate) fn library_namespace(&self) -> Result<String> {
         Ok(Digest::sha256(
             &serde_json::to_vec(&(
-                "library-row-v6",
+                "library-row-v7",
                 env!("CARGO_PKG_VERSION"),
                 self.modules.descriptors(),
-                self.encoder_availability(&ConversionProfile::Flac),
-                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 96 }),
-                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 128 }),
-                self.encoder_availability(&ConversionProfile::Opus { bitrate_kbps: 192 }),
+                ConversionProfile::PRESETS
+                    .iter()
+                    .map(|profile| self.encoder_availability(profile))
+                    .collect::<Vec<_>>(),
             ))
             .map_err(|error| Error::Storage(error.to_string()))?,
         )

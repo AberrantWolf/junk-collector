@@ -476,7 +476,7 @@ impl Store {
                     .join(capture.id.to_string())
                     .join("payload")
                     .join(representation.id.to_string())
-                    .join(&file.name);
+                    .join(collector_core::archive_relative_path(&file.name));
                 let (length, digest) = crate::files::hash_file(&path)?;
                 if length != validation.bytes || digest != validation.digest {
                     return Err(Error::Storage(

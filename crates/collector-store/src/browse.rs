@@ -213,9 +213,6 @@ fn query_parts(
 ) -> Result<QueryParts> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200) as usize;
     let search = query.search.as_deref().unwrap_or("").trim();
-    if search.len() > 256 {
-        return Err(Error::Invalid("search is too long".into()));
-    }
     let revision = cache
         .map(|_| crate::library::cursor_revision(db, query.filter))
         .transpose()?;

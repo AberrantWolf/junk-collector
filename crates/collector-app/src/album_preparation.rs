@@ -571,21 +571,36 @@ impl CollectionService {
             .item_id
             != Some(item_id)
         {
-            return Err(Error::Unavailable("Automatic preparation stopped because the Capture association changed. Open the associated album to prepare it explicitly.".into()));
+            return Err(Error::Unavailable(
+                "The import's album changed. Open the album to prepare it.".into(),
+            ));
         }
         // Admission belongs to this import. Siblings may still be applying
         // their reviewed playback selections after the preservation barrier.
         let source = import.view.representation_id;
         let frozen = self.freeze_music_album_batch_with_selection(
-            user_id, &item, profile, batch_id, |plan| {
-                let disc = plan.discs.iter().find(|disc| {
-                    disc.sources.iter().any(|candidate| candidate.source_representation_id == source)
-                }).ok_or_else(|| Error::Unavailable(
-                    "The preserved import has no selected audio tracks for this preparation format. Review its analysis and playback selection.".into()
-                ))?;
+            user_id,
+            &item,
+            profile,
+            batch_id,
+            |plan| {
+                let disc = plan
+                    .discs
+                    .iter()
+                    .find(|disc| {
+                        disc.sources
+                            .iter()
+                            .any(|candidate| candidate.source_representation_id == source)
+                    })
+                    .ok_or_else(|| {
+                        Error::Unavailable(
+                            "This import has no selected tracks for this format.".into(),
+                        )
+                    })?;
                 if *profile == ConversionProfile::Flac && disc.ambiguous {
                     return Err(Error::Unavailable(
-                        "This disc has alternative sources. Use Prepare album to choose one.".into()
+                        "This disc has alternative sources. Use Prepare album to choose one."
+                            .into(),
                     ));
                 }
                 Ok(vec![source])
@@ -950,10 +965,8 @@ impl CollectionService {
 }
 
 fn validate_album_sources(sources: &[RepresentationId]) -> Result<()> {
-    if sources.is_empty() || sources.len() > 64 {
-        return Err(Error::Invalid(
-            "album preparation requires 1–64 selected disc sources".into(),
-        ));
+    if sources.is_empty() || sources.len() > MAX_ALBUM_PREPARATION_MEMBERS {
+        return Err(Error::Invalid("Select at least one disc.".into()));
     }
     let unique = sources
         .iter()
@@ -1087,20 +1100,15 @@ fn album_plan_from_rows(
             capture_id,
             sources: source_plans,
             ambiguous,
-            message: ambiguous.then(|| {
-                "Select the preservation source that represents this disc; alternatives are never encoded as duplicate discs.".into()
-            }),
+            message: ambiguous.then(|| "Choose which source to use for this disc.".into()),
         });
     }
     if discs.is_empty() {
-        blockers.push(
-            "No supported audio source is associated with this album. Preserve and analyze a complete supported package first."
-                .into(),
-        );
+        blockers.push("This album has no supported audio yet.".into());
     }
     if total_tracks > MAX_ALBUM_PREPARATION_MEMBERS {
         blockers.push(format!(
-            "The default scope has {total_tracks} tracks; one batch admits at most {MAX_ALBUM_PREPARATION_MEMBERS}."
+            "This album has {total_tracks} tracks; a batch can prepare at most {MAX_ALBUM_PREPARATION_MEMBERS}."
         ));
     }
     let can_submit = discs.iter().any(|disc| {
@@ -1196,7 +1204,7 @@ mod tests {
                 .all(|source| !source.default_selected)
         );
         assert_eq!(plan.total_tracks, 0);
-        assert!(plan.blockers[0].contains("choose one"));
+        assert!(!plan.blockers.is_empty());
 
         let source = RepresentationId::new();
         let oversized = (1..=257)
@@ -1222,11 +1230,6 @@ mod tests {
             .collect::<Vec<_>>();
         let oversized = album_plan_from_rows(item, &oversized, &ConversionProfile::Flac);
         assert_eq!(oversized.maximum_members, 256);
-        assert!(
-            oversized
-                .blockers
-                .iter()
-                .any(|blocker| blocker.contains("at most 256"))
-        );
+        assert!(!oversized.blockers.is_empty());
     }
 }

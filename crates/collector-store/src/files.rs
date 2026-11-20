@@ -12,9 +12,6 @@ enum ExistingAsset {
 pub(crate) fn safe_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 1024
-        || name.contains('\\')
-        || name.contains(':')
-        || name.chars().any(char::is_control)
         || name.starts_with('/')
         || name
             .split('/')
@@ -239,7 +236,7 @@ impl Store {
         let mut total = 0u64;
         for file in &files {
             safe_name(&file.name)?;
-            if !names.insert(file.name.to_lowercase()) {
+            if !names.insert(collector_core::archive_relative_path(&file.name).to_lowercase()) {
                 return Err(Error::Invalid(
                     "duplicate or case-colliding package name".into(),
                 ));
@@ -787,7 +784,7 @@ impl Store {
         for (file, source) in files.iter().zip(sources) {
             safe_name(&file.name)?;
             check()?;
-            let target = payload.join(&file.name);
+            let target = payload.join(collector_core::archive_relative_path(&file.name));
             let parent = target.parent().ok_or(Error::Conflict)?;
             fs::create_dir_all(parent).map_err(storage)?;
             copy_publication_file(source, &target, file.bytes.0, &mut check)?;
@@ -851,8 +848,14 @@ impl Store {
         for file in &capture.representations[0].files {
             artifacts.push(publication::JournalArtifact {
                 kind: publication::ArtifactKind::Payload,
-                staged_path: format!("{stage_relative}/payload/{}", file.name),
-                published_path: format!("{payload_relative}/{}", file.name),
+                staged_path: format!(
+                    "{stage_relative}/payload/{}",
+                    collector_core::archive_relative_path(&file.name)
+                ),
+                published_path: format!(
+                    "{payload_relative}/{}",
+                    collector_core::archive_relative_path(&file.name)
+                ),
                 sha256: file.digest.hex.clone(),
             });
         }
@@ -902,8 +905,9 @@ impl Store {
         fs::create_dir_all(payload_destination.parent().unwrap()).map_err(storage)?;
         if payload_destination.try_exists().map_err(storage)? {
             for file in &capture.representations[0].files {
-                if hash_file(&payload_destination.join(&file.name))?
-                    != (file.bytes, file.digest.clone())
+                if hash_file(
+                    &payload_destination.join(collector_core::archive_relative_path(&file.name)),
+                )? != (file.bytes, file.digest.clone())
                 {
                     return Err(Error::Storage("orphan package differs from retry".into()));
                 }
@@ -1114,7 +1118,7 @@ impl Store {
                 .join(representation.to_string())
         };
         self.archive_guard.check()?;
-        let path = fs::canonicalize(root.join(&file.name)).map_err(|error| {
+        let path = fs::canonicalize(root.join(collector_core::archive_relative_path(&file.name))).map_err(|error| {
             if canonical_derivative {
                 tracing::error!(%error, representation = %representation, "prepared media path unavailable");
                 Error::PreparedMediaInvalid
@@ -1286,7 +1290,7 @@ impl Store {
             return Err(Error::Invalid("asset exceeds upload limit".into()));
         }
         let (extension, media_type, thumbnail) = if kind == AssetKind::Document {
-            let format = junk_libs_core::document::classify(bytes, collector_app::MAX_ASSET_BYTES)
+            let format = junk_libs_core::document::classify(bytes)
                 .map_err(|e| Error::Invalid(e.to_string()))?;
             (format.extension(), format.media_type(), None)
         } else {

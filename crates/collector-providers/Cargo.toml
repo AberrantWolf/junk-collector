@@ -20,10 +20,12 @@ httpdate.workspace = true
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync"] }
 junk-libs-accuraterip.workspace = true
 junk-libs-dat.workspace = true
-junk-libs-disc.workspace = true
-junk-libs-core.workspace = true
 junk-libs-audio = { workspace = true, features = ["derivative-validation"] }
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+junk-libs-disc.workspace = true
+junk-libs-core.workspace = true

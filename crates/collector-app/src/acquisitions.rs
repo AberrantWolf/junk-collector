@@ -101,7 +101,9 @@ impl CollectionService {
         }
         Err(match failures.first() {
             Some(first) if failures.iter().all(|error| error == first) => first.clone(),
-            Some(_) => Error::Unavailable("No current request owner remains eligible for this provider response; their eligibility failures differ".into()),
+            Some(_) => {
+                Error::Unavailable("No requester can still use this provider response".into())
+            }
             None => Error::JobCancelled,
         })
     }

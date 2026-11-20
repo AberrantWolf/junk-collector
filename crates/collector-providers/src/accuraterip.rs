@@ -116,10 +116,8 @@ impl AccurateRipProvider {
         minimum_interval: Duration,
     ) -> Result<Self> {
         if user_agent.trim().is_empty()
-            || user_agent.len() > 255
             || user_agent.chars().any(char::is_control)
             || timeout.is_zero()
-            || timeout > DEFAULT_TIMEOUT
         {
             return Err(Error::Invalid(
                 "invalid AccurateRip client configuration".into(),

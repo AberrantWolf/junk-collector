@@ -1,256 +1,114 @@
 # Email purchase suggestions
 
-Architectural rules: [ADR 0007](decisions/0007-manual-metadata-authority.md), [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0011](decisions/0011-input-bound-command-receipts.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
+Optional email intake reads retailer receipts and proposes purchases for review. It
+never changes inventory by itself or infers that you own something from a receipt.
+Install Proton Mail Bridge with the [Bridge setup guide](../deploy/proton-bridge/README.md).
+Gmail is not supported.
 
-Optional email intake proposes collection changes; it does not automatically alter
-inventory or infer possession from a receipt. Use the [Bridge setup guide](../deploy/proton-bridge/README.md)
-for installation and [dated acceptance](validation/inbox-recovery-2026-10-31.md)
-for tested recovery limits. Published releases containing the feature describe it
-in their notes; this guide does not describe a particular installation.
+## Design
 
-## Boundaries
+Mail access goes through `MailProviderPort`. The only adapter uses a local official
+Proton Mail Bridge over IMAP; its connector (`mail/connector.py`, Python standard
+library only) keeps retailer parsing separate from IMAP so another provider could
+reuse it. There is no plugin interface.
 
-`MailProviderPort` is the installed transport boundary. Its first adapter uses
-local official Proton Mail Bridge; Gmail is not implemented. The connector is
-embedded in the provider adapter and runs with Python 3's standard library.
-Retailer interpretation is independent of IMAP inside `mail/connector.py` and can
-be reused by a future Gmail adapter. Providers are compiled/configured adapters;
-there is no dynamic executable plugin installation interface.
+- Credential profiles live outside the portable archive (mode 0600/0400) and contain
+  reversible Bridge credentials. APIs never return them. Back them up privately
+  together with Bridge's home directory.
+- Pending and dismissed suggestions, connections and cursors live in private SQLite.
+  Accepted purchases are portable item records. Viewers see no purchase details.
+- IMAP access uses EXAMINE and BODY.PEEK only: mail is never marked read, moved,
+  deleted or sent. (The Bridge credential itself could do more, so keep it private.)
+- Bodies, attachments and raw messages are not stored or sent to the browser. Only
+  the extracted product text, order reference, status and date are kept, plus a
+  private locator (folder, UID, UIDVALIDITY, Message-ID, subject, date) visible only
+  to the profile owner. No external HTML resources are fetched and no mail data is
+  sent to any lookup service.
 
-The administrator provisions a private profile for a specific Collector user.
-Administrators can connect their own Bridge from the visible **Connect your
-email** card in Purchase inbox. It accepts Bridge's distinct local IMAP
-credentials, validates the server-provided certificate pin and read-only folder
-access, then saves the profile without enabling receipt scanning. Proton account
-login/2FA remains in the private Bridge terminal. Legacy operator-provisioned
-profiles remain supported; read APIs never return credentials.
-That user enables it for one explicitly selected collection with curate access.
-Other users cannot enumerate the profile, credentials or suggestions. The UI
-supports enable/pause and **Edit scanned folders**; changing an existing profile's
-destination is refused.
-Use a new profile ID to import to another collection.
+## Connecting
 
-During Bridge setup or in **Edit scanned folders**, select **Find mail folders**,
-choose a folder from **Available mail folders**, and select **Add folder**. Repeat
-for each folder to scan. Setup uses the local IMAP credentials you entered and
-the editor uses your saved profile. Discovery lists selectable folders over the
-pinned local IMAP connection without opening them or fetching messages. If Bridge
-is unavailable, you can still enter exact names manually.
+An administrator connects their own Bridge from the **Connect your email** card in
+**Purchase inbox**, entering Bridge's local IMAP credentials (Proton login and 2FA
+happen in the Bridge terminal). Collector checks the certificate pin and read-only
+folder access, then saves the profile with scanning disabled. Operator-provisioned
+profile files are also supported.
 
-**Edit scanned folders** accepts 1–16 names, one per line, then **Save folders**.
-Include `INBOX` to keep scanning inbox mail. Archived receipts
-require their folders or the exact Bridge All Mail folder name. Saving retains
-the enabled/paused state, suggestions and saved folder scan positions. New folders
-start at the beginning; removing a folder stops its future reads without deleting
-prior suggestions. Changes apply to subsequent batches without restarting Collector
-or entering credentials again. Folder access is checked by the next enabled scan;
-invalid/inaccessible folders produce a visible scan problem. Cancel and reopen the
-editor if another update causes a revision conflict. Folder choices persist in
-private connection state; provisioned defaults and credential files remain intact.
+The profile's owner enables scanning for one collection they can curate. Other users
+cannot see the profile or its suggestions. A profile's destination collection cannot
+be changed; use a new profile ID for another collection.
 
-No public mail/SMTP tool is exposed. Credential-bearing profiles live outside the
-portable archive and must be mode 0600/0400. Read APIs return owner-scoped summaries,
-never credentials. Profile files contain reversible local Bridge credentials and
-need protected local storage and encrypted backups.
+**Folders:** during setup or with **Edit scanned folders**, use **Find mail folders**,
+pick from **Available mail folders** and **Add folder**; or type 1–16 exact names, one
+per line, and **Save folders**. Include `INBOX` to keep scanning the inbox; archived
+receipts need their folders or Bridge's All Mail folder. New folders start from the
+beginning; removed folders stop being read but keep their suggestions. Changes apply to
+the next batch without a restart. Inaccessible folders show a scan problem.
 
-Pending/dismissed suggestions, connections and cursors live in private SQLite.
-Accepted orders are portable, role-redacted Item records, retained by ordinary
-Item edits, reindex and archive-only recovery. Readers with Viewer access receive
-no purchase details. Full local backups include private SQLite; back up the
-external credential file and Bridge home separately and privately.
+**Revalidate Bridge connection** replaces the saved credentials after you confirm the
+current certificate fingerprint; cursors, suggestions and enablement are kept.
+Removing profiles and provisioning them for non-administrators are operator tasks.
+Both setup routes exist only on administration listeners.
 
-## Review
+## Scanning
 
-Open **Purchase inbox**, select a collection, find **Connect your email**
-and enable receipt scanning for its configured account. Every receipt match needs
-explicit review.
-Correct the title, platform, edition, format, order reference and status; then
-link an existing entry or create an unidentified Games entry. Creating entries
-for other collection modules is not implemented; existing entries can be linked.
-No specimen, carrier, game dump, catalog identity or ownership assertion is
-fabricated. Cancellation/refund suggestions can explicitly update a matching
-existing order; source dates prevent an older message replacing a later status.
-Manual titles and metadata remain unchanged when linking.
+Polling runs one account at a time, one minute after the previous batch, with a
+90-second fetch deadline. History is read from UID 1 in windows of 100 UIDs; each
+batch commits its suggestions and cursor together, and a failed batch never advances
+the cursor. A UIDVALIDITY change rescans the folder; duplicate messages across folders
+and rescans are suppressed.
 
-Matching normalizes Unicode width, case and punctuation. A title from a reviewed
-order linked to an Item also acts as an alias for later suggestions, allowing
-Japanese/English receipt titles to converge through manual review. Platform and
-edition remain visible; overlapping matches are warnings, not proof of a mistaken
-purchase. A reviewer can mark a duplicate intentional. No external title/AI lookup
-receives mail data. Matching is bounded to the first 5,000 entries and 20 displayed
-matches per suggestion; use explicit library search when that is insufficient.
+Only known retailer sender domains with receipt-like subjects are fetched. Headers are
+routing hints, not proof of authenticity.
 
-Every accepted source key is retained with the order. Inbox acceptance is derived
-from those archive-owned keys. The same Item publication commits Collector's
-existing command receipt, so interruption cannot record a successful review
-without its order. Concurrent/replayed decisions use idempotency receipts,
-expected Item revisions and the archive writer lock; dismissed/accepted receipts
-require an explicit restore/reopen before they can be reviewed again. Disabling a connection fences in-flight
-batch commits without discarding its history cursor.
+**Supported retailers:** Amazon Japan, Joshin, Square Enix e-STORE, Nintendo eShop and
+Steam, with labelled Japanese/English product and order fields; Steam also supports
+receipt item cells and store links. Amazon Japan's English **Ordered**, **Shipped**,
+**Out for delivery** and **Delivered** notices are recognized by a labelled order number
+and marked product links (titles come from link text or image alt text; recommendation
+links are ignored). These are marked as physical purchases. Status is taken from the
+subject, not footer help text.
 
-## Import and parser coverage
+MIME encodings, Japanese character sets and modified UTF-7 folder names are decoded
+locally. Limits: 2 MiB per mail, 100 MIME parts, 20 products per mail, 100 suggestions
+per batch. Unknown layouts, oversized mail, bad dates and undecodable content become
+**unparsed** suggestions that need manual details. Gift, wallet, subscription, quantity
+and partial-refund cases need manual review. Unrecognized templates can be missed.
 
-Polling runs every minute after the prior batch completes, one account at a time.
-Each account fetch has a 90-second deadline. History starts at UID 1 in configured
-folders, in windows of 100 UIDs; every successful batch commits candidates and
-cursor together. Repeated polls drain history. UIDVALIDITY changes rescan that
-folder; profile-scoped message/line hashes suppress duplicate messages across
-folders and rescans. IMAP uses EXAMINE and BODY.PEEK; it does not mark mail read,
-move it, delete it or send mail. This is an application restriction: Bridge's
-credential itself can read/write the account and must remain private.
+## Reviewing
 
-Only matching retailer sender domains and receipt-like subjects trigger body
-fetches. Headers are routing hints, not proof of sender authenticity. Bodies,
-attachments and raw messages are not retained or sent to browsers. The parser
-keeps selected product text, order reference, status and source date. Bounded
-owner-private locators retain folder/UID/UIDVALIDITY, Message-ID, subject and the
-email date so an original can be found; they stay outside the portable archive and
-are never exposed to other users. No full header block is retained. Locator text
-can itself contain private sender-supplied details; inspect it only in the private
-review UI. Matching rescans refresh coordinates and can fill missing fields on
-unaccepted Amazon suggestions. No external HTML resource is fetched. Other email
-clients can still modify mailbox flags. Bridge sync itself is separate from the
-extractor's read-only command set.
+Open **Purchase inbox** and select a collection. Every suggestion needs explicit review:
+correct title, platform, edition, format, order reference and status, then link an
+existing entry or create an unidentified Games entry (creating entries in other kinds
+of collection is not supported). Nothing else — physical copy, dump, catalog identity —
+is created. Manual titles and metadata are not changed by linking.
 
-Supported parsers: Amazon Japan, Joshin, Square Enix e-STORE, Nintendo eShop and
-Steam, with labelled Japanese/English product/order fields; Steam also supports
-receipt item cells and store app links.
+- Matching ignores Unicode width, case and punctuation. A linked order's title becomes
+  an alias for later suggestions, so Japanese and English titles converge. Matching
+  checks the first 5,000 entries and shows up to 20 matches; use library search
+  otherwise. Overlaps are warnings; a duplicate can be marked intentional.
+- Cancellation and refund notices can update a matching order; source dates prevent an
+  older message overwriting a newer status. To update an accepted order from a later
+  notice, link it to the existing entry and choose the order in **Order action**.
+- **Dismiss** suggestions you don't want; **Restore suggestion** brings one back.
+- **Reopen purchase review** (then **Confirm reopen purchase**) removes the accepted
+  purchase from the item and returns its receipts to review. Inventory, metadata and
+  files are untouched; the earlier purchase stays in archive history.
 
-Amazon Japan's English **Ordered**, **Shipped**, **Out for delivery** and
-**Delivered** HTML notices have a separate layout check. A labelled order number
-and marked Amazon Japan product links in the same message body identify the order
-and its listed items. Full link text or the linked product image's alternate text
-supplies the title, including when the visible text is shortened. The parser reads
-those links as text and ignores recommendation links. It marks these items as
-physical purchases and leaves platform and edition for review. The subject prefix
-identifies the phase even when the progress bar shows several phases or the
-subject uses a separator other than a colon. Labelled Japanese receipts keep
-their original parser. Equivalent HTML alternatives count once. Different
-products with the same title remain separate suggestions. If one item's title
-cannot be recovered, its suggestion keeps the order number and phase for manual
-review alongside the successfully parsed items. To update an accepted order, link
-the new notice to the existing entry and choose the matching order in **Order
-action**. Dismiss suggestions for purchases outside your collection.
+Review decisions are idempotent and checked against the suggestion and item revisions,
+so concurrent or replayed submissions cannot double-apply. Disabling a connection stops
+in-flight batches without losing its cursor.
 
-MIME transfer encodings and declared Japanese character sets are decoded locally.
-Japanese folder names are encoded as IMAP modified UTF-7, including literal
-ampersands. The legacy Amazon quoted-subject title fallback is tentative and may
-be truncated. Status comes from the subject to avoid
-cancellation/refund help text in receipt footers. Unknown layouts/oversize receipts
-become an unparsed review entry rather than an owned game. Limits are 2 MiB/mail,
-100 MIME parts, 20 product names/mail and 100 suggestions/batch. Malformed dates,
-unsupported decoding and excessive MIME parts become unparsed suggestions with a
-typed issue and locator; later messages can progress. Unparsed suggestions require
-manual details/status before acceptance, can be dismissed to skip or restored.
-The received date is used when a malformed sender date cannot be parsed. Transport
-failures, incomplete message bytes and invalid response envelopes keep the saved
-cursor and return typed authentication/certificate/folder/transport/adapter errors.
-No failed batch advances its cursor. Templates without a receipt-like subject or
-recognised sender can be missed. Gift, wallet, subscription, quantity and item-level
-partial-refund semantics need manual review; no claim of universal template support
-is made. Automated tests use synthetic receipts.
+## Status and recovery
 
-On 2026-11-09, four local exports from one physical purchase produced the same
-full title and order reference across all four phases. The Purchase inbox
-browser test also scans a synthetic delivery notice through the IMAP adapter,
-checks the mobile review form and accepts the purchase with its delivery status.
-Initial local validation passed 26 offline mail tests, 640 Rust workspace tests with
-five existing ignores, strict Clippy, contract and web checks, and all 31
-browser journeys. The Opus journey passed on retry with the existing local
-encoder supplied through `COLLECTOR_OPUS`.
+Each folder shows its last check and whether it is unchecked, has backlog (by UID
+position), or was caught up. For a complete first pass, let Bridge finish syncing,
+then use **Rescan configured folders**. Rescan resets the folders' cursors but keeps
+suggestions and the enabled/paused state; use it again after a parser fix. A rescan
+fills missing fields on matching unaccepted suggestions; dismissals stay dismissed.
 
-The 2026-11-09 review follow-up exercises subject variants through the IMAP
-header filter and verifies in-place field recovery through the Purchase inbox.
-Storage regression coverage checks stale review rejection, replay, conflicting
-order numbers, retained dismissals and accepted purchase history after reindex.
-The follow-up passed 30 offline mail tests, 641 Rust workspace tests with five
-existing ignores, strict Clippy, contract and web checks, and all 31 browser
-journeys.
-
-## Proton Bridge deployment
-
-See [the Portainer and authentication runbook](../deploy/proton-bridge/README.md).
-Keep Bridge home and Collector private state on local private storage. The archive
-may use the supported separate remote-storage layout. Official Linux packages run unchanged with CLI mode and the Linux `pass`
-keychain; there is no Proton protocol reimplementation or public IMAP proxy.
-
-## Bridge status and web connection
-
-The administration-only `GET /api/v1/mail/setup` query reports a typed Bridge
-phase, an optional last-reported percentage/elapsed/remaining time, event time and
-public certificate fingerprint. Purchase inbox polls every five seconds while
-open, independently of receipt review. Unknown, stopped, interrupted and stale
-reports are visible; no percentage or completion is invented. The reporter's
-heartbeat expires after twenty seconds. Percentages cover an observed single
-account; concurrent-account progress is not averaged. These are Bridge mailbox
-events, separate from Collector's receipt-history cursor and last-check/problem
-fields. Progress older than two minutes is explicitly labelled as waiting for a
-new report and its old ETA is hidden.
-
-The container supervisor runs the pinned official CLI, reduces its sync events to
-one bounded atomic status file, and keeps raw output/account names/message IDs
-out of that file. Only a public certificate fingerprint crosses the shared
-read-only status bind. Certificate export stays inside Bridge's protected home,
-including its private key. Operators can inspect the same sanitized snapshot at
-`${PROTON_BRIDGE_STATUS}/status.json` on the Docker host without opening another
-Bridge process or interrupting sync. An absent or stale file is not sync completion.
-
-`POST /api/v1/mail/setup` binds the profile owner to the authenticated enabled
-administrator and accepts only local IMAP credentials and folder names. A pinned
-STARTTLS/login/EXAMINE/STATUS probe must succeed before publication; it never
-fetches message bodies. Credentials and the input-bound command receipt publish
-together in a private immutable file under `state/mail-profiles`. Repeated inputs
-converge after interruption/restart; reusing the same receipt with different
-inputs conflicts before mutable Bridge status is read. Successful creation is
-visible immediately without restarting Collector. The user then explicitly
-enables scanning for an authorized collection. **Revalidate Bridge connection**
-accepts the same local IMAP username, current password and an explicitly confirmed
-current certificate fingerprint. A pinned authentication probe precedes atomic
-replacement of the active private profile. Expected configuration revisions and
-input-bound, secret-free repair receipts fence stale updates and recover uncertain
-responses, including after restart. The provider serializes batch/error publication
-with replacement, so obsolete fetches cannot report success or failure afterward.
-Connection identity, cursors, enablement and suggestions remain intact. Existing
-operator profiles use a managed override with the same ID; their original files are
-retained unchanged. Receipt replay does not restore superseded credentials. Profile
-removal and non-administrator credential provisioning remain operator tasks.
-
-Both setup routes belong to administration listener composition and require the
-administrator role. Existing profile/connection reads remain owner-scoped. The
-managed credentials are reversible private operational data, not archive content;
-include them and Bridge's home in complete paired recovery points. No extra
-per-message or per-poll history is retained.
-
-## Recovery and review corrections — 2026-10-31
-
-Each configured folder shows its last checked time and either not checked, history
-backlog, or caught up at that check. Backlog uses UID positions, not message counts.
-It covers only mail exposed by Bridge; initial Bridge sync and parser coverage are
-separate. For an initial complete history pass, finish Bridge sync, then use
-**Rescan configured folders**. Rescan resets the selected folders' cursor/progress,
-retains suggestions and enabled/paused state, and fences prior work. A paused scan
-stays paused until explicitly enabled. It also provides a retry after parser repair.
-Older unparsed suggestions remain available for review/dismissal when a later parse
-produces a new suggestion. When a recognized Amazon order card matches an
-existing unaccepted suggestion, the rescan fills a missing order number, format
-or phase in place. Dismissed suggestions stay dismissed. Refresh an open inbox
-after recovery to load the new review revision. Accepted receipts and their
-purchase history retain the reviewed facts.
-
-**Restore suggestion** returns a dismissed receipt to Needs review. **Reopen purchase
-review** previews the affected accepted purchase and requires **Confirm reopen
-purchase**. The command removes that current purchase from the Item and returns
-all of its linked receipts to review; earlier accepted details remain in archive
-history. Review again to correct purchase fields or select another entry. No Item
-inventory, manual metadata or files are removed. All review mutations bind the submitted suggestion revision. Both recovery effects
-are owner-scoped and curation-authorized; accepted reopening also checks the Item revision. Private
-review generations fence old forms. Reopening reserves those generations before
-archive publication: an interrupted unsuccessful attempt can require a refresh,
-but leaves either the accepted purchase or its committed reopened state intact.
-
-Receipt review attaches older source keys to an existing matching order without
-replacing newer status/date/details or duplicate intent. Newer receipts can update
-that order normally. Orders with different retailer/reference still conflict.
-Corrections made during review live in the accepted purchase row.
+`GET /api/v1/mail/setup` (administrators only) reports Bridge's sync phase, progress,
+time estimates and certificate fingerprint; Purchase inbox polls it every five seconds.
+Reports expire after twenty seconds; progress older than two minutes is shown as
+waiting, without an ETA. The container supervisor writes this sanitized status to
+`${PROTON_BRIDGE_STATUS}/status.json` (no account names or message IDs). A missing or
+stale file does not mean sync finished.

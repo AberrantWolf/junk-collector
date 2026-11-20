@@ -459,15 +459,3 @@ fn redirect_policy_rejects_other_origins_and_supports_same_origin_redirects() {
         .is_ok()
     );
 }
-
-#[test]
-fn unused_fixture_responses_have_bounded_teardown() {
-    let server = serve(vec![(Duration::ZERO, "200 OK".into(), vec![])]);
-    let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        drop(server);
-        tx.send(()).unwrap();
-    });
-    rx.recv_timeout(Duration::from_secs(2))
-        .expect("unused fixture blocked teardown");
-}

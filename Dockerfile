@@ -1,6 +1,6 @@
-FROM rust:1.99.1-slim-bookworm AS chef
+FROM rust:1-slim-bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends cmake pkg-config libssl-dev git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --version 0.1.78 --locked
+RUN cargo install cargo-chef --locked
 WORKDIR /build
 
 FROM chef AS planner

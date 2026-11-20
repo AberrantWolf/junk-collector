@@ -14,11 +14,9 @@ impl UnavailableReason {
     pub fn message(self) -> &'static str {
         match self {
             Self::NotConfigured => {
-                "Passkeys are not configured. Configure authentication_origin with a trusted HTTPS DNS hostname to enable them."
+                "Passkeys are disabled; set authentication_origin to an HTTPS hostname to enable them"
             }
-            Self::DnsNameRequired => {
-                "Passkeys require a trusted HTTPS DNS hostname; numeric IP addresses support password sign-in and recovery."
-            }
+            Self::DnsNameRequired => "Passkeys need an HTTPS hostname, not an IP address",
         }
     }
 }

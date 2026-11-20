@@ -1,5 +1,4 @@
 //! Schema-3 archive records. These are persistence envelopes, not HTTP DTOs.
-//! Publication/migration code adopts them in P01.2–P01.4.
 use chrono::{DateTime, Utc};
 use collector_core::*;
 use serde::{Deserialize, Serialize};
@@ -165,16 +164,6 @@ impl EvidenceRecordV3 {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[allow(dead_code, reason = "P01.4 adopts tombstones in the entity writer")]
-pub(crate) struct TombstoneRecordV3 {
-    pub collection_id: CollectionId,
-    pub entity_type: String,
-    pub entity_id: String,
-    pub revision: Revision,
-    pub deleted_at: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EvidenceReferenceV3 {
     pub id: EvidenceId,
     pub sha256: String,
@@ -257,8 +246,8 @@ mod tests {
         let bytes = serde_json::to_vec(&ItemRecordV3::from(&item)).unwrap();
         let text = String::from_utf8(bytes).unwrap();
         let document: serde_json::Value = serde_json::from_str(&text).unwrap();
-        // Portable lifecycle references now include historical Capture IDs;
-        // the prohibition is against embedding the compatibility projections.
+        // Lifecycle references may name Capture IDs, but the compatibility
+        // projections themselves are not embedded.
         assert!(document.get("captures").is_none());
         assert!(document.get("assets").is_none());
         assert_eq!(

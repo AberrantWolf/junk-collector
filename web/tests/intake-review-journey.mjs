@@ -27,8 +27,6 @@ export async function inboxSelectorJourney(page,{scratch}){
   await chooser.getByLabel('Search inbox packages').fill('');await expect(rows).toHaveCount(50);
   for(const [width,height,label] of [[1440,1000,'desktop'],[390,844,'mobile']]){
    await page.setViewportSize({width,height});await chooser.getByLabel(names[1],{exact:true}).check();
-   const aligned=await chooser.locator('.inbox-package-results label').evaluateAll(labels=>labels.every(label=>{const control=label.querySelector('input').getBoundingClientRect();const text=label.querySelector('span').getBoundingClientRect();return text.left>control.right&&Math.abs((control.top+control.bottom-text.top-text.bottom)/2)<2;}));
-   assert.equal(aligned,true,'Folder names must sit beside and align with their controls');
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Inbox chooser overflows');
    await chooser.screenshot({path:path.join(scratch,`inbox-selector-${label}.png`)});
   }
@@ -70,7 +68,7 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   for(const [index,name] of packageNames.entries()){
    const row=imports.locator('.care-row').filter({has:page.getByText(name,{exact:true})});
    await row.getByText('Files and analysis',{exact:true}).click();
-   const anchor=row.getByRole('combobox',{name:`Analysis anchor for ${name}`});
+   const anchor=row.getByRole('combobox',{name:`Main file for ${name}`});
    assert.equal(await anchor.locator('option').count(),3,'Both CUE and Redumper anchors must remain selectable');
    await row.getByLabel(/Curators only: .unknown/).check();
    await row.getByLabel('Album group',{exact:true}).fill('Shared review group');

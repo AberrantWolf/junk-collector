@@ -36,7 +36,7 @@ try{
  const features=await(await page.request.get(origin+'/api/v1/features')).json();assert.equal(features.passkeys,false);assert.equal(features.passkeys_unavailable_reason,'dns_name_required');
  await page.getByRole('button',{name:'Account & security',exact:true}).click();const security=page.getByRole('dialog',{name:'Account & security'});
  await security.getByRole('button',{name:'Passkeys',exact:true}).click();
- await expect(security.getByText('Password sign-in and recovery work at this IP address.',{exact:false})).toBeVisible();assert.equal(await security.getByRole('button',{name:'Add a passkey',exact:true}).count(),0);
+ assert.equal(await security.getByRole('button',{name:'Add a passkey',exact:true}).count(),0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:artifact,fullPage:true});
  await security.getByRole('button',{name:'Recovery',exact:true}).click();await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
  const code=await security.getByRole('list',{name:'Recovery codes'}).locator('code').first().textContent();assert.ok(code);

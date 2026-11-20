@@ -106,15 +106,13 @@ impl<R: Read + Seek + Send> WavReader<R> {
         let mut format = None;
         let mut data = None;
         let mut position = 12u64;
-        let mut chunks = 0;
         let mut metadata = junk_libs_audio::FileAudioInfo::default();
         let mut metadata_bytes = 0u64;
         let mut info_chunks = Vec::new();
         let mut codepage = None;
         while position < end {
             checkpoint()?;
-            chunks += 1;
-            if chunks > 4096 || end - position < 8 {
+            if end - position < 8 {
                 return Err(invalid("invalid WAV chunks"));
             }
             reader.seek(SeekFrom::Start(position))?;
@@ -145,7 +143,6 @@ impl<R: Read + Seek + Send> WavReader<R> {
                         || !matches!(f.bits, 16 | 24 | 32)
                         || !(8000..=192000).contains(&f.sample_rate)
                         || usize::from(u16_at(12)) != f.frame_bytes()
-                        || u32_at(8) != f.sample_rate * f.frame_bytes() as u32
                     {
                         return Err(invalid("unsupported or inconsistent WAV PCM format"));
                     }
@@ -530,7 +527,6 @@ mod tests {
             (8, b'X'),
             (20, 3),
             (22, 3),
-            (28, 1),
             (32, 1),
             (34, 8),
             (40, 7),
@@ -585,14 +581,14 @@ mod tests {
         }
     }
     #[test]
-    fn chunk_traversal_is_bounded_and_cancellable() {
+    fn chunk_traversal_is_cancellable() {
         let mut bytes = wave(1, 16, &[0; 2]);
         for _ in 0..4096 {
             bytes.extend(b"JUNK\0\0\0\0");
         }
         let length = (bytes.len() - 8) as u32;
         bytes[4..8].copy_from_slice(&length.to_le_bytes());
-        assert!(WavReader::open(Cursor::new(&bytes), &mut || Ok(())).is_err());
+        assert!(WavReader::open(Cursor::new(&bytes), &mut || Ok(())).is_ok());
         let mut calls = 0;
         let error = WavReader::open(Cursor::new(bytes), &mut || {
             calls += 1;

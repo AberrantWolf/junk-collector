@@ -115,9 +115,7 @@ pub fn browse_sort_fields(item: &Item) -> (String, String) {
     }
 }
 
-/// Transitional combined Wave 1 adapter. Application services consume the
-/// narrow ports below; A04.2 removes this compatibility surface after moving
-/// the remaining command families behind application policy.
+/// Combined storage port. Application services prefer the narrower ports below.
 pub trait Catalog: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
     fn collections_page(
@@ -158,8 +156,7 @@ pub trait Catalog: Send + Sync {
     fn evidence(&self, item: ItemId) -> Result<Vec<Evidence>>;
 }
 
-/// Mechanism-only reads. A read adapter never receives a Principal or decides
-/// what a role is allowed to observe.
+/// Reads without authorization; callers apply role policy.
 pub trait CollectionReadPort: Send + Sync {
     fn collections(&self, user: UserId) -> Result<Vec<Collection>>;
     fn collections_page(
@@ -342,8 +339,7 @@ impl PresentedAsset {
     }
 }
 
-/// Persistence and file mechanisms after application policy has authorized an
-/// effect. No method receives a Principal or Role.
+/// Persistence for effects already authorized by application policy.
 #[derive(Clone, Copy, Debug)]
 pub enum AssetWriteContext {
     /// A direct, authorized upload, unrelated to a background workflow.
@@ -886,9 +882,8 @@ pub struct RetryIngestCommand {
 }
 
 pub trait ProvisionalImportPort: Send + Sync {
-    /// Derived activity for an authorized album. Includes downstream work and
-    /// transition gaps; excludes cancelled/settled or terminally blocked imports.
-    /// This discloses no private workflow details and never reads media payloads.
+    /// Derived activity for an authorized album, excluding cancelled, settled or
+    /// terminally blocked imports.
     fn item_has_active_ingest(&self, item: ItemId) -> Result<bool>;
     fn items_with_active_ingest(&self, items: &[ItemId]) -> Result<Vec<ItemId>>;
     fn queue_inbox_cleanup(&self, id: ImportId, source: String, spec: JobSpec) -> Result<JobId>;
@@ -1328,9 +1323,7 @@ pub trait JobPort: Send + Sync {
         limit: u16,
     ) -> Result<Page<JobRecord>>;
     fn retry_failed_job(&self, id: JobId, user: UserId) -> Result<JobId>;
-    /// Active derivative inputs are private mechanism records. Application code
-    /// reduces them to a viewer-safe preparing state after collection access is
-    /// authorized; job identity, submitter and diagnostics never cross the DTO.
+    /// Private derivative inputs; callers reduce these to a viewer-safe state.
     fn active_derivative_jobs(&self, capture: CaptureId) -> Result<Vec<ActiveDerivativeJob>>;
     fn frozen_job_input(&self, id: JobId, user: UserId) -> Result<Option<FrozenJobInput>>;
     fn preparation_batch_records(
@@ -1621,9 +1614,8 @@ pub enum ReceiptDecision {
     Replay(serde_json::Value),
 }
 
-/// A per-command mechanism scope. Every durable effect must commit its receipt
-/// atomically, or prepare an outcome tied to an immutable archive commit point.
-/// No ambient thread-local state or authorization decisions live in this scope.
+/// Per-command scope. Every durable effect commits its receipt atomically, or
+/// prepares an outcome tied to an immutable archive commit point.
 pub trait CommandEffects:
     CollectionWritePort
     + ContentPort
@@ -2054,9 +2046,7 @@ pub struct PresentedCollection {
     pub content_permissions: ContentPermissions,
 }
 
-/// Typed creation input reserved for CT.2 runtime integration. Keeping the
-/// module mandatory here prevents `LegacyUnassigned` from becoming a valid new
-/// collection request while CT.1 leaves persisted Collection unchanged.
+/// The module is required so new collections are never `LegacyUnassigned`.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateCollectionCommand {
     pub name: String,
@@ -2194,16 +2184,13 @@ impl PresentedCapture {
     }
 }
 
-/// Recorded checks for visible, currently associated originals. This is not an
-/// album-coverage claim: missing discs and unchecked originals remain distinct.
+/// Recorded checks for visible, currently associated originals.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PresentedAudioCheck {
     pub source_id: RepresentationId,
     pub status: Option<collector_modules::music::AudioVerificationStatus>,
 }
 
-/// Explicit response shape: unrestricted stored Item records are never
-/// flattened into a transport response.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PresentedItem {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -2691,8 +2678,7 @@ impl CollectionService {
         min_role: Option<u8>,
         module: Option<&str>,
     ) -> Result<Page<PresentedCollection>> {
-        if search.len() > 256
-            || !(1..=100).contains(&limit)
+        if !(1..=100).contains(&limit)
             || min_role.is_some_and(|value| value > 2)
             || module.is_some_and(|value| value.len() > 256)
         {
@@ -2774,8 +2760,7 @@ impl CollectionService {
         }
         Ok(role)
     }
-    /// Presentation is calculated only after role-based entity redaction. It is a
-    /// read model; module commands remain behind A04.
+    /// Presentation is calculated after role-based redaction.
     pub fn browse_presented(
         &self,
         actor: &Principal,
@@ -3645,8 +3630,7 @@ impl CollectionService {
                     || submitted_owned != canonical_owned
                 {
                     return Err(Error::Invalid(
-                        "the Wave 1 item envelope changed server-owned fields; refresh and send only editable command fields"
-                            .into(),
+                        "This save changes server-owned fields. Refresh and try again.".into(),
                     ));
                 }
             }
@@ -3667,7 +3651,7 @@ impl CollectionService {
                             .map_err(|error| Error::Storage(error.to_string()))? => {}
             Err(Error::NotFound) => {
                 return Err(Error::Invalid(
-                    "a new Wave 1 item envelope contains server-owned state".into(),
+                    "A new item cannot include server-owned fields.".into(),
                 ));
             }
             Err(error) => return Err(error),
@@ -3849,8 +3833,7 @@ impl CollectionService {
                 catalog: if private { evidence.catalog } else { None },
                 details: private.then_some(evidence.details),
                 provenance_limitation: Some(
-                    "Legacy schema-3 Evidence has limited provenance and is not current source-bound processing proof."
-                        .into(),
+                    "Recorded by an older version; source details are incomplete.".into(),
                 ),
             })
             .collect())
@@ -5850,10 +5833,8 @@ impl CollectionService {
             ))),
         };
         let heartbeat_result = heartbeat.stop();
-        // A lost lease/heartbeat after a successful effect must not mark that
-        // effect failed. Leave the claim recoverable; the runtime reports the
-        // heartbeat cause and a later claim resumes durable publication state.
-        // When execution failed too, retain its primary error.
+        // A lost lease after a successful effect leaves the claim recoverable
+        // rather than failed. If execution also failed, keep that error.
         if result.is_ok() {
             heartbeat_result?;
         }
@@ -6710,8 +6691,7 @@ fn validate_security_page(cursor: Option<&str>, limit: u16) -> Result<()> {
     Ok(())
 }
 
-/// New digital packages share playable files and ordinary covers. Companions
-/// require explicit review; old stored visibility is never rewritten.
+/// New digital packages share playable files and covers; companions need review.
 fn default_import_visibility(file_audio: bool, name: &str) -> Visibility {
     let basename = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
     let ordinary_cover = basename.rsplit_once('.').is_some_and(|(stem, ext)| {

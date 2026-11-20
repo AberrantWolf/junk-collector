@@ -1,0 +1,19 @@
+# Real-disc test template: copy to $JUNK_COLLECTOR_CD_DUMP_ROOT/oracle.toml, fill in
+# known-good values, then run `cargo test -p collector-modules --test real_dump_oracle -- --ignored`.
+[[packages]]
+kind = "cue"
+anchor = "disc/disc.cue"
+files = ["disc/disc.cue", "disc/disc.bin"]
+expected_layout_sha256 = "replace-with-64-lowercase-hex"
+
+[packages.accuraterip]
+dbar = "reference/dBAR.bin"
+maximum_offset = 2939
+expected_status = "verified"
+expected_selected_offset = 0
+
+[[packages.accuraterip.expected_tracks]]
+position = 1
+computed_offset = 0
+arv1 = "replace-with-8-lowercase-hex"
+arv2 = "replace-with-8-lowercase-hex"

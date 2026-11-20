@@ -41,7 +41,7 @@ wtransport = { version = "0.7.2", features = ["quinn"] }
 if-addrs = "0.15"
 time = "0.3"
 
-webauthn-rs = { version = "=0.5.4", default-features = false }
+webauthn-rs = { version = "0.5.4", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true

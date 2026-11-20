@@ -1,100 +1,78 @@
-# Automatic standard-game identification — 2026-10-10
+# Game catalogs and identification
 
-Architectural rules: [ADR 0005](decisions/0005-lossless-module-data-and-write-eligibility.md), [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
+## Using it
 
-Upload standard DAT files or ZIPs in Administration → Game catalogs, review the
-detected documents, import them and activate the saved catalogs. Activation queues
-existing preserved games. New guided imports use the same identification service;
-Metadata → Identify game requests it again. No system string or normalization
-profile is required in this workflow. Catalog downloads remain manual.
+1. Download DAT files from [DAT-o-MATIC](https://datomatic.no-intro.org/) (see the
+   [No-Intro download guide](https://wiki.no-intro.org/index.php?title=Database_Navigation_Guide))
+   or [Redump](https://redump.info/downloads). Collector never downloads catalogs itself.
+2. In **Administration → Game catalogs**, upload the DAT files or ZIPs, review the
+   detected documents, import them and activate the saved catalogs.
+3. Activation queues identification of existing games in the collection. New guided
+   imports use the same service, and **Metadata → Identify game** runs it again for one item.
 
-## Supported detection matrix
+No system string or normalization profile has to be entered. A game imported without
+an active catalog keeps its originals and reports that no catalog match was
+attempted; that is not a failed verification. Game collections do not show the
+music-only import and preparation controls.
 
-This is a finite supported matrix, not universal ROM/container understanding.
-The registry accepts canonical names and recognized aliases (including PS1/PSX).
-An extension never establishes a format, system or game identity.
+## Supported formats
 
-| Input / catalog | Supported interpretation | Acceptance and limitations |
+The supported set is finite. An extension or file name never establishes a format,
+system or game identity. System names accept recognized aliases (for example PS1/PSX).
+
+| Input / catalog | Interpretation | Limits |
 | --- | --- | --- |
-| Logiqx XML or ClrMamePro DAT | Content-detected dialect; header name/description, author/URL and version identify recognized No-Intro/Redump conventions | Unknown systems/conventions are unsupported. Conflicting recognized systems require a choice constrained to that document. Conflicting families cannot activate. |
-| NES, No-Intro | Strict trainer-free iNES/NES 2.0 payload; headerless PRG/CHR bytes; explicitly headered DAT bytes | Header fields and exact declared lengths must agree. Headerless identity requires a complete catalog match. Trainers, miscellaneous ROM data and unsupported directives are refused. |
-| Nintendo 64, No-Intro | z64, v64 and little-endian source orders normalized to big-endian checksums | Magic, header/boot-code boundary, word alignment and reserved header fields must agree. Catalog checksums must be big-endian. No new CIC checksum algorithm is claimed. |
-| SNES, No-Intro | Headerless payload or a candidate 512-byte copier-header layout | Alignment only proposes a layout. Complete catalog evidence must support the interpretation; alignment alone never identifies SNES. |
-| PC Engine/TurboGrafx-16, No-Intro | Headerless HuCard payload or candidate 512-byte copier-header layout | Complete catalog evidence must support stripping/interpretation. No byte deinterleaving or new layout algorithm is added. |
-| PlayStation, Saturn, Mega CD/Sega CD, Redump | Content-recognized CUE and ordered BINARY raw 2352-byte track spans | Validate directives, references, source lengths, track/index order and boundaries. All declared matching tracks must match. This is catalog matching, not sector error-correction validation or media health certification. |
-| Mega Drive/Genesis and GBA, No-Intro | Raw catalog bytes, with recognized header contradiction guards | Mega Drive ROM boundaries; GBA logo, fixed/reserved fields and header checksum are checked when recognized. Identity still requires a complete catalog match. |
-| Game Boy, Game Boy Color, Master System, Game Gear, No-Intro | Exact raw-byte catalog evidence | No separate structural decoder is claimed. Headerless/non-self-describing bytes need an unambiguous complete match; filenames and plausible sizes provide no identity. |
-| UNIF, CHD and compressed game containers | Recognized unsupported containers | Preserve originals and show Unsupported; no raw-catalog fallback. ZIP support in this delivery is for catalog uploads, not game-container extraction. |
-| Other bytes, ambiguous packages or unsupported conventions | Unrecognized, Ambiguous, Malformed or Unsupported with reasons | Preserve originals and retain honest inspection results. Unanchored multi-file packages and multiple CUE anchors need review. |
+| Logiqx XML or ClrMamePro DAT | Dialect detected from content; header fields identify recognized No-Intro/Redump conventions | Unknown systems or conventions are unsupported. A document that matches several systems needs a choice |
+| NES (No-Intro) | Trainer-free iNES/NES 2.0; headerless PRG/CHR; headered DAT bytes | Header fields and lengths must agree. Trainers and miscellaneous ROM data are refused |
+| Nintendo 64 (No-Intro) | z64, v64 and little-endian, normalized to big-endian | Header must be consistent |
+| SNES (No-Intro) | Headerless, or a 512-byte copier header | Layout must be confirmed by a complete catalog match |
+| PC Engine / TurboGrafx-16 (No-Intro) | Headerless HuCard, or a 512-byte copier header | Layout must be confirmed by a complete catalog match |
+| PlayStation, Saturn, Mega CD (Redump) | CUE with ordered BINARY 2352-byte tracks | CUE structure and track boundaries are validated; all tracks must match. Not a sector error-correction check |
+| Mega Drive / Genesis, GBA (No-Intro) | Raw bytes, with header sanity checks | Requires a complete catalog match |
+| Game Boy, Game Boy Color, Master System, Game Gear (No-Intro) | Raw bytes | Requires an unambiguous complete match |
+| UNIF, CHD, compressed game containers | Recognized but unsupported | Originals are kept and shown as Unsupported |
+| Anything else | Unrecognized, Ambiguous, Malformed or Unsupported, with reasons | Originals are kept. Packages with no anchor or several CUE files need review |
 
-A complete match uses every supplied checksum and the strongest usable checksum
-for attribution. CRC-only matches retain their weaker-evidence qualification.
-Equivalent complete rows from different snapshots can converge; competing systems
-or different complete identities remain ambiguous. Partial matches remain proposals
-and cannot supply an accepted automatic title or system. Computed coordinates,
-interpretations, catalog identities and algorithm/settings versions are retained;
-reported candidates are cross-checked against their computed matches.
+A complete match uses every supplied checksum; CRC-only matches are marked as weaker
+evidence. Identical rows from different catalog snapshots agree; competing systems
+or titles stay ambiguous. Partial matches are proposals and never become an
+automatic title or system.
 
-## Upload bounds and active catalogs
+## Upload limits and active catalogs
 
-Each uploaded file and extracted DAT is limited to 64 MiB. A batch permits at most
-128 archive members/files and 512 MiB of expanded content. Reject traversal,
-non-regular links, encryption, nested archives and expansion beyond bounds while
-reading. DAT readers bound total input, XML events/text lines, nesting, game count
-and files per row before uncontrolled allocation. Upload preview stages immutable
-bytes; acquisition revalidates the selected detected interpretation.
+- Each uploaded file and extracted DAT is at most 64 MiB; a batch allows at most
+  128 files/archive members and 512 MiB expanded. Path traversal, links, encryption
+  and nested archives are rejected.
+- Uploading requires server administration plus write access to the Games
+  collection. The route only exists on management listeners.
+- An accepted upload survives browser closure and restart; Administration resumes
+  showing its progress. Repeating the same upload returns the same job; different
+  bytes under the same request conflict.
+- Malformed input fails the job and saves no catalog.
 
-Active slots are scoped by collection, canonical system, catalog family and byte
-variant. Replacement keeps unrelated systems active and retains earlier snapshots
-and evidence. Recognized historical configuration becomes a slot; unsupported
-historical configuration remains readable, inactive and explained. No archive
-cleanup or provenance compaction is performed.
+One catalog is active per collection, system, catalog family and byte variant.
+Replacing one keeps other systems active and keeps earlier snapshots and results.
+Unsupported older configuration stays readable but inactive, with an explanation.
 
-## Jobs, authority and presentation
+## Identification jobs
 
-The application owns admission and orchestration. Shared `junk-libs-dat` and
-`junk-libs-game-formats` own decoding, inspection and normalization; Games owns
-system/convention eligibility and catalog interpretation. Provider adapters own ZIP
-traversal and uploaded bytes. HTTP and React do not compose an identification
-pipeline.
+Activation starts a durable collection scan that walks items in pages of 100 and
+resumes after restart. Equivalent work requested by an import, a scan or a direct
+request is shared; cancelling one requester stops the work only when no other
+requester remains. Failures stay visible; retry failed items before retrying the scan.
 
-Activation atomically admits a durable collection scan. It traverses eligible
-items in 100-item keyset pages, records each admitted member and cursor, yields its
-processing slot while waiting, and recovers unfinished pages periodically. Direct,
-import and scan requests retain durable ownership of equivalent active work.
-Cancelling a requester stops a child only when its last owner is gone. Partial
-failures remain visible; retry failed children before retrying their parent scan.
+Workers read the actual bytes (cancellably), match, and re-check before publishing.
+Publication is abandoned if the source, item, collection, permissions or active
+catalogs changed meanwhile. Browsing, previews and polling never hash originals.
 
-Workers validate actual bytes with cancellation checks, then inspect/match and
-recheck before publication. Publication is fenced against source changes, item
-generation, current association, collection binding, permission loss, cancellation
-and superseded catalog sets. Later manual edits are resolved independently from
-frozen identification inputs. Browse, preview, admission and polling use recorded
-fingerprints and do not hash original payloads.
+## Metadata authority
 
-Title, edition details and system have Automatic / Manual override controls.
-Automatic shows the effective detected value and source. Manual values require
-editing and Save; Use detected value clears that field's override. Untouched import
-labels remain provisional; deliberate edits survive refresh. Historical explicit
-choices remain authoritative. New resolution records retain their inventory/domain
-baseline, and historical resolution policies retain their original field-origin
-interpretation. A reset is explicit, not inferred from text such as `disc`.
+Title, edition details and system each have **Automatic / Manual** controls.
+Automatic shows the detected value and its source. Manual requires editing and
+**Save**; **Use detected value** clears the override. Untouched import labels stay
+provisional, deliberate edits survive refresh, and resets are always explicit.
+Accepted values appear immediately in detail, browse and search.
 
-Accepted title, edition and system feed detail, browse and search immediately.
-Games use game/game match/edition terminology, music uses album/release terminology,
-and other modules use entry/match. Original inventory and preserved bytes remain
-independent of descriptive identification.
-
-## Delivery and qualification
-
-See [dated validation](validation/game-identification-2026-10-10.md) for executable
-fixtures, restart/ownership/publication tests and real browser acceptance. New
-normalization/format algorithms, arbitrary systems/conventions, game artwork
-providers and provenance compaction remain outside this delivery.
-
-The workspace manifest and lockfile record the exact published `junk-libs` revisions;
-no sibling checkout or local Cargo patches are required.
-Retro Junk's affected DAT constructors and facade were updated and checked against
-these shared changes. The shared revision is pushed to the `junk-libs` repository.
+The decoding and matching code lives in the shared `junk-libs-dat` and
+`junk-libs-game-formats` crates; the Games module decides eligibility and
+interpretation.

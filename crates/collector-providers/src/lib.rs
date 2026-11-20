@@ -38,7 +38,6 @@ pub const LOCAL_DAT_ACQUIRE_OPERATION: &str = "org.junk.providers.local-dat.acqu
 pub const DAT_OBSERVATION_SCHEMA_VERSION: u32 = 1;
 const MAX_DAT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_DAT_GAMES: usize = 1_000_000;
-const MAX_DAT_ROMS: usize = 4_096;
 const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Clone, Debug)]
@@ -400,11 +399,6 @@ fn normalized_dat(
                 safe_text(value, field)?;
             }
         }
-        if game.roms.is_empty() || game.roms.len() > MAX_DAT_ROMS {
-            return Err(Error::Invalid(
-                "DAT game file count is out of bounds".into(),
-            ));
-        }
         let mut files = Vec::with_capacity(game.roms.len());
         let mut excluded_files = Vec::new();
         for rom in game.roms {
@@ -429,10 +423,9 @@ fn normalized_dat(
                 excluded_files.push(file);
             }
         }
+        // Games without files in the configured byte domain cannot be matched.
         if files.is_empty() {
-            return Err(Error::Invalid(
-                "DAT game has no files in the configured byte domain".into(),
-            ));
+            continue;
         }
         entries.push(DatCatalogEntryObservation {
             system: None,
@@ -445,6 +438,11 @@ fn normalized_dat(
             files,
             excluded_files,
         });
+    }
+    if entries.is_empty() {
+        return Err(Error::Invalid(
+            "DAT has no games with files in the configured byte domain".into(),
+        ));
     }
     Ok((
         DatSnapshotObservation {

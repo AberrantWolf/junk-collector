@@ -1,78 +1,122 @@
 # Server operations
 
-Architectural rules: [ADR 0003](decisions/0003-portable-and-private-authority.md), [ADR 0004](decisions/0004-single-writer-publication-and-recovery.md), [ADR 0011](decisions/0011-input-bound-command-receipts.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
+[← README](../README.md) · [Docker installation](../deploy/container/README.md) · [Configuration](configuration.md)
 
-[← README](../README.md) · [Docker updates](../deploy/container/README.md#update) · [Configuration](configuration.md)
+For Docker, start with the [container guide](../deploy/container/README.md); the
+commands below work in either installation.
 
-## Operations and backups
+## Commands
 
-The examples below use the built binary; place `--config /absolute/path/collector.toml` before any command when needed.
+Commands read `collector.toml` by default; put `--config FILE` before the command to
+use another. "Stopped" means the server must not be running.
 
 | Command | Purpose |
 |---|---|
-| `setup [--username NAME]` | Initialize storage, TLS, the default account, and local browser configuration. Run while stopped. |
-| `serve` | Run listeners and background workers. Stop with Ctrl-C or SIGTERM on Unix. |
-| `enroll-archive` | Bind an existing archive/private-state pair while every writer is stopped; see [archive admission](configuration.md#remote-archive-admission). |
-| `inspect-collection-type --collection-id ID` | Inspect legacy collection binding eligibility without modifying it. Run while stopped. |
-| `assign-collection-type --collection-id ID --expected-revision N --module MODULE` | Explicit stopped-server legacy assignment after inspection; retains unknown data. |
-| `inspect-snapshot-duplicates` / `apply-snapshot-duplicates --plan PATH --backup PATH` | Review and apply the [backup-fenced duplicate conversion](snapshot-duplicate-conversion.md). |
-| `doctor` | Check configuration and optional encoders without locking the archive; can run while serving. Does not test provider reachability, passwords, grants, or browser certificate trust. |
-| `reindex` | Rebuild the catalog from archive records. Stop the server first. |
-| `backup --destination PATH` | Lock the stopped installation, settle journals/checkpoint SQLite and write a verified complete backup to a new directory. |
-| `export-archive --destination PATH` | Copy a stopped installation's portable archive to a new directory, excluding accounts/configuration/private work. |
-| `validate-archive-export --export PATH` | Validate the complete portable file inventory and every checksum without configuration or databases. |
-| `import-archive --export PATH --archive PATH` | Copy a validated export into an empty archive; use fresh setup and explicit Owner recovery afterward. |
-| `validate-backup --backup PATH` | Check the sealed inventory, complete file set and every digest without opening databases or current configuration. |
-| `restore --backup PATH --archive PATH --state PATH [--archive-only]` | Validate and copy into empty roots. `--config` names a new output configuration. Archive-only recovery requires a fresh identity and explicit grants. |
-| `unowned-collections [--limit 50] [--cursor ID]` | List recovered collections with no Owner grant. Run while stopped. |
-| `recover-collection-owner --collection-id ID --username NAME` | Explicitly assign the first Owner to an enabled account while stopped. Refuses replacing any existing Owner; repeating the same assignment leaves its revision unchanged. |
-| `pairing` | Export server identity, public certificate, and endpoint data as JSON. Transfer it through a trusted channel; it contains no login credential and does not establish browser trust. Run while stopped. |
-| `paths` | Show absolute configuration, account-storage, archive and public-certificate locations with existence status. Safe while serving; reads configuration only. |
-| `accounts [--limit 50] [--cursor USERNAME]` | List sign-in usernames and enabled/admin/default status. Run while stopped. |
-| `recover-account --username NAME` | Recover that sign-in username while stopped. Reads a new password, revokes browsers/apps/pending approvals/codes/passkeys, and preserves grants and enabled/admin/default status. |
+| `setup [--username NAME]` | Create storage, TLS identity, the first account and local browser config. Stopped. |
+| `serve` | Run listeners and workers. Stop with Ctrl-C or SIGTERM. |
+| `doctor` | Check configuration and encoders. Safe while serving. |
+| `paths` | Show configuration, state, archive and certificate locations. Safe while serving. |
+| `reindex` | Rebuild the catalog from the archive. Stopped. |
+| `backup --destination PATH` | Write a verified full backup to a new directory. Stopped. |
+| `validate-backup --backup PATH` | Check a backup's files and digests. |
+| `restore --backup PATH --archive PATH --state PATH [--archive-only]` | Restore into empty directories; `--config` names the new config file. |
+| `export-archive --destination PATH` | Export collections and originals without accounts or config. Stopped. |
+| `validate-archive-export --export PATH` | Check an export's files and digests. |
+| `import-archive --export PATH --archive PATH` | Import an export into an empty archive. See [archive export](archive-export.md). |
+| `accounts [--limit 50] [--cursor NAME] [--state PATH]` | List accounts. Stopped. |
+| `recover-account --username NAME [--state PATH]` | Reset a password (read from stdin). Stopped. |
+| `unowned-collections [--limit 50] [--cursor ID]` | List collections with no Owner. Stopped. |
+| `recover-collection-owner --collection-id ID --username NAME` | Give an ownerless collection its first Owner. Stopped. |
+| `pairing` | Print server identity, public certificate and endpoints as JSON for native clients. |
+| `enroll-archive` | Bind an existing archive to this state directory. Stopped. See [NFS archive](configuration.md#nfs-archive). |
+| `inspect-collection-type --collection-id ID` | Show whether a legacy collection can be given a type. |
+| `assign-collection-type --collection-id ID --expected-revision N --module MODULE` | Assign it. Unknown data is kept. Stopped. |
+| `inspect-snapshot-duplicates` / `apply-snapshot-duplicates --plan PATH --backup PATH` | [Deduplicate provider snapshots](snapshot-duplicate-conversion.md). Stopped. |
 
-These commands use `collector.toml` by default; select another configuration with `--config FILE` before the command. Account storage is the folder containing `private.sqlite` (normally `.collector/state`). Run `paths` to see its configured location. If configuration is damaged, `accounts --state PATH` and `recover-account --username NAME --state PATH` use that existing folder directly. They never create missing storage or open the archive. Recovery takes the username used for sign-in; no account ID is required.
+## Before relying on an installation
 
-The [account delivery ledger](account-usability-delivery.md) documents schema 19, preserved credentials and the native account-keyed conversion.
+- Choose permanent absolute paths for archive, state and config, and run the server as an
+  ordinary user. Keep state on local disk; the archive may be on a NAS.
+- Set the HTTPS origin and exposure before `setup`. `setup` never overwrites existing
+  accounts, TLS or configuration.
+- Import one package, download its originals and compare digests with the source; play
+  a track and seek; restart and sign in again.
+- Make a full backup and test restoring it into separate empty directories.
 
-### Full backup
+## Account recovery
 
-For a fresh installation without transferred credentials or grants, use
-[portable full archive export/import](archive-export.md). Full backup below
-also preserves operational identity, access and pending work.
+With the server stopped, `accounts` lists usernames and `recover-account --username NAME`
+reads a new password from stdin. Recovery signs out all browsers and apps and removes
+pending approvals, recovery codes and passkeys; roles and admin status are kept. If the
+config is damaged, pass `--state PATH` (the directory containing `private.sqlite`).
 
-Stop the server, then run:
+## Full backup
+
+A full backup contains the whole archive, the whole state directory (databases, TLS
+keys, accounts, sessions, pending uploads and jobs) and the configuration. It includes
+media. It does not include inboxes, external DAT files or encoder binaries; back those
+up separately. Never copy live SQLite files by hand.
+
+Stop the server, wait for it to exit, then:
 
 ```sh
 collector-server --config /absolute/path/collector.toml backup --destination /backup/new-collector-backup
 collector-server validate-backup --backup /backup/new-collector-backup
 ```
 
-The destination must not exist; its parent must exist outside both storage roots.
-Protect it like live private state. The completion marker is written last; failed
-or interrupted backups must be retried at a fresh destination. Restart the source
-only when the backup command has exited.
+- The destination must not exist; its parent must exist outside both storage roots.
+- The backup holds both server locks, settles pending publications and checkpoints
+  SQLite first. A running server or unresolved journal makes it refuse.
+- `inventory.v1.json` lists every file with its SHA-256; `complete.sha256` seals it and
+  is written last. A backup without it is incomplete: retry to a new destination and
+  never create the marker by hand.
+- Files are `0600` and directories `0700`. Protect the backup like live state: it
+  contains password hashes, sessions and the TLS private key.
 
-The state root includes pending uploads and work as well as SQLite databases and TLS keys. Do not copy live SQLite files as an ordinary filesystem backup. Keep inbox originals and external DAT source files in your backup plan too; those paths are outside the server roots.
+In the container, backups go to fresh directories under `/data/backups`; see the
+[container guide](../deploy/container/README.md).
 
-Restore with the original server stopped:
+## Restore
+
+Keep the original server stopped. A full restore brings back the same server identity,
+accounts, sessions, pending jobs and TLS key, so **retire the original before starting
+the restored copy and never run both**, even on different ports. Restore refuses a live
+original on the same host but cannot see one on another host.
+
+Choose two absent or empty directories and a new config path whose parents exist. To
+restore over the original paths, move the old directories and config aside first.
 
 ```sh
 collector-server --config /restore/collector.toml restore --backup /backup/new-collector-backup --archive /restore/archive --state /restore/state
+collector-server --config /restore/collector.toml doctor
+collector-server --config /restore/collector.toml serve
 ```
 
-The two roots must be absent or empty, their parents must exist, and the output
-configuration must not exist. Review reported external paths and run `doctor`
-before starting the restored server. Retire the original instance: full restore
-preserves identity, accounts, grants and TLS keys, so never run both copies.
-Interrupted roots are fenced from startup; retry with newly empty roots.
-For a deliberate independent clone, use `--archive-only`, then `setup` for a fresh
-identity. While still stopped, use `unowned-collections` to find its collection IDs,
-then `recover-collection-owner --collection-id ID --username NAME` for each
-collection you intend to claim. Sign in as that Owner to share access normally.
-Existing Owners and disabled accounts cannot be bypassed through this command.
-Missing original lockfiles are recreated when their writable directories survive;
-live original locks still refuse restore. See the complete
-[operator runbook](local-alpha-installation.md#stopped-server-backup).
+Restore validates the whole backup, copies and rechecks each file, and writes the new
+config last with only `archive` and `state` changed. It reports inbox, DAT and encoder
+paths that it did not relocate; fix them for the new host, along with listeners, TLS
+names, origins and endpoints. Pending work that refers to an old inbox needs that path
+restored or the import retried.
+
+An interrupted restore leaves `.restore-in-progress` in both directories and the server
+refuses to start on them. Retry into fresh empty directories; do not delete the marker.
+
+### Archive-only restore
+
+For an independent copy, or to recover collections without the private state:
+
+```sh
+collector-server --config /independent/collector.toml restore --backup /backup/new-collector-backup --archive /independent/archive --state /independent/state --archive-only
+collector-server --config /independent/collector.toml setup --username owner
+collector-server --config /independent/collector.toml unowned-collections
+collector-server --config /independent/collector.toml recover-collection-owner --collection-id COLLECTION_ID --username owner
+```
+
+This copies archive history only; `setup` creates a new server identity, account and
+certificate. Assign an Owner to each collection you want, then share access through the
+normal collection controls (an administrator does not get collection access
+automatically). `recover-collection-owner` refuses collections that already have an
+Owner, including a disabled one. Re-pair native clients afterwards.
+
+To move collections to a fresh installation without accounts, use
+[archive export/import](archive-export.md) instead.

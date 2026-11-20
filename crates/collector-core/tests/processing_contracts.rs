@@ -4,7 +4,7 @@ use collector_core::{
     ByteLength, CollectionId, Digest, ImportId, MetadataAuthority, ModuleData, ModuleId,
     ObservationId, OperationSupport, PackageFileFingerprint, PackageFileId, PackageFileName,
     PackageInventory, PackageInventoryFile, PackageScope, ProcessingObservation, RawJson,
-    SourceFingerprint,
+    SourceFingerprint, archive_relative_path,
 };
 
 fn id<T: std::str::FromStr>(value: &str) -> T
@@ -104,8 +104,11 @@ fn package_inventory_rejects_unsafe_ambiguous_or_duplicate_entries() {
     };
     assert!(PackageFileName::new("../master.bin").is_err());
     assert!(PackageFileName::new("folder/master.bin").is_ok());
-    assert!(PackageFileName::new("C:\\master.bin").is_err());
-    assert!(PackageFileName::new("bad\0name").is_err());
+    assert!(PackageFileName::new("/master.bin").is_err());
+    assert!(PackageFileName::new("folder//master.bin").is_err());
+    // Names valid on any one system are accepted; see archive_relative_path.
+    assert!(PackageFileName::new("Disc 1: Intro.flac").is_ok());
+    assert!(PackageFileName::new("Rock\\Pop.flac").is_ok());
     assert!(PackageInventory::new(collection_id, scope, vec![]).is_err());
 
     let duplicate_id = PackageFileId::new();
@@ -165,6 +168,46 @@ fn package_inventory_resolves_bounded_relative_references() {
             .is_err()
     );
     assert!(inventory.resolve_relative(cue_id, "missing.bin").is_err());
+    // CUE sheets written on Windows use backslash separators.
+    assert_eq!(
+        inventory
+            .resolve_relative(cue_id, "..\\audio.bin")
+            .unwrap()
+            .id,
+        audio_id
+    );
+}
+
+#[test]
+fn archive_paths_replace_characters_other_systems_cannot_store() {
+    assert_eq!(
+        archive_relative_path("disc/Track 01.flac"),
+        "disc/Track 01.flac"
+    );
+    assert_eq!(
+        archive_relative_path("Disc 1: Intro\\Live.flac"),
+        "Disc 1\u{FF1A} Intro\u{FF3C}Live.flac"
+    );
+    assert_eq!(archive_relative_path("tab\there"), "tab\u{2409}here");
+    assert!(
+        !archive_relative_path("c1\u{85}name")
+            .chars()
+            .any(char::is_control)
+    );
+    // Names that share an archive path can't share a package.
+    let file = |name: &str| PackageInventoryFile {
+        id: PackageFileId::new(),
+        display_name: PackageFileName::new(name).unwrap(),
+        bytes: ByteLength(1),
+    };
+    assert!(
+        PackageInventory::new(
+            CollectionId::new(),
+            PackageScope::Import(ImportId::new()),
+            vec![file("a:b.bin"), file("A\u{FF1A}B.bin")],
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -313,11 +356,11 @@ fn conversion_recipe_rejects_unrelated_digest() {
 }
 
 #[test]
-fn conversion_recipes_accept_only_the_settled_flac_and_opus_profiles() {
+fn conversion_recipes_accept_only_preset_flac_and_opus_profiles() {
     use collector_core::*;
 
     let source = SourceFingerprint::calculate(
-        PackageScope::Representation(RepresentationId::new()),
+        PackageScope::Import(ImportId::new()),
         vec![PackageFileFingerprint {
             id: PackageFileId::new(),
             bytes: ByteLength(588 * 4),
@@ -347,7 +390,7 @@ fn conversion_recipes_accept_only_the_settled_flac_and_opus_profiles() {
         digest: Digest::sha256(b"unsealed"),
     };
     base.clone().seal().unwrap();
-    for bitrate_kbps in [96, 192] {
+    for bitrate_kbps in [64, 96, 160, 192, 256] {
         let mut recipe = base.clone();
         recipe.settings = ConversionSettings::Opus {
             bitrate_kbps,
@@ -355,7 +398,7 @@ fn conversion_recipes_accept_only_the_settled_flac_and_opus_profiles() {
         };
         recipe.seal().unwrap();
     }
-    for bitrate_kbps in [64, 256] {
+    for bitrate_kbps in [100, 512] {
         let mut recipe = base.clone();
         recipe.settings = ConversionSettings::Opus {
             bitrate_kbps,

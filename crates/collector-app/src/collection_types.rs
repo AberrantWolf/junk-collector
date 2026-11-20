@@ -144,7 +144,7 @@ impl CollectionTypeAdministrationService {
                 .enumerate()
             {
                 unresolved.push(format!(
-                    "item {} preserved historical metadata field override {} remains provenance only: {}",
+                    "item {} has a preserved metadata override {}: {}",
                     authority.item_id,
                     index + 1,
                     preserved.get()
@@ -152,10 +152,7 @@ impl CollectionTypeAdministrationService {
             }
         }
         if counts.len() > 1 {
-            unresolved.push(
-                "current items have mixed domain owners; splitting or moving the graph is a separate task"
-                    .into(),
-            );
+            unresolved.push("items belong to more than one collection type".into());
         }
         for name in counts.keys() {
             let id = ModuleId(name.clone());
@@ -308,8 +305,7 @@ impl CollectionService {
             CollectionBinding::Assigned { module } => module.clone(),
             CollectionBinding::LegacyUnassigned => {
                 return Err(Error::Unavailable(
-                    "collection content is read-only until its legacy type is explicitly assigned"
-                        .into(),
+                    "collection is read-only until its type is assigned".into(),
                 ));
             }
         };
@@ -411,10 +407,18 @@ impl CollectionService {
         let (status, message, administrator_commands) = match &collection.binding {
             CollectionBinding::LegacyUnassigned => (
                 ContentAvailabilityStatus::LegacyUnassigned,
-                Some("This collection is read-only. A server administrator must stop the server and assign its collection type.".into()),
+                Some(
+                    "This collection is read-only until an administrator assigns its type.".into(),
+                ),
                 vec![
-                    format!("cargo run -p collector-server -- inspect-collection-type --collection-id {}", collection.id),
-                    format!("cargo run -p collector-server -- assign-collection-type --collection-id {} --expected-revision {} --module <MODULE_ID>", collection.id, collection.revision.0),
+                    format!(
+                        "collector-server inspect-collection-type --collection-id {}",
+                        collection.id
+                    ),
+                    format!(
+                        "collector-server assign-collection-type --collection-id {} --expected-revision {} --module <MODULE_ID>",
+                        collection.id, collection.revision.0
+                    ),
                 ],
             ),
             CollectionBinding::Assigned { module } => {
@@ -427,7 +431,7 @@ impl CollectionService {
                     None => (
                         ContentAvailabilityStatus::OwnerUnavailable,
                         Some(format!(
-                            "Collection type {} is not installed. Saved content is readable, but cannot be edited.",
+                            "Collection type {} is not installed, so this collection is read-only.",
                             module.0
                         )),
                         vec![],
@@ -437,11 +441,14 @@ impl CollectionService {
                             domain.module != descriptor.id
                                 || domain.schema_version != descriptor.schema_version
                                 || self.modules.inspect(domain).is_err()
-                        }) => (
+                        }) =>
+                    {
+                        (
                             ContentAvailabilityStatus::ItemSchemaUnsupported,
-                            Some("This entry uses an unsupported data format. You can browse its saved content, but cannot edit it.".into()),
+                            Some("This entry uses an unsupported format and is read-only.".into()),
                             vec![],
-                        ),
+                        )
+                    }
                     Some(_) => (ContentAvailabilityStatus::Available, None, vec![]),
                 }
             }

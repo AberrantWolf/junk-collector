@@ -32,12 +32,12 @@ export default function DigitalAlbumMatching({userId,item,metadataRevision,disab
 
  async function jobAction(job:string,method:'POST'|'DELETE'){const controller=lifetime.current;setError('');setBusy(true);try{await api(`/jobs/${job}${method==='POST'?'/retry':''}`,{method,signal:controller.signal});if(owns(controller))setReload(v=>v+1);}catch(e){if(owns(controller))setError(requestErrorMessage(e));}finally{if(owns(controller))setBusy(false);}}
  if(!item.captures.some(c=>c.representations.some(r=>r.format==='original-file-audio-package')))return null;
- return <section aria-label="Digital album matching" className="metadata-source metadata-search digital-album-matching"><h4>Find matching digital albums</h4><p className="muted">Search MusicBrainz releases using AcoustID audio fingerprints.</p>
- {status&&!status.available&&<p className="notice">Configure the server’s AcoustID application key and MusicBrainz contact to enable matching.</p>}
+ return <section aria-label="Digital album matching" className="metadata-source metadata-search digital-album-matching"><h4>Find matching albums</h4>
+ {status&&!status.available&&<p className="notice">Album matching needs an AcoustID key and MusicBrainz contact in the server settings.</p>}
  <button className="primary" disabled={disabled||busy||!!pending||!status?.available} onClick={()=>void start()}>Find matching albums</button>
  {pending&&<div role="status"><p>{matchingProgress(pending)}</p><button disabled={busy||pending.job.state==='cancel_requested'} onClick={()=>void jobAction(pending.job.id,'DELETE')}>Cancel album matching</button></div>}
  {latest?.job.error&&!latest.stale&&<p role="alert">{latest.job.error}</p>}{latest?.job.retryable&&!latest.stale&&!pending&&<button disabled={busy||disabled} onClick={()=>void jobAction(latest.job.id,'POST')}>Retry album matching</button>}{loadError&&<p role="alert">{loadError}</p>}{error&&<p role="alert">{error}</p>}
- {completed?.result&&<>{!pending&&<button disabled={disabled||busy} onClick={()=>void start(false,true)}>Refresh lookups</button>}<div className="digital-match-guidance"><p>Review track mappings before choosing a release.</p><details className="digital-match-info"><summary aria-label="About audio recognition">ⓘ</summary><p>Recognition can be incomplete. These are identity suggestions, not catalog verification. Choosing a release applies the album and every mapped track title; it does not verify the audio.</p></details></div>{inventoryChanged&&<p className="notice">Album inventory or metadata changed. Find matching albums again before applying a release.</p>}{completed.result.truncated&&<p className="notice">Search limited.{!pending&&completed.result.can_expand&&<button disabled={disabled||busy} onClick={()=>void start(true)}>Search more releases</button>}</p>}{completed.result.edition_error&&<p role="alert">Other editions could not be loaded: {completed.result.edition_error}</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No album candidates are available to review. Try a manual MusicBrainz search below.</p>}
+ {completed?.result&&<>{!pending&&<button disabled={disabled||busy} onClick={()=>void start(false,true)}>Refresh lookups</button>}{inventoryChanged&&<p className="notice">This album changed. Find matches again before using one.</p>}{completed.result.truncated&&<p className="notice">Search limited.{!pending&&completed.result.can_expand&&<button disabled={disabled||busy} onClick={()=>void start(true)}>Search more releases</button>}</p>}{completed.result.edition_error&&<p role="alert">Other editions could not be loaded: {completed.result.edition_error}</p>}{completed.result.artwork_error&&<p role="alert">Artwork needs attention: {completed.result.artwork_error}</p>}{!completed.result.matches.length&&<p>No matches found. Try searching MusicBrainz below.</p>}
  {completed.result.matches.map(candidate=><AlbumCandidate key={`${completed.job.id}:${candidate.release.id}`} candidate={candidate} result={completed.result!} item={item} jobId={completed.job.id} submissionFiles={completed.submission_files||[]} stale={inventoryChanged} artworkAvailable={artworkAvailable} disabled={disabled||busy||!['completed','queued','running'].includes(completed.job.state)} onChoose={assignments=>callbacks.current.onChoose(completed.job.id,candidate.release.id,assignments)} onArtwork={()=>callbacks.current.onArtwork(candidate.release.id)}/> )}</>}
 
  </section>;
@@ -136,12 +136,10 @@ function AlbumCandidate({candidate,result,item,jobId,submissionFiles,stale,disab
  return <article className="candidate"><div className="digital-match-cover">{cover?<img loading="lazy" src={`/api/v1/items/${item.id}/metadata/artwork/${cover.snapshot_id}/${encodeURIComponent(cover.image_id)}/thumbnail`} alt={`Cover of ${candidate.release.title}`}/>:<span role="img" aria-label="No cover preview">♫</span>}</div><div>
  <strong>{candidate.release.title}</strong><p className="digital-match-artist">{candidate.release.artist}</p>
  <div className="digital-match-edition">{candidate.release.disambiguation&&<span className="digital-match-edition-badge">{candidate.release.disambiguation}</span>}{candidate.release.date&&<span>{candidate.release.date}</span>}{candidate.release.country&&<ReleaseRegion code={candidate.release.country}/>}</div>
- <p>{candidate.mappings.length} of {candidate.local_tracks} files associated by audio recognition · {candidate.release_tracks} release tracks{candidate.ambiguous_mapping?' · ambiguous track assignment':''}{candidate.duration_conflicts?' · conflicting durations':''}</p>
- {candidate.mappings.length<candidate.local_tracks&&<p className="notice">Partial album evidence: the remaining files have no recording association to this release.</p>}
- <details>
-  <summary>Review proposed track mapping</summary>
-  <p>AcoustID scores describe recording associations, not the probability that the whole album is correct.</p>
-  <div className="digital-mapping-table" role="region" aria-label="Proposed track mapping" tabIndex={0}>
+ <p>{candidate.mappings.length} of {candidate.local_tracks} files recognized · {candidate.release_tracks} tracks on release{candidate.ambiguous_mapping?' · unclear track order':''}{candidate.duration_conflicts?' · conflicting durations':''}</p>
+  <details>
+  <summary>Show track matches</summary>
+  <div className="digital-mapping-table" role="region" aria-label="Track matches" tabIndex={0}>
    <table>
     <thead><tr><th scope="col">Local file</th><th scope="col">Release track</th><th scope="col">Time gap</th><th scope="col">Match</th></tr></thead>
     <tbody>{files.map(file=>{
@@ -151,22 +149,21 @@ function AlbumCandidate({candidate,result,item,jobId,submissionFiles,stale,disab
      const gap=slot?.duration_ms==null?null:Math.abs(measuredDuration(file)-slot.duration_ms);
      return <tr key={key}>
       <td data-label="Local file">{file.name}</td>
-      <td data-label="Release track">{slot?<><span className="mapping-position">Disc {slot.medium} · track {slot.position}</span>{slot.title}</>:'No proposed assignment'}</td>
+      <td data-label="Release track">{slot?<><span className="mapping-position">Disc {slot.medium} · track {slot.position}</span>{slot.title}</>:'No match'}</td>
       <td data-label="Duration difference">{gap==null?'Unknown':`${(gap/1000).toFixed(1)} s`}</td>
       <td data-label="Match">{mapping?mapping.score.toFixed(2):slot?<span className="digital-review-tentative">Tentative</span>:'—'}</td>
      </tr>;
     })}</tbody>
    </table>
   </div>
-  {unassigned.length>0&&<div><h5>Release tracks without a proposed assignment</h5><ul>{unassigned.map(slot=><li key={slot.value}>Disc {slot.medium} · track {slot.position}: {slot.title}</li>)}</ul></div>}
+  {unassigned.length>0&&<div><h5>Unmatched release tracks</h5><ul>{unassigned.map(slot=><li key={slot.value}>Disc {slot.medium} · track {slot.position}: {slot.title}</li>)}</ul></div>}
  </details>
  {!stale&&canMap&&<button disabled={disabled||submitting} onClick={()=>{setEditing(v=>!v);setConfirmed(false);}}>{editing?'Close mapping editor':'Edit track mapping'}</button>}
- {!automatic&&!editing&&!stale&&<p>{canMap?'Complete and confirm the track mapping to use this album.':`This release cannot be applied: ${!candidate.complete_tracklist?'MusicBrainz’s release track list is incomplete. ':''}${candidate.release_tracks!==files.length?`It declares ${candidate.release_tracks} release tracks for ${files.length} local files. `:''}${slots.length!==files.length?`${slots.length} release track entries were received. `:''}Review the track counts below or choose another edition.`}</p>}
+ {!automatic&&!editing&&!stale&&<p>{canMap?'Edit and confirm the track mapping to use this album.':`Can’t use this release: ${!candidate.complete_tracklist?'its MusicBrainz track list is incomplete. ':''}${candidate.release_tracks!==files.length?`It has ${candidate.release_tracks} tracks for ${files.length} files. `:''}${slots.length!==files.length?`Only ${slots.length} track details were received. `:''}Try another edition.`}</p>}
  {!canMap&&<ul className="digital-track-counts">{candidate.release.media.map((medium,index)=><li key={index}>Disc {medium.position??'?'}: {medium.track_count} declared tracks · {medium.tracks.length} received</li>)}</ul>}
  {editing&&<fieldset disabled={disabled||stale||submitting} className="digital-mapping-editor">
   <legend>Map every file to a release track</legend>
-  <p>Choose each track once. Check the titles and durations before confirming.</p>
-  {suggestedCount>0&&<p className="notice">{suggestedCount} tentative {suggestedCount===1?'assignment uses':'assignments use'} filenames and track details. Check each suggestion.</p>}
+    {suggestedCount>0&&<p className="notice">{suggestedCount} {suggestedCount===1?'match is a guess':'matches are guesses'} from file names and durations. Check them.</p>}
   <button type="button" onClick={assignInFileOrder}>Assign in file order</button>
   <div className="digital-review-heading" aria-hidden="true"><b>Local file</b><b>Release track</b></div>
   {files.map(file=>{
@@ -193,7 +190,7 @@ function AlbumCandidate({candidate,result,item,jobId,submissionFiles,stale,disab
      </select>
      {slot&&<div className="digital-review-evidence">
       {audioMatches?<span>{audio.score>=.95?'Strong AcoustID match':'AcoustID match'} ({audio.score.toFixed(3)})</span>
-       :tentative?<span className="digital-review-tentative">Tentative · {value===suggestions[key]?'file and track details':'file order'}</span>
+       :tentative?<span className="digital-review-tentative">Tentative · {value===suggestions[key]?'file name and duration':'file order'}</span>
        :<span>Manual assignment</span>}
       {slot.duration_ms!=null&&<small>{(Math.abs(measuredDuration(file)-slot.duration_ms)/1000).toFixed(1)} s duration difference</small>}
      </div>}
@@ -201,11 +198,11 @@ function AlbumCandidate({candidate,result,item,jobId,submissionFiles,stale,disab
     </div>
    </div>;
   })}
-  {!complete&&<p role="status">Assign every file to a different release track.</p>}
+  {!complete&&<p role="status">Each file needs a different track.</p>}
   <label className="inline-check"><input type="checkbox" checked={confirmed} disabled={!complete} onChange={event=>{
    if(event.target.checked)setDraft(Object.fromEntries(files.map(file=>[fileKey(file),selected(fileKey(file))])));
    setConfirmed(event.target.checked);
-  }}/>I reviewed all {files.length} file assignments and confirm this mapping.</label>
+  }}/>I checked all {files.length} tracks</label>
   {submissionCount>0&&complete&&<AcoustIdSubmission
    itemId={item.id} jobId={jobId} releaseId={candidate.release.id} assignments={assignments()}
    count={submissionCount} confirmed={confirmed} onBusy={setSubmitting}/>}
@@ -246,7 +243,7 @@ function AcoustIdSubmission({itemId,jobId,releaseId,assignments,count,confirmed,
    if(!signal.aborted){setOutcome(response);setUserKey('');}
   }catch(e){
    if(!signal.aborted)setError(e instanceof DOMException&&e.name==='TimeoutError'
-    ?'The request timed out. Submit the same mapping again to check its receipt.'
+    ?'The request timed out. Submit again to check whether it went through.'
     :requestErrorMessage(e));
   }finally{
    onBusy(false);
@@ -254,14 +251,13 @@ function AcoustIdSubmission({itemId,jobId,releaseId,assignments,count,confirmed,
  }
  return <details className="acoustid-contribution">
   <summary>Contribute missing fingerprints to AcoustID</summary>
-  <p>Send {count} {count===1?'fingerprint':'fingerprints'}, file durations, and reviewed MusicBrainz recording IDs to AcoustID.</p>
-  {!outcome&&<>
+    {!outcome&&<>
    <label>AcoustID user API key<input type="password" autoComplete="off" maxLength={128} value={userKey} onChange={event=>setUserKey(event.target.value)}/></label>
    <p><a href="https://acoustid.org/api-key" target="_blank" rel="noreferrer">Get your AcoustID user key</a></p>
    <button type="button" disabled={!confirmed||!userKey.trim()} onClick={()=>void submit()}>Submit {count} {count===1?'fingerprint':'fingerprints'} to AcoustID</button>
   </>}
-  {outcome?.status==='accepted'&&<p role="status">AcoustID accepted the contribution for processing. Submission IDs {outcome.submission_ids.join(', ')}. Use Refresh lookups after AcoustID processes it.</p>}
-  {outcome?.status==='unknown'&&<p role="alert">AcoustID did not confirm receipt. Check AcoustID before attempting another contribution.</p>}
+  {outcome?.status==='accepted'&&<p role="status">Submitted to AcoustID (IDs {outcome.submission_ids.join(', ')}). Refresh lookups later to see it.</p>}
+  {outcome?.status==='unknown'&&<p role="alert">AcoustID didn’t confirm the submission. Check AcoustID before submitting again.</p>}
   {error&&<p role="alert">{error}</p>}
  </details>;
 }

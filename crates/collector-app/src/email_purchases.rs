@@ -623,7 +623,7 @@ impl CollectionService {
                     item
                 },
                 Err(Error::NotFound) if command.expected_revision==Revision(0)=>{
-                    if eligibility.owner.0!="org.junk.games" { return Err(Error::Invalid("New email purchase entries currently require a Games collection; link other purchases to an existing entry".into())); }
+                    if eligibility.owner.0!="org.junk.games" { return Err(Error::Invalid("New purchase entries need a Games collection; link others to an existing entry".into())); }
                     Item {purchase_orders:vec![],lifecycle:ItemLifecycle::default(),id:command.item_id,collection_id:suggestion.collection_id,revision:Revision(0),title:command.title.trim().to_owned(),subtitle:String::new(),identity_link:ItemIdentityLink::None,domain:ModuleData { module: eligibility.owner.clone(), schema_version: eligibility.schema_version, payload: RawJson::from_json("{}")? },identity:IdentityState::Unidentified,translations:vec![],identifiers:vec![],specimens:vec![],wishlist:false,captures:vec![],assets:vec![],metadata:MetadataState::default(),deleted:false,updated_at:Utc::now()}
                 },
                 Err(e)=>return Err(e),
@@ -825,7 +825,7 @@ fn validate_mail_folders(folders: &[String]) -> Result<()> {
             f.is_empty() || f.len() > 256 || f.trim().is_empty() || f.chars().any(char::is_control)
         })
     {
-        return Err(Error::Invalid("Enter 1–16 exact IMAP folder names, each at most 256 bytes and without control characters.".into()));
+        return Err(Error::Invalid("Enter 1–16 folder names.".into()));
     }
     Ok(())
 }

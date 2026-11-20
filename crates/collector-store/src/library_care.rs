@@ -7,7 +7,7 @@ use collector_app::{
 
 pub(crate) fn install(db: &Connection) -> Result<()> {
     crate::digital_pipeline::install(db)?;
-    // The old FLAC-only projection is replaced by the generation-fenced library cache.
+    // Superseded by the generation-fenced library cache.
     db.execute_batch("DROP TABLE IF EXISTS preparation_readiness")
         .map_err(storage)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,missing_name INTEGER NOT NULL,missing_artwork INTEGER NOT NULL,album_ambiguity INTEGER NOT NULL,incomplete_provider_information INTEGER NOT NULL,no_match INTEGER NOT NULL,manual_conflict INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
@@ -263,10 +263,9 @@ impl LibraryCarePort for Store {
     }
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>> {
         let limit = query.limit.unwrap_or(50);
-        if !(1..=200).contains(&limit) || query.search.len() > 256 {
+        if !(1..=200).contains(&limit) {
             return Err(Error::Invalid(
-                "metadata query must use a 1–200 entry page and at most 256 search characters"
-                    .into(),
+                "metadata query page must be 1–200 entries".into(),
             ));
         }
         let language = self
@@ -371,10 +370,9 @@ impl LibraryCarePort for Store {
         full_language: &str,
     ) -> Result<Page<collector_app::MetadataCareRow>> {
         let limit = query.limit.unwrap_or(50);
-        if !(1..=200).contains(&limit) || query.search.len() > 256 {
+        if !(1..=200).contains(&limit) {
             return Err(Error::Invalid(
-                "metadata query must use a 1–200 entry page and at most 256 search characters"
-                    .into(),
+                "metadata query page must be 1–200 entries".into(),
             ));
         }
         let language = self

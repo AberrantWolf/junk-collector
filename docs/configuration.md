@@ -1,103 +1,84 @@
 # Configuration and access
 
-Architectural rules: [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0010](decisions/0010-trust-before-credentials-and-native-enrollment.md), [ADR 0012](decisions/0012-durable-workflow-ownership-and-fencing.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
-
 [← README](../README.md) · [First setup](getting-started.md) · [Operations](server-operations.md)
 
-## Configuration reference
+Edit `collector.toml` and restart the server to apply changes. Unknown keys are
+rejected. Relative paths are relative to the process's working directory, so use
+absolute paths for a permanent installation.
 
-Optional: [enable backup-age reminders](local-alpha-installation.md#optional-backup-age-reminder).
-
-Edit `collector.toml` and restart the server to apply changes. Unknown configuration keys are rejected. Relative filesystem paths are relative to the process's working directory, so absolute paths are recommended for a permanent installation or service.
-
-### Storage and accounts
+## Storage and accounts
 
 | Option | Default | Effect |
 |---|---|---|
-| `archive` | `".collector/archive"` | Original files, collection manifests, revisions, artwork, derivatives, and evidence. |
-| `state` | `".collector/state"` | Local SQLite databases, accounts, credentials, TLS keys, jobs, and upload/processing scratch. |
-| `multi_user` | `true` | Users enter their own username at sign-in. Set to `false` to use the default account on the sign-in form and disable new account creation. Both modes require authentication. |
+| `archive` | `".collector/archive"` | Originals, collection manifests, revisions, artwork, prepared audio and evidence. |
+| `state` | `".collector/state"` | SQLite databases, accounts, credentials, TLS keys, jobs and upload/processing scratch. |
+| `multi_user` | `true` | Users type their username at sign-in. `false` uses the default account and disables new account creation. Both modes require a password. |
 
-Keep `state` on local disk, even if `archive` is on a NAS. Allow space for retained originals, prepared audio, uploads, and temporary conversion work. Keep the complete state directory private to the server account; it contains credentials and TLS keys.
+Keep `state` on local disk even if `archive` is on a NAS, and keep it private to the
+server account: it holds credentials and TLS keys. Leave room for originals, prepared
+audio, uploads and conversion scratch.
 
-### Listeners and browser access
-
-| Option | Default | Effect |
-|---|---|---|
-| `public_bind` | `"127.0.0.1:9841"` | HTTP upstream for a public HTTPS proxy or tunnel. Must bind loopback. |
-| `private_bind` | `"127.0.0.1:9842"` | HTTP management listener for local use or a private HTTPS proxy. Must bind loopback. |
-| `lan_bind` | `"0.0.0.0:9843"` | Direct TLS listener, using the public route composition. The default listens on all IPv4 interfaces; choose a specific interface to narrow it. |
-| `private_tls_bind` | Unset | Optional direct TLS management listener. Must name an explicit interface address, such as `"192.0.2.20:9844"`; wildcard addresses are rejected. |
-| `tls_names` | `["localhost", "junk-collector.local", "127.0.0.1"]` | DNS names/IP addresses included in the server-managed certificate when setup creates it. Choose these before initialization. Changing this list does not replace an existing certificate. |
-| `allowed_origins` | HTTPS origins for `localhost:9843` and `junk-collector.local:9843`; setup adds the local management origin | Exact browser origins allowed for session operations. Include the scheme, hostname, and non-default port. This does not establish certificate trust or grant access. |
-| `authentication_origin` | Unset | Stable HTTPS origin for WebAuthn passkey registration/login. Also include it in `allowed_origins`. |
-| `endpoints` | `["https://junk-collector.local:9843"]` | Addresses included in exported pairing material. Does not bind listeners, create DNS records, or advertise an mDNS service. |
-
-A `.local` name must resolve on your network independently of Junk Collector. Merely listing it in `tls_names` or `endpoints` does not make it reachable.
-
-### Public exposure
-
-Audio uses the same authenticated connection as the website by default, including
-through proxies and tunnels. Collector does not detect Cloudflare or enforce
-provider restrictions. The server operator chooses the route policy; login,
-collection permissions and exposure checks always apply.
+## Listeners and browser access
 
 | Option | Default | Effect |
 |---|---|---|
-| `remote_media_allowed` | `true` | Uses the normal signed-in connection for audio. Set `false` to require a private or separate HTTPS audio route on public listeners. |
-| `local_playback_enabled` | `true` | Starts the optional private media listeners. They are unused by normal-mode playback. Set `false` for a setup without those listeners. |
+| `public_bind` | `"127.0.0.1:9841"` | HTTP upstream for a public HTTPS proxy or tunnel. Must be loopback. |
+| `private_bind` | `"127.0.0.1:9842"` | HTTP management listener for local use or a private HTTPS proxy. Must be loopback. |
+| `lan_bind` | `"0.0.0.0:9843"` | Direct TLS listener with public-route exposure rules. |
+| `private_tls_bind` | unset | Optional direct TLS management listener on an explicit interface address (e.g. `"192.0.2.20:9844"`); wildcards are rejected. |
+| `local_playback_bind` | `"0.0.0.0:9845"` | Optional private media listener. |
+| `tls_names` | `["localhost", "junk-collector.local", "127.0.0.1"]` | Names/IPs put in the certificate when `setup` creates it. Changing them later does not replace the certificate. |
+| `allowed_origins` | `https://localhost:9843`, `https://junk-collector.local:9843`, plus the local management origin added by setup | Exact browser origins (scheme, host, non-default port) allowed to use sessions. |
+| `authentication_origin` | unset | Stable HTTPS origin for passkeys. Also list it in `allowed_origins`. |
+| `endpoints` | `["https://junk-collector.local:9843"]` | Addresses included in pairing data. Does not bind listeners or create DNS/mDNS records. |
 
-In **Administration → Server settings → Audio connection**, enable **Require a
-separate audio connection** to disable normal public-origin audio. Saved choices
-persist across restarts and override `remote_media_allowed` in the config. New
-requests observe the setting; reconnect other clients to clear cached routes.
-An active transfer is not forcibly disconnected. Direct LAN listeners retain
-ordinary media access.
+A `.local` name must resolve on your network by other means; listing it here does not
+make it reachable.
 
-For optional separate HTTPS streaming, configure `[remote_media]` with `base_url`
-(a fixed HTTPS URL ending in `/`) and `socket` (an absolute Unix socket path in a
-dedicated shared directory). Run `collector-media` with that socket and read-only
-archive access. The endpoint may stay configured while normal audio is enabled;
-it is advertised only when separate audio is required. If no separate/private
-route is reachable in that mode, playback fails visibly without public fallback.
-See the [operator instructions](../deploy/container/media.md).
-No setting opens the router, creates DNS or supplies browser certificate trust.
+## Exposure
 
-These settings apply to both the public HTTP upstream and the direct LAN TLS listener. Private listeners include all management surfaces; users still need the appropriate permissions.
+The public listener and the direct LAN listener serve client pages (browsing,
+playback, downloads) by default. Management can be exposed there explicitly:
 
 | Option | Default | Effect |
 |---|---|---|
-| `[exposure].public_curation` | `false` | Exposes collection editing, imports, metadata review, and their backing APIs on public routes. |
-| `[exposure].public_administration` | `false` | Exposes server/account/access administration on public routes. Also enables public curation. |
+| `[exposure].public_curation` | `false` | Collection editing, imports, metadata review and their APIs. |
+| `[exposure].public_administration` | `false` | Server, account and access administration. Also enables public curation. |
 
-Login, authorized browsing, prepared media, and downloads are available on client routes without enabling either management setting. Exposure never grants a collection role. Disabled management pages, JavaScript bundles, and APIs are absent from the public router; forwarded headers cannot make a public request private.
+Private listeners always include every management page. Exposure never grants a
+collection role. Disabled pages, bundles and APIs are absent from the public router,
+and forwarded headers cannot make a public request private.
 
-### Example: local installation with music support
+### Audio routes
 
-Change the storage and executable paths for your machine. Omit the optional provider section if you do not want online metadata acquisition.
+| Option | Default | Effect |
+|---|---|---|
+| `remote_media_allowed` | `true` | Audio uses the normal signed-in connection, including through proxies. `false` requires a private or separate HTTPS audio route on public listeners. |
+| `local_playback_enabled` | `true` | Starts the optional private media listeners. `false` disables them. |
+
+**Administration → Server settings → Audio connection → Require a separate audio
+connection** overrides `remote_media_allowed` and persists across restarts. New
+requests see the change; active transfers continue.
+
+For separate HTTPS streaming, set `[remote_media]` with `base_url` (an HTTPS URL ending
+in `/`) and `socket` (absolute Unix socket path in a dedicated shared directory), and
+run `collector-media` on that socket with read-only archive access. It is only
+advertised when separate audio is required; if no separate route is reachable then,
+playback fails rather than falling back to the public origin. See
+[media deployment](../deploy/container/media.md).
+
+## Example
 
 ```toml
 archive = "/srv/junk-collector/archive"
 state = "/var/lib/junk-collector"
-multi_user = true
 
-public_bind = "127.0.0.1:9841"
-private_bind = "127.0.0.1:9842"
-lan_bind = "0.0.0.0:9843"
-tls_names = ["localhost", "junk-collector.local", "127.0.0.1"]
 allowed_origins = ["http://localhost:9842"]
-endpoints = ["https://junk-collector.local:9843"]
-
-[exposure]
-public_curation = false
-public_administration = false
 
 [encoders]
 flac = "/usr/bin/flac"
 # opus = "/usr/bin/opusenc"
-# ffmpeg = "/usr/bin/ffmpeg" # live playback; defaults to ffmpeg on PATH
+# ffmpeg = "/usr/bin/ffmpeg"
 
 [providers]
 musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
@@ -106,131 +87,79 @@ musicbrainz_user_agent = "JunkCollector/0.1.0 (you@example.com)"
 rips = "/srv/incoming"
 ```
 
+## Live playback format
 
-### Live playback format
+Choose **Playback format** in the player or **Account & security → Playback**. It is
+saved per account per browser and applies from the next track.
 
-Use **Playback format** in the player or **Account & security → Playback**.
-The setting is saved for this account in this browser and takes effect on the
-next Play or track change. The selected source track is the same in each mode.
+- **Original** serves the WAV, FLAC or MP3 file; raw CD tracks are served as seekable
+  16-bit stereo WAV.
+- **High Bandwidth** (default) serves FLAC/MP3 originals, reuses prepared FLAC, and
+  converts WAV and CD audio to FLAC on the fly.
+- **Low Bandwidth** uses Opus, 128 kbps VBR by default (6–256 kbps), reusing a matching
+  prepared copy when there is one.
 
-- **Original** serves the selected WAV, FLAC or MP3. For supported raw CD
-  rips it presents the track window as a seekable 16-bit stereo WAV.
-- **High Bandwidth** is the default. It serves existing FLAC and MP3 originals,
-  reuses matching prepared FLAC, and converts WAV and CD audio to FLAC as needed.
-  Float WAV uses the same signed 24-bit PCM conversion as live playback.
-- **Low Bandwidth** uses Opus at 128 kbps VBR by default. It accepts any whole
-  target from 6 to 256 kbps and reuses a matching prepared copy when available.
+The stream API takes `mode=original|high_bandwidth|low_bandwidth` (default high) and
+`bitrate` for low bandwidth. Files and CD WAV support byte ranges; live streams seek by
+reopening at `start_ms`. Live conversion needs FFmpeg with FLAC and libopus (included in
+the container; set `encoders.ffmpeg` or put it on PATH otherwise). The server runs up to
+eight live encoders, two per session or app credential. Live playback writes nothing to
+the archive.
 
-The music stream query accepts `mode=original|high_bandwidth|low_bandwidth`.
-Omitting the mode selects High Bandwidth. Supply `bitrate` only with Low
-Bandwidth. The response's `Content-Type` gives the actual format. Existing
-files and CD WAV support byte ranges. Live encoded streams seek by reopening
-at `start_ms`.
+## CD library defaults
 
-The live encoder uses FFmpeg with FLAC and libopus. The container includes it.
-Native installs can configure `encoders.ffmpeg` or install it on PATH. The
-server admits eight concurrent live requests, with up to two per session or
-native credential for track and seek overlap. Browsing does not start an
-encoder. Playback writes no prepared audio. Dedicated WebTransport and
-separate HTTPS media still deliver existing files under their media policy.
+In **Administration → Library settings**, per music collection you own:
 
-### CD library defaults
+- automatic AccurateRip checking of new CD imports (on by default);
+- maximum offset, 0–2939 sample frames (default 2939).
 
-In **Administration → Library settings**, choose a music collection you own.
-Automatic AccurateRip checking during new CD ingest defaults on; save the checkbox
-to turn it off. The maximum offset accepts 0–2939 stereo sample frames and defaults
-to 2939. A new import freezes these settings at acceptance. Existing unfinished
-imports keep their previously accepted behavior. Preservation-only imports and
-digital purchases do not acquire CD checks.
+Imports keep the settings in force when they were accepted. **Check unconfirmed rips**
+runs a one-off check over existing originals that are not yet confirmed.
 
-**Check unconfirmed rips** starts a bounded batch over the collection's existing
-originals. Confirmed sources are skipped, and every other eligible source gets a
-structure/response/audio workflow. Open the batch's album results for no-data,
-ambiguity, missing files or unsupported packages. The button is an explicit run;
-there is no perpetual retry of absent provider data. New ingests check automatically
-when enabled. Defaults are private operational state retained through restart and
-reindex, independent of portable metadata authority.
-
-### Background workers
+## Background workers
 
 ```toml
 [jobs]
-processing_workers = 4
-copy_workers = 1
+processing_workers = 4   # copying, analysis, publication, audio preparation
+copy_workers = 1         # 1..processing_workers; concurrent inbox copies
 ```
 
-`processing_workers` accepts 1–8 and includes inbox copying, analysis, original
-publication and audio preparation. `copy_workers` independently caps concurrent
-inbox staging (including the older combined inbox import command); it accepts
-1 through `processing_workers` and defaults to one. Provider acquisitions have
-four additional slots overall, with at most one active Job per provider. Omitting `[jobs]` uses four processing workers and
-one copy. These are startup defaults. **Administration → Server settings →
-Background workers** saves an override that survives restart and reindex. Saved
-limits apply to new claims immediately; reducing them lets current jobs finish.
-Configuration-file edits require restart and do not replace a saved override.
-Invalid settings are rejected before opening storage.
+Provider lookups have four extra slots, one per provider. **Administration → Server
+settings → Background workers** saves an override that survives restart; lowering it
+lets running jobs finish. More workers mean more CPU, memory and disk contention.
 
-Ready copied discs get bounded priority for analysis and original publication.
-With one worker this normally finishes one disc's originals before the next copy.
-Workers are not permanently assigned to a disc: provider waits and unavailable or
-failed steps cannot hold a slot. Other processing is offered FIFO service after
-two preferred continuations. Copying gets a turn after two processing admissions
-when both are runnable, allowing one ready save to finish a just-analyzed disc
-before that copy turn. With multiple workers, the scheduler leaves
-room for both waiting classes, and processing can use all available slots when
-copying is idle. The copy cap still applies when processing is idle. Running jobs
-finish or acknowledge cancellation before their capacity is reused.
-Metadata resolution gets priority over queued encoding and ordinary processing,
-sharing at most two preferred admissions with ready-disc continuations before
-another processing turn.
-It starts after originals are saved; copying keeps its own scheduling turns.
+The scheduler favours finishing a disc that is already copied before starting the next
+copy, and gives metadata lookups priority over queued encoding.
 
-More workers can increase CPU, memory and storage contention. Four is the default;
-eight is available for operator tuning, not a throughput guarantee. Original
-publication still uses the existing archive writer. These settings do not remove
-the extra inbox-to-private-staging-to-archive copy.
-
-### Audio encoders
+## Audio encoders
 
 | Option | Effect |
 |---|---|
-| `[encoders].flac` | Path or executable name for `flac`. Enables validated lossless track preparation. |
-| `[encoders].opus` | Path or executable name for `opusenc`. Enables 96, 128 and 192 kbps VBR track, album, batch and optional import preparation. See [audio preparation](audio-preparation.md). |
+| `[encoders].flac` | `flac` path or name. Enables lossless track preparation. |
+| `[encoders].opus` | `opusenc` path or name. Enables 96/128/192 kbps Opus preparation. |
+| `[encoders].ffmpeg` | FFmpeg for live playback; defaults to `ffmpeg` on PATH. |
 
-Both are optional and are probed at startup and by `doctor`. Use absolute executable paths when running as a service, whose `PATH` may differ from your shell. Unavailable tools do not prevent preservation or original-file downloads.
+All are optional and checked at startup and by `doctor`. Use absolute paths for a
+service, whose PATH may differ from your shell. Prepared audio is stored alongside the
+original, never in place of it. See [audio preparation](audio-preparation.md).
 
-Preparation stores separate audio files in the archive; it does not replace the raw dump. It runs when selected during import or requested in the music preparation controls.
-An explicitly configured Opus import default still applies to eligible albums.
-Live playback can convert audio on demand without saving a file.
+## Metadata and artwork providers
 
-### Online metadata and artwork
+- `[providers].musicbrainz_user_agent` enables MusicBrainz and Cover Art Archive. Use an
+  application name, version and a real contact address, e.g.
+  `"JunkCollector/0.1.0 (you@example.org)"`.
+- `[providers].acoustid_api_key` (an AcoustID application key, plus the user agent)
+  enables digital album matching. Fingerprints and durations are sent to AcoustID;
+  audio, paths and purchase data are not. Submitting fingerprints also needs the
+  reviewer's personal AcoustID user key, entered in the review panel and not stored.
 
-`[providers].acoustid_api_key` enables explicit digital album matching when
-`musicbrainz_user_agent` is also configured. Use an AcoustID application key;
-restart the server after changing provider configuration. The matching panel
-explains the disclosure before submission: fingerprints and durations go to
-AcoustID; original audio, paths and private purchase data are not sent. Matching
-is available to curators through the configured curation listener/API exposure.
-Fingerprint contributions also require the reviewer’s personal AcoustID user API
-key. Enter that key in the review panel for the requested contribution. Collector
-uses it for the outbound request and keeps the submission receipt without the key.
+Without providers, imports and manual editing still work. Manual edits always win over
+provider data. MusicBrainz identity is metadata, not audio verification.
 
-`[providers].musicbrainz_user_agent` enables MusicBrainz and Cover Art Archive acquisition. Set it to a versioned application name with a real contact address, for example `"JunkCollector/0.1.0 (your-real-address@example.org)"`.
+## Server inboxes
 
-Guided imports can automatically gather available metadata and artwork. In an item's editor, you can also request metadata, inspect alternatives, set manual overrides, and choose cover art. Cover Art Archive choices show small previews before you archive an image. Manual overrides survive provider refreshes.
-
-Without this setting, imports and manual curation still work. MusicBrainz identity is descriptive metadata, **not audio verification**. AccurateRip checks are a separate music operation and do not use this user-agent setting.
-
-### Server inboxes
-
-Each entry in `[inboxes]` maps a display name to a server-side directory:
-
-```toml
-[inboxes]
-rips = "/srv/incoming"
-```
-
-Put each package in a direct child directory. A package may contain nested files; preserve the filenames and relative paths referenced by CUE sheets and other sidecars.
+`[inboxes]` maps display names to server directories. Each direct child directory is
+one package; keep the relative paths that CUE sheets and sidecars reference.
 
 ```text
 /srv/incoming/
@@ -244,11 +173,14 @@ Put each package in a direct child directory. A package may contain nested files
     └── dump.subcode
 ```
 
-Curators select packages under **Add / import → Configured inbox**. Package contents are copied into staging; source files are retained. Symlinks and special files are rejected. The browser sees configured inbox names and package names, not server filesystem roots.
+Curators pick packages under **Add / import → Configured inbox**. Files are copied into
+staging and the sources are left in place. Symlinks and special files are rejected. The
+browser only sees inbox and package names.
 
-### Game DAT catalogs
+## Game DAT catalogs
 
-Local DAT files provide reference data for game matching. Configure each under a unique source name:
+DAT catalogs can be uploaded in **Administration → Game catalogs** (see
+[game identification](game-identification.md)) or configured as local files:
 
 ```toml
 [dat_sources.nes]
@@ -256,99 +188,85 @@ path = "/srv/catalogs/nes.dat"
 system = "nes"
 catalog = "NES headerless catalog"
 byte_domain = "org.junk.game.nes.ines-payload"
-byte_domain_version = 1
+byte_domain_version = 1   # default
 ```
 
-| Field | Effect |
-|---|---|
-| `path` | Local DAT file to import. |
-| `system` | System label associated with the catalog. |
-| `catalog` | Human-readable catalog label. |
-| `byte_domain` | The exact byte representation covered by its checksums; must agree with the catalog and processing operation. |
-| `byte_domain_version` | Version of that representation; defaults to `1`. |
-
-Supported normalized domains include:
+`byte_domain` names exactly which bytes the catalog's checksums cover:
 
 | Catalog bytes | `byte_domain` |
 |---|---|
-| Complete files, without normalization | `org.junk.game.raw-bytes` |
-| CD tracks with 2352-byte raw sectors | `org.junk.game.cd.raw-2352-track` |
-| NES iNES payload, excluding its header | `org.junk.game.nes.ines-payload` |
-| Nintendo 64 big-endian ROM bytes | `org.junk.game.n64.z64-big-endian` |
+| Whole files | `org.junk.game.raw-bytes` |
+| CD tracks, 2352-byte raw sectors | `org.junk.game.cd.raw-2352-track` |
+| NES iNES payload without header | `org.junk.game.nes.ines-payload` |
+| Nintendo 64 big-endian ROM | `org.junk.game.n64.z64-big-endian` |
 | SNES headerless payload | `org.junk.game.snes.headerless-payload` |
 | PC Engine HuCard payload | `org.junk.game.pce.hucard-payload` |
 
-In **Administration**, import the configured DAT as an immutable snapshot and select the active snapshot. Results retain their original snapshot identity when you later select another catalog. A file hash, structural analysis, or tentative title is not a complete catalog match; consult each result's coverage and limitations.
+Import the DAT in Administration and choose the active snapshot. Results keep the
+snapshot they were matched against. The server never downloads DATs itself;
+`python3 scripts/cache_game_dats.py --help` is an optional manual download helper.
 
-The optional manual download helper supports an allowlist of catalogs:
+## Users and roles
 
-```sh
-python3 scripts/cache_game_dats.py --help
-python3 scripts/cache_game_dats.py /srv/catalog-cache --catalog redump-psx
-```
-
-It retains downloaded data and a digest manifest. The server does not automatically download or refresh DATs. New DAT-o-MATIC downloads are disabled in the helper; local DAT files and verified cached data remain usable.
-
-## Users and collection access
-
-Users sign in with their own username by default. For an existing configuration
-with `multi_user = false`, set `multi_user = true` and restart the server to enable
-username entry and account creation. Create accounts in **Administration → Accounts**
-and assign each account the appropriate collection role.
+Create accounts in **Administration → Accounts** and grant collection roles:
 
 | Role | Access |
 |---|---|
-| Viewer | Browse authorized collection data, view shared artwork, play and download prepared media. |
-| Curator | Viewer access plus inventory changes, imports, metadata/artwork work, and processing commands. |
-| Owner | Curator access plus collection access management. |
+| Viewer | Browse, view artwork, play and download. |
+| Curator | Viewer plus inventory edits, imports, metadata/artwork and processing. |
+| Owner | Curator plus managing who can access the collection. |
 
-Server administration and collection access are separate permissions. An administrator does not automatically receive permission to read every collection. Single-user mode uses the stored default account on the sign-in form and blocks new account creation in Administration and the API. Existing accounts and grants are retained.
+Server administration is separate: an administrator cannot read a collection without a
+role on it.
 
-### Passkeys
-
-Set `authentication_origin` to a stable, browser-trusted HTTPS origin and add it to `allowed_origins`. Register and use passkeys on that origin. The browser needs the standard WebAuthn JSON conversion APIs. Password login remains available.
-
-Use **Account & security** for Profile, Password, Passkeys, Recovery, Browser sessions and Apps. Changing the password retains existing access. **Sign out other sessions and apps** keeps this browser, passkeys and recovery codes. Using a recovery code replaces browser/app access and the old code batch, retaining passkeys; save replacement codes afterward. For local account recovery, see [server commands](server-operations.md#operations-and-backups).
+**Account & security** covers profile, password, passkeys, recovery codes, browser
+sessions and apps. **Sign out other sessions and apps** keeps this browser, passkeys
+and recovery codes. Using a recovery code signs out all browsers/apps and replaces the
+code batch; passkeys are kept. Passkeys need `authentication_origin` set to a stable
+browser-trusted HTTPS origin. For local account recovery see
+[server operations](server-operations.md#account-recovery).
 
 ## Access from another computer
 
-For browser access, use HTTPS trusted by that browser. The certificate generated by setup is not automatically trusted by other devices. Do not bypass certificate verification.
+Browsers need HTTPS they trust. The certificate generated by `setup` is not trusted by
+other devices automatically; never bypass certificate checks.
 
-| Connection | Destination | Setup |
+| Connection | Points at | Notes |
 |---|---|---|
-| Private HTTPS reverse proxy or Tailscale Serve | `http://127.0.0.1:9842` | Provides management to trusted network users; application login and roles still apply. |
-| Direct private HTTPS | Explicit `private_tls_bind`, e.g. `192.0.2.20:9844` | Trust the server certificate in the browser and ensure its names cover the hostname/IP you use. |
-| Direct client HTTPS | `lan_bind`, normally port `9843` | Uses the server certificate and public exposure settings. |
-| Public HTTPS reverse proxy or Cloudflare Tunnel | `http://127.0.0.1:9841` | Client access by default; enable public curation/admin only if desired. |
+| Private HTTPS proxy or Tailscale Serve | `http://127.0.0.1:9842` | Management for your network; login and roles still apply. |
+| Direct private HTTPS | `private_tls_bind` | Install the server certificate; its names must cover the host you use. |
+| Direct client HTTPS | `lan_bind` (9843) | Server certificate, public exposure rules. |
+| Public HTTPS proxy or Cloudflare Tunnel | `http://127.0.0.1:9841` | Client access; management only if enabled. |
 
-Add each browser-facing HTTPS origin to `allowed_origins`, including its port when non-default. A private proxy with a browser-trusted certificate avoids having to install the server's certificate on each browser. Tailscale HTTPS uses a tailnet hostname, not an arbitrary `.local` name.
+Add every browser-facing origin to `allowed_origins`. Public tunnels must target
+`public_bind`, even from localhost; never publish the private listener. Tailscale HTTPS
+uses the tailnet hostname, not a `.local` name.
 
-Keep private and public proxy destinations separate. Public tunnels must target `public_bind`, even when they connect from localhost. Never publish the private management listener through a public tunnel.
+For direct HTTPS, set `tls_names` before `setup`, copy only `state/tls/cert.pem` to the
+client, check its SHA-256 against the startup output, and install it in that client's
+trust store. Never distribute `key.pem`.
 
-## Direct HTTPS and certificate trust
+## NFS archive
 
-A reverse proxy or tunnel normally manages the browser-facing certificate. It
-does not use Collector's generated certificate when its upstream is loopback HTTP.
+`[archive_mount]` with `nfs_source = "HOST:/EXPORT"` requires the archive to be a hard,
+read/write NFSv4.1/4.2 mount of exactly that source with no nested mounts. The
+`--nfs-source SOURCE` flag (or `COLLECTOR_NFS_SOURCE`) applies the same check to offline
+commands. Each state directory is bound to its archive; `setup` creates the binding for
+new storage and `enroll-archive` adopts an existing archive while everything is
+stopped. Do not remove a binding to get past a refusal. See
+[remote archive](../deploy/container/remote-archive.md).
 
-For direct HTTPS, configure certificate names before `setup`, obtain only the
-public `state/tls/cert.pem` through a trusted administrator channel, and compare
-its file SHA-256 with the fingerprint in startup output. Install it in the trust
-store used by the browser/client, then connect using a matching name or IP.
-Never distribute `key.pem` or bypass certificate validation. The generated
-certificate is not automatically trusted by other devices.
+## Backup-age reminder
 
-Certificate names and advertised endpoints do not create DNS or mDNS records.
-A `.local` name must resolve independently. Changing configured names does not
-replace an existing certificate; plan certificate renewal/trust updates explicitly.
-The optional direct listeners are separate from the proxy's certificate lifecycle.
+```toml
+[backup_reminder]
+after_days = 30
+# For backups made outside Collector, report them yourself:
+# externally_managed = true
+# external_completed_at = "2026-01-01T00:00:00Z"
+# external_failed_at = "2026-01-02T00:00:00Z"
+```
 
-## Remote archive admission
-
-`[archive_mount]` with `nfs_source = "HOST:/EXPORT"` requires the exact Linux
-NFSv4.1/4.2 source, a hard read/write mount and no nested archive mounts. Archive
-identity and local-state binding are required by ordinary executable startup;
-`enroll-archive` is the explicit stopped-server adoption command for existing
-installations, while `setup` initializes new storage. Do not remove a binding
-to bypass a refusal. `--nfs-source SOURCE` (or `COLLECTOR_NFS_SOURCE`) applies the
-same source requirement to offline tools, including explicit import/restore
-destinations. See [the split deployment and recovery procedure](../deploy/container/remote-archive.md).
+Administration → Server settings and `doctor` then show when the last full backup
+completed and whether it is due. Only a successful `backup` run counts; the reminder
+never runs backups or checks that they still exist.

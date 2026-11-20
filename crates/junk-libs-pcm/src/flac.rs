@@ -102,10 +102,10 @@ pub fn repack(
     comments.extend((metadata.tags.len() as u32).to_le_bytes());
     for (key, value) in &metadata.tags {
         checkpoint()?;
+        // Vorbis comment field names: printable ASCII except '='.
         if key.is_empty()
-            || !key.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+            || !key.bytes().all(|b| (0x20..=0x7d).contains(&b) && b != b'=')
             || value.len() > 4096
-            || value.chars().any(char::is_control)
         {
             return Err(invalid("invalid FLAC export tag"));
         }

@@ -101,12 +101,12 @@ try{
  // Server-side logout must stop even already buffered WebTransport playback.
  const revokedAudio=await page.locator('audio').elementHandle();
  assert.equal(await page.evaluate(async()=>(await fetch('/api/v1/auth/logout',{method:'POST'})).status),204);
- await page.getByText('Your session expired or was revoked.',{exact:false}).waitFor();
+ await page.getByLabel('Username',{exact:true}).waitFor();
  assert.deepEqual(await revokedAudio.evaluate(audio=>({paused:audio.paused,src:audio.getAttribute('src')})),{paused:true,src:null});await revokedAudio.dispose();
  await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await player.waitFor();
  // Fail closed when the transport is unavailable: no ordinary HTTP media request.
  await page.reload();let mediaRequests=0;page.on('request',request=>{if(request.url().startsWith(origin+fixture.path))mediaRequests++;});
- await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').filter({hasText:'does not support secure local playback'}).waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
+ await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
  assert.deepEqual(errors,[]);console.log(`Local playback passed in Chrome ${await browser.version()}: automatic pinned QUIC, actual audio, forward/back seeks, public media refusal, wrong pin, live logout/source release and unsupported-transport fail closed.`);
 }finally{
  await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});

@@ -368,7 +368,9 @@ impl CollectionService {
         if !self.streaming_providers.contains_key(provider)
             || !self.catalog_parsers.contains_key(provider)
         {
-            return Err(Error::Unavailable("the metadata provider is not configured; manual information and originals remain available".into()));
+            return Err(Error::Unavailable(
+                "metadata provider is not configured".into(),
+            ));
         }
         let mut sources = Vec::new();
         for capture in &item.captures {

@@ -144,13 +144,11 @@ pub(crate) fn validate_intake_files(files: &[UploadFile], limit: usize) -> Resul
         if file.name.is_empty()
             || file.name.len() > 4096
             || file.name.starts_with('/')
-            || file.name.contains('\\')
             || file
                 .name
                 .split('/')
                 .any(|part| part.is_empty() || matches!(part, "." | ".."))
-            || file.name.chars().any(char::is_control)
-            || !names.insert(file.name.to_ascii_lowercase())
+            || !names.insert(collector_core::archive_relative_path(&file.name).to_lowercase())
         {
             return Err(Error::Invalid(
                 "package inventory contains an unsafe or duplicate name".into(),

@@ -209,8 +209,8 @@ impl CollectionService {
                         }
                     }
                     LibrarySelection::AllMatching { query, exclusions } => {
-                        if query.cursor.is_some() || query.search.len() > 256 || exclusions.len() > 10_000 {
-                            return Err(Error::Invalid("Use a search of at most 256 characters, with at most 10,000 exclusions and no cursor.".into()));
+                        if query.cursor.is_some() || exclusions.len() > 10_000 {
+                            return Err(Error::Invalid("Use at most 10,000 exclusions and no cursor.".into()));
                         }
                         if let Some(collection) = query.collection_id {
                             self.authorize(actor, collection, Action::Curate)?;
@@ -309,7 +309,7 @@ impl CollectionService {
                         let next = if command.kind == BulkLibraryKind::MusicPreparation {
                             let page = self.preparation_care(actor, query.clone(), &command.profile)?;
                             if query.needs_attention && page.summary_state != LibrarySummaryState::Ready {
-                                return Err(Error::Unavailable("Preparation summaries are still updating. Retry the preview once the results are current.".into()));
+                                return Err(Error::Unavailable("Still updating. Try the preview again shortly.".into()));
                             }
                             items.extend(page.items.into_iter().filter(|row| !exclusions.contains(&row.item.id)).map(|row| (row.item.id, row.revision)));
                             page.next_cursor
@@ -340,7 +340,7 @@ impl CollectionService {
                 let presented=self.item_presented(actor,item.id)?;
                 let member=FrozenBulkLibraryMember {view:BulkLibraryMemberView{position:position as u32,item_id:item.id,collection_id:item.collection_id,title:presented.title,artwork_asset_id:presented.primary_artwork,state:if input.is_some(){BulkMemberState::Ready}else{BulkMemberState::Excluded},reason,job_id:None,tracks,already_ready:ready},item:Some(item),input,preparation:None};
                 manifest_bytes=manifest_bytes.saturating_add(serde_json::to_vec(&member).map_err(|e|Error::Invalid(e.to_string()))?.len());
-                if manifest_bytes>256*1024*1024{return Err(Error::Invalid("This frozen selection exceeds 256 MiB of inventory and processing metadata. Submit smaller batches; no work has been started.".into()));}
+                if manifest_bytes>256*1024*1024{return Err(Error::Invalid("This selection is too large. Submit a smaller batch.".into()));}
                 members.push(member);
             }
             summary.can_start=summary.pending>0;

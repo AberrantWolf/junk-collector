@@ -1,34 +1,40 @@
-# ADR 0016: Coordinated pre-release evolution with data preservation
+# 0016: Pre-release evolution with data preservation
 
-Status: Accepted. Formalized 2026-11-03 from existing documented decisions and
-implemented constraints; this is not a claim that implementation or qualification
-first occurred on that date. Source reviewed: `eaff933`.
+Status: proposed, not yet reviewed by the owner.
 
 ## Context
 
-Checkpoint completion does not create a supported compatibility baseline. Actual archives and independent consumers nevertheless have preservation and recovery requirements now.
+Before a stable release, interfaces and formats need to change freely, but real
+archives already exist and must not be lost.
 
 ## Decision
 
-- Before a supported baseline is explicitly declared, repository interfaces and formats may evolve together. Checkpoint names must not create compatibility wrappers, schema reservations or migration chains by themselves.
-- Changes must update affected repository callers, generated contracts, fixtures and tests together. Independent consumers and external formats must have their actual requirements assessed separately.
-- Existing data, identities, unknown envelopes, manual authority and recovery guarantees must be preserved. Breaking stored formats must supply an explicit safe conversion/recovery path or actionable refusal before writes; silent resets are prohibited.
-- Changes to encodings identifying stored objects must be versioned and affected references converted or retained explicitly.
-- A supported baseline must declare versions, upgrade/conversion, backup/restore and unsupported-format commitments before claiming those promises.
+- Rust interfaces, JSON APIs, private databases, catalog projections and archive
+  schemas may change together. Update all in-repo callers, generated contracts,
+  fixtures and tests in the same change; no deprecation periods, compatibility
+  re-exports or reserved migration numbers.
+- Don't remove working compatibility code just as cleanup; simplify it when
+  touching that boundary and nothing depends on it.
+- Sibling projects and external formats are independent consumers with their own
+  requirements.
+- Existing archives, originals, observations, overrides, loans, credentials, trust
+  and configuration are preserved. A breaking stored-format change needs a
+  backup-and-convert path or a clear unsupported-format error before any write.
+  Never silently reset user state. Prefer one restartable conversion over a chain
+  of historical readers; rebuild catalog projections instead of migrating them.
+- Encodings that identify stored objects (hashes, recipes) are versioned, and
+  existing references are converted or kept explicitly.
+- While there is a single installation, the only upgrade that must work is from
+  the version deployed there to the current schemas. That installation runs
+  beta.33 or beta.34 (catalog schema 15, private schema 23). Older readers and
+  conversions may be removed once that installation has moved past them. Keep a
+  matched backup before upgrading.
+- Crash recovery, expected revisions, idempotence and access checks apply now,
+  regardless of compatibility policy.
 
-## Consequences and scope
+## Consequences
 
-This permits coordinated simplification without discarding real data. It does not authorize removing useful compatibility with existing archives or independent clients merely as cleanup.
+A stable release will need an explicit declaration of upgrade, backup/restore and
+unsupported-format commitments.
 
-## Supporting requirements and evidence
-
-- [Accepted evolution policy and rationale](pre-release-evolution.md)
-- [Stored-input/recipe identity](../../crates/collector-core/src/processing.rs)
-- [Existing data migration/recovery tests](../../crates/collector-store/tests/archive.rs)
-
-Implementation and tests are supporting evidence, not a fresh qualification run.
-Detailed subsystem requirements and existing dated validation limits remain applicable.
-
-## Reconsideration
-
-Revisit when declaring a supported release baseline or adding sustained external consumers; document the compatibility promise explicitly.
+See: [processing identity](../../crates/collector-core/src/processing.rs).

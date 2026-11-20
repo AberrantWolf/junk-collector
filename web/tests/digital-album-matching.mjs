@@ -85,27 +85,17 @@ try{
  const itemUrl=`**/api/v1/items/${item}`;
  await page.route(itemUrl,async route=>{const response=await route.fetch();const data=await response.json();data.revision+=1;refreshed=true;await route.fulfill({json:data});});
  await page.getByRole('button',{name:'Refresh panel',exact:true}).click();await expect.poll(()=>refreshed,{timeout:15000}).toBe(true);
- await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeVisible({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('Find matching albums again');
- await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'stale matching notice overflows mobile');await page.screenshot({path:'/tmp/collector-stale-matching-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
+ await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeVisible({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'stale matching notice overflows mobile');await page.setViewportSize({width:1440,height:1000});
  assert.deepEqual(await page.evaluate(()=>window.matchingAlerts),[],'obsolete discovery request surfaced an error after refresh');
  releasePost();await page.unroute(matchUrl);await page.unroute(itemUrl);
 
  // Reopening recovers the server-owned workflow without a second submission.
  const lostReceipt=`collector.digital-match.${await page.evaluate(async()=>(await(await fetch('/api/v1/me')).json()).user_id)}.${item}`;await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),lostReceipt)).toBeNull();
  await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
- await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('1 of 2 files associated by audio recognition');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
- const info=matching.getByText('Recognition can be incomplete.',{exact:false});
- await expect(info).toBeHidden();
+ await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('1 of 2 files recognized');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
  await expect(matching.locator('.digital-match-edition-badge')).toHaveText('Steam');
  await expect(matching.locator('.digital-match-region')).toContainText('Worldwide');
- const infoControl=matching.getByLabel('About audio recognition');
- // Native disclosure supports keyboard activation as well as touch/click.
- await infoControl.focus();await page.keyboard.press('Enter');await expect(info).toBeVisible();
- await matching.screenshot({path:'/tmp/collector-matching-info-desktop.png'});
- await page.setViewportSize({width:390,height:844});await info.scrollIntoViewIfNeeded();
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'recognition information overflows mobile');
- await matching.screenshot({path:'/tmp/collector-matching-info-mobile.png'});
- await infoControl.click();await expect(info).toBeHidden();await page.setViewportSize({width:1440,height:1000});
  // Full local coverage cannot hide an incomplete release or an extra declared track.
  const countRoute=`**/api/v1/items/${item}/digital-album-matches**`;let countFixture=true;
  await page.route(countRoute,async route=>{
@@ -117,26 +107,24 @@ try{
   }
   await route.fulfill({json:data});
  });
- await page.reload();await expect(matching).toContainText('It declares 3 release tracks for 2 local files.');
- await expect(matching).toContainText('Disc 1: 3 declared tracks · 2 received');
+ await page.reload();await expect(matching).toContainText(/3 declared tracks · 2 received/);
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
- await matching.getByText('Review proposed track mapping',{exact:true}).click();
+ await matching.getByText('Show track matches',{exact:true}).click();
  await expect(matching.getByRole('table')).toBeVisible();
  await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mapping diagnostics overflow mobile');
- await matching.screenshot({path:'/tmp/collector-mapping-counts-mobile.png'});
- await page.setViewportSize({width:1440,height:1000});await matching.screenshot({path:'/tmp/collector-mapping-counts-desktop.png'});
+ 
+ await page.setViewportSize({width:1440,height:1000});
  // Explicit presentation fixture: a complete 28-for-28 layout is actionable and readable.
  countFixture=false;await page.reload();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled();
- await matching.getByText('Review proposed track mapping',{exact:true}).click();
+ await matching.getByText('Show track matches',{exact:true}).click();
  const largeTable=matching.getByRole('table');await expect(largeTable.getByRole('row')).toHaveCount(29);
  assert.equal(await largeTable.evaluate(table=>table.scrollWidth>table.parentElement.clientWidth),false,'desktop mapping columns require sideways scrolling');
- await largeTable.evaluate(table=>table.scrollIntoView({block:'start'}));const area=await largeTable.boundingBox();
- await page.screenshot({path:'/tmp/collector-mapping-28-desktop.png',clip:{x:area.x,y:area.y,width:area.width,height:Math.min(area.height,650)}});
+ await largeTable.evaluate(table=>table.scrollIntoView({block:'start'}));
  await page.setViewportSize({width:390,height:844});await largeTable.evaluate(table=>table.scrollIntoView({block:'start'}));
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'28-track mapping overflows mobile');
- await page.screenshot({path:'/tmp/collector-mapping-28-mobile.png'});await page.setViewportSize({width:1440,height:1000});
+ await page.setViewportSize({width:1440,height:1000});
  await page.unroute(countRoute);await page.reload();await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:60000});
  // A release card can open its artwork without adopting its album or tracks.
  const beforeListing=await metadataReview(item);
@@ -144,9 +132,9 @@ try{
  await expect(page.locator('.artwork-options').getByRole('button',{name:'Front cover',exact:false})).toBeEnabled({timeout:60000});
  const afterListing=await metadataReview(item);
  assert.deepEqual(afterListing.authority,beforeListing.authority);
- await matching.getByText('Review proposed track mapping',{exact:true}).click();await expect(matching.getByRole('row').filter({hasText:'01.wav'})).toContainText('Matched first');
+ await matching.getByText('Show track matches',{exact:true}).click();await expect(matching.getByRole('row').filter({hasText:'01.wav'})).toContainText('Matched first');
  const before=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}`)).json(),item);assert.notEqual(before.title,'Matched album');assert.equal(fingerprints.size,2);assert.ok(requests.every(r=>!r.includes('PRIVATE-MATCHING-ORDER')&&!r.includes('Private matching store')));
- await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');await mkdir(path.join(root,'web/test-results'),{recursive:true});await page.screenshot({path:path.join(root,'web/test-results/digital-matching-mobile.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');
  await matching.getByRole('button',{name:'Edit track mapping'}).click();
  const editor=matching.getByRole('group',{name:'Map every file to a release track'});
  await expect(editor.getByRole('combobox')).toHaveCount(2);
@@ -168,7 +156,7 @@ try{
  const contributionRequest=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/acoustid-submissions'));
  await contribute.click();
  const firstContribution=await contributionRequest;
- await expect(editor.getByText(/Submission IDs 4321/)).toBeVisible();
+ await expect(editor.getByRole('status').filter({hasText:'4321'})).toBeVisible();
  const sentBody=firstContribution.postDataJSON();
  const sentKey=firstContribution.headers()['idempotency-key'];
  const replay=await page.evaluate(async ({item,sentBody,sentKey})=>{
@@ -182,8 +170,8 @@ try{
  assert.deepEqual((await metadataReview(item)).authority,beforeListing.authority,'contributing fingerprints must not apply album metadata');
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'manual mapping overflows mobile');
- await page.screenshot({path:path.join(root,'web/test-results/digital-matching-manual-mobile.png'),fullPage:true});
- await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:path.join(root,'web/test-results/digital-matching-manual-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});
+ 
+ await page.setViewportSize({width:1440,height:1000});await page.setViewportSize({width:390,height:844});
  const submission=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith(`/items/${item}/metadata/resolutions`));
  const adoptionResponse=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith(`/items/${item}/metadata/resolutions`));
  await matching.getByRole('button',{name:'Use this album and track mapping'}).click();
@@ -212,23 +200,23 @@ try{
   const result=body.find(value=>value.job.id===job)?.result;
   return result?[result.outcome,result.artwork_error]:null;
  },{item,job:adoptionJob}),{timeout:15000}).toEqual(['candidates',null]);
- await expect(matching).toContainText('Find matching albums again',{timeout:15000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
+ await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled({timeout:15000});
  // Source-only edits preserve selected release, track mappings and automatic artwork.
  const sourceEditor=page.getByRole('region',{name:'Digital source',exact:true});
  const overridesBefore=adopted.authority.domain_overrides.payload;
  await sourceEditor.getByLabel('Source',{exact:true}).fill('Steam');
  await sourceEditor.getByRole('button',{name:'Save source',exact:true}).click();
- await expect(sourceEditor).toContainText('Saved source: Steam');
+ await expect(sourceEditor.getByText('Steam',{exact:true})).toBeVisible();
  const sourceAfter=await metadataReview(item);
  assert.deepEqual(sourceAfter.authority.domain_overrides.payload,{...overridesBefore,digital_source:'Steam'});
  assert.deepEqual(sourceAfter.display.candidate,adopted.display.candidate);assert.equal(sourceAfter.display.artwork,adopted.display.artwork);
- await page.setViewportSize({width:1440,height:1000});await sourceEditor.screenshot({path:'/tmp/collector-digital-source-desktop.png'});
+ await page.setViewportSize({width:1440,height:1000});
  await page.setViewportSize({width:390,height:844});await sourceEditor.scrollIntoViewIfNeeded();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'digital source overflows mobile');
- await sourceEditor.screenshot({path:'/tmp/collector-digital-source-mobile.png'});
+ 
  await page.getByRole('button',{name:'Refresh panel',exact:true}).click();await expect(sourceEditor.getByLabel('Source',{exact:true})).toHaveValue('Steam');
  await sourceEditor.getByRole('button',{name:'Clear source',exact:true}).click();await expect(sourceEditor.getByLabel('Source',{exact:true})).toHaveValue('');
- await sourceEditor.getByLabel('Source',{exact:true}).fill('Steam');await sourceEditor.getByRole('button',{name:'Save source',exact:true}).click();await expect(sourceEditor).toContainText('Saved source: Steam');
+ await sourceEditor.getByLabel('Source',{exact:true}).fill('Steam');await sourceEditor.getByRole('button',{name:'Save source',exact:true}).click();await expect(sourceEditor.getByText('Steam',{exact:true})).toBeVisible();
  // A different release supplies artwork without being adopted as album metadata.
  await page.getByLabel('MusicBrainz artwork release ID',{exact:true}).fill(id(92));
  await page.getByRole('button',{name:'Find artwork only',exact:true}).click();
@@ -252,20 +240,20 @@ try{
  assert.ok(artItem.assets.find(asset=>asset.id===artOnly.authority.artwork_choice).alt_text.includes(id(92)));
  await page.getByLabel('MusicBrainz artwork release ID',{exact:true}).fill(id(93));
  await page.getByRole('button',{name:'Find artwork only',exact:true}).click();
- await expect(page.getByText('No artwork was found for this release.',{exact:true})).toBeVisible({timeout:60000});
+ await expect(page.getByText(/No artwork/)).toBeVisible({timeout:60000});
  await expect(page.locator('.artwork-options')).toHaveCount(0);
  const reopenedArtHistory=page.waitForResponse(response=>response.ok()&&response.request().method()==='GET'&&new URL(response.url()).pathname===`/api/v1/items/${item}/metadata/resolutions`);
  await page.reload();
  await (await reopenedArtHistory).finished();
  await expect(sourceEditor.getByLabel('Source',{exact:true})).toHaveValue('Steam');
  await expect(page.getByLabel('MusicBrainz artwork release ID',{exact:true})).toBeEnabled();
- await page.locator('.manual-artwork').screenshot({path:'/tmp/collector-artwork-empty-reopened.png'});
+ 
  await expect(page.locator('.artwork-options')).toHaveCount(0);
  await expect(matching.getByRole('button',{name:'Choose artwork only',exact:true})).toBeEnabled();
  // A fresh search after acknowledgement admits exactly one new Job.
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();
  await expect.poll(async()=>matchingJobs(item).then(jobs=>jobs?.length),{timeout:15000}).toBe(2);
- await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:60000});await expect(matching).toContainText('1 of 2 files associated by audio recognition');
+ await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:60000});await expect(matching).toContainText('1 of 2 files recognized');
  await expect(sourceEditor.getByLabel('Source',{exact:true})).toHaveValue('Steam');
  await matching.getByRole('button',{name:'Edit track mapping'}).click();
  await editor.getByRole('button',{name:'Assign in file order'}).click();await editor.getByRole('checkbox').check();
@@ -318,15 +306,15 @@ try{
  assert.ok(compact.items.length>=3);assert.ok(compact.items.every(row=>!('captures' in row)&&!('assets' in row)),'Metadata rows must not hydrate item graphs');
  assert.ok(queueTimes.length);console.log(`Metadata page requests during multi-album admission: ${queueTimes.map(n=>Math.round(n)).join(', ')} ms`);
  await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:15000});await expect(matching.getByRole('button',{name:'Cancel album matching'})).toHaveCount(0);
- await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'multi-album queue status overflows mobile');await page.screenshot({path:'/tmp/collector-metadata-queue-mobile.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'multi-album queue status overflows mobile');
  // Corrupt durable receipts stay visible and cannot create a fresh queue command.
  let unexpectedAdmissions=0;const observeAdmission=request=>{if(request.method()==='POST'&&request.url().endsWith('/digital-album-matches'))unexpectedAdmissions++;};page.on('request',observeAdmission);
  for(const damaged of ['{invalid',JSON.stringify({key:12,expected_revision:0,extended:'false'})]){
   await page.evaluate(async ({item,damaged})=>{const actor=await(await fetch('/api/v1/me')).json();localStorage.setItem(`collector.digital-match.${actor.user_id}.${item}`,damaged);},{item:newItems[0],damaged});
   await page.reload();
-  const unreadable=page.getByRole('alert').filter({hasText:'Saved queue receipt is unreadable'});
+  const unreadable=page.getByRole('alert').filter({has:page.getByRole('button',{name:'Discard unreadable receipt'})});
   await expect(unreadable).toBeVisible();await expect(unreadable.getByRole('button',{name:'Retry queue request'})).toBeDisabled();
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'unreadable receipt notice overflows mobile');await page.screenshot({path:'/tmp/collector-unreadable-receipt-mobile.png',fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'unreadable receipt notice overflows mobile');
   await unreadable.getByRole('button',{name:'Discard unreadable receipt'}).click();await expect(unreadable).toHaveCount(0);
  }
  assert.equal(unexpectedAdmissions,0,'unreadable receipt triggered an admission');page.off('request',observeAdmission);

@@ -6,6 +6,12 @@ use junk_libs_music::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Fingerprint identity hashed into cache keys and observation ids. Keep it
+/// fixed while fingerprint output is unchanged, or stored work is redone and
+/// duplicated.
+pub(crate) const FINGERPRINT_IDENTITY: &str =
+    "chromaprint-next/7a384eee09caf17b4f6241f481dd784c2e937d9a";
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DigitalMatchingProgress {
     pub tracks: usize,
@@ -121,7 +127,7 @@ impl CollectionService {
                         .next()
                         .unwrap_or("")
                         .to_ascii_lowercase(),
-                    junk_libs_music::fingerprint::IMPLEMENTATION,
+                    FINGERPRINT_IDENTITY,
                 ))
                 .map_err(|e| Error::Storage(e.to_string()))?,
             )

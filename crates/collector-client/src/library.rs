@@ -273,7 +273,7 @@ fn validate_track_page(query: &TrackPageQuery, page: &TrackPage) -> Result<()> {
     )
 }
 
-/// A continuation must advance within one complete, bounded album revision.
+/// A continuation must advance within one complete album revision.
 fn validate_track_continuation(
     expected: &TrackSummary,
     actual: &TrackSummary,
@@ -290,10 +290,8 @@ fn validate_track_continuation(
     let total = expected
         .total_items
         .ok_or_else(|| Error::Invalid("missing track total".into()))?;
-    if expected.tracks_revision.is_empty() || total > 10000 {
-        return Err(Error::Invalid(
-            "invalid or oversized album track snapshot".into(),
-        ));
+    if expected.tracks_revision.is_empty() {
+        return Err(Error::Invalid("missing album track revision".into()));
     }
     let end = offset
         .checked_add(count)
@@ -440,8 +438,6 @@ mod track_pagination_tests {
         ] {
             assert!(validate_track_continuation(&s, &s, offset, count, next).is_err());
         }
-        let oversized = summary(10001);
-        assert!(validate_track_continuation(&oversized, &oversized, 0, 1, Some(1)).is_err());
     }
     #[test]
     fn rejects_changed_revision_total_and_pending_projection() {

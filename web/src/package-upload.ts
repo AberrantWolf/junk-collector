@@ -18,11 +18,11 @@ async function sendChunk(path:string,body:Blob,signal:AbortSignal,progress:(load
    signal.addEventListener('abort',abort,{once:true});
    xhr.upload.onprogress=event=>{if(!signal.aborted)progress(Math.min(event.loaded,body.size),false);};
    xhr.upload.onload=()=>{if(!signal.aborted)progress(body.size,true);};
-   xhr.onerror=()=>{cleanup();reject(new TypeError('Upload connection interrupted. Reselect the package to resume.'));};
+   xhr.onerror=()=>{cleanup();reject(new TypeError('Upload interrupted. Select the files again to resume.'));};
    xhr.onabort=()=>{cleanup();reject(new DOMException('Upload stopped','AbortError'));};
    xhr.onload=()=>{
     cleanup();if(signal.aborted){reject(new DOMException('Upload stopped','AbortError'));return;}
-    let value;try{value=JSON.parse(xhr.responseText);}catch{reject(new ApiRequestError(xhr.status,`http_${xhr.status}`,`Upload response could not be read (HTTP ${xhr.status}). ${xhr.status>=200&&xhr.status<300?'The upload outcome is unconfirmed; resume with the same package.':'The server did not confirm the chunk.'}`));return;}
+    let value;try{value=JSON.parse(xhr.responseText);}catch{reject(new ApiRequestError(xhr.status,`http_${xhr.status}`,`Upload response could not be read (HTTP ${xhr.status}). ${xhr.status>=200&&xhr.status<300?'It may not have finished; resume with the same files.':'The server did not confirm it.'}`));return;}
     if(xhr.status<200||xhr.status>=300){reject(new ApiRequestError(xhr.status,value.error?.code||`http_${xhr.status}`,value.error?.message||`Upload failed (${xhr.status})`));return;}
     resolve(value as ImportView);
    };
@@ -33,7 +33,7 @@ async function sendChunk(path:string,body:Blob,signal:AbortSignal,progress:(load
 
 export async function uploadPackage(initial:ImportView,files:File[],verifyPrefix:boolean,signal:AbortSignal,onProgress:(value:UploadProgress)=>void,onRecord:(value:ImportView)=>void):Promise<ImportView>{
  const selected=new Map(files.map(file=>[fileName(file),file]));
- if(selected.size!==files.length||selected.size!==initial.files.length||initial.files.some(entry=>selected.get(entry.name)?.size!==entry.bytes))throw new Error('Select the same complete package, with original file names and sizes.');
+ if(selected.size!==files.length||selected.size!==initial.files.length||initial.files.some(entry=>selected.get(entry.name)?.size!==entry.bytes))throw new Error('Select the same files, with the same names and sizes.');
  let current=initial;
  const packageBytes=initial.files.reduce((sum,file)=>sum+file.bytes,0);
  const retained=initial.files.reduce((sum,file)=>sum+file.received_bytes,0);

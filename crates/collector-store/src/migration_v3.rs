@@ -1,6 +1,6 @@
 //! Additive schema-2 to schema-3 archive migration.
 //!
-//! Every Wave 1 byte remains in place. Schema-3 sidecars remove compatibility
+//! Every schema-2 byte remains in place. Schema-3 sidecars remove compatibility
 //! Capture/Asset copies from canonical Item revisions and establish standalone
 //! append-only Evidence plus revisioned collection-level Asset records.
 

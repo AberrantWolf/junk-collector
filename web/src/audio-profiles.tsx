@@ -2,11 +2,11 @@ import React from '@collector/runtime';
 import type {components} from './generated/api';
 
 type S=components['schemas'];
-export type PreparationPreset='flac'|'96'|'128'|'192';
+export const opusBitrates=[64,96,128,160,192,256] as const;
+export type PreparationPreset='flac'|`${typeof opusBitrates[number]}`;
 export type ImportPreparationChoice=PreparationPreset|'default'|'none';
-export const opusBitrates=[96,128,192] as const;
 export function preparationPreset(value:string|null):PreparationPreset{
- return value==='96'||value==='128'||value==='192'?value:'flac';
+ return opusBitrates.some(rate=>String(rate)===value)?value as PreparationPreset:'flac';
 }
 export function conversionProfile(value:PreparationPreset):S['ConversionProfile']{
  return value==='flac'?{codec:'flac'}:{codec:'opus',bitrate_kbps:Number(value)};

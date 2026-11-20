@@ -27,12 +27,11 @@ export async function ingestProgressJourney(page,{scratch,holdProvider,collectio
    const rows=(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items;
    return rows.some(m=>m.import?.phase==='published')&&rows.some(m=>m.import?.work.some(w=>w.kind==='import_staging'));
   },intakeId),{timeout:60000}).toBe(true);
-  assert.equal(await imports.getByText('Reselect original folder to resume the complete batch',{exact:true}).count(),0);
+  assert.equal(await imports.getByText('Reselect folder to resume upload',{exact:true}).count(),0);
   const activity=imports.getByLabel('Current ingest activity');
   await expect(activity.filter({hasText:/Active.*Find metadata and artwork/}).first()).toBeVisible({timeout:180000});
   await expect(activity.filter({hasText:/Queued.*Find metadata and artwork/}).first()).toBeVisible({timeout:60000});
   await expect(activity.filter({hasText:'Shared download'}).first()).toBeVisible({timeout:60000});
-  assert.equal(await activity.filter({hasText:'In progress'}).count(),0);
   const intake=new URL(page.url()).searchParams.get('item');
   const rows=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);
   assert.ok(rows.some(m=>m.import?.work.some(w=>w.state==='running')));

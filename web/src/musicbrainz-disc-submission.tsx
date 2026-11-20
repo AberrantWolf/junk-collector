@@ -30,7 +30,7 @@ export default function MusicBrainzDiscSubmission({itemId,releaseId,refreshKey,s
   void load();return()=>{controller.abort();clearTimeout(timer);};
  },[scope,itemId,suspended]);
  if(suspended||result?.scope!==scope)return null;
- if(result.error)return <div className="metadata-disc-submissions"><p role="alert">{result.error}</p><button onClick={()=>setRetry(value=>value+1)}>Retry Disc ID submission check</button></div>;
+ if(result.error)return <div className="metadata-disc-submissions"><p role="alert">{result.error}</p><button onClick={()=>setRetry(value=>value+1)}>Retry</button></div>;
  const seen=new Set<string>();
  const sources=result.coverage?.release_id===releaseId?result.coverage.sources.filter(source=>{
   const toc=source.musicbrainz_submission_toc;if(!toc||seen.has(toc))return false;seen.add(toc);return true;
@@ -41,6 +41,6 @@ export default function MusicBrainzDiscSubmission({itemId,releaseId,refreshKey,s
    {sources.length>1&&<small>{source.medium_position?`Disc ${source.medium_position}`:`Original ${index+1}`} · {source.track_count} tracks · {source.file_label}</small>}
    <a className="musicbrainz-submit" href={`https://musicbrainz.org/cdtoc/attach?${new URLSearchParams({toc:source.musicbrainz_submission_toc!,'filter-release.query':releaseId})}`} target="_blank" rel="noopener noreferrer">Submit Disc ID to MusicBrainz</a>
   </div>)}
-  <small>Review and confirm on MusicBrainz. No audio is uploaded. Refresh this release after submitting.</small>
+  <small>Confirm on MusicBrainz, then refresh this release.</small>
  </div>;
 }

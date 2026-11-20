@@ -1,67 +1,33 @@
-# Local recovery snapshots and optional incremental exports
+# Btrfs snapshots and incremental exports
 
-For a local-state/NFS-archive split, use the [remote archive runbook](remote-archive.md).
-Its paired recovery point replaces the single-root snapshot assumption.
+An optional alternative to full backups on Btrfs: take a read-only snapshot of the
+stopped data directory before each update, and optionally export tar increments
+to other storage. This is separate from Collector's full-backup format: do not pass
+a tar export to `validate-backup` or `restore --backup`. For an NFS archive split
+use [remote-archive.md](remote-archive.md) instead.
 
-This is an optional Btrfs operations path over the existing stopped-server recovery
-contract. It is separate from Collector's sealed full-backup format: do not pass a
-tar increment to `validate-backup` or `restore --backup`. The full-copy
-[backup/update](README.md#update) and [restore](recovery.md) remain available.
-Qualification status and exact limits are recorded in
-[the actual-host recovery report](../../docs/validation/snapshot-recovery-2026-10-20.md).
-Use the local snapshot section for update rollback. The export/independent-copy
-sections are optional for operators who choose to back up media elsewhere; no cloud
-account or independent destination is required. These commands do not configure a
-schedule or change a live installation automatically. The packaged local full-backup
-area is `${COLLECTOR_DATA}/backups`; full backups include media and require an explicit
-fresh child destination. Snapshot points belong outside the live data root.
-
-## Eligibility and policy
-
-On the inspected DS1522+, `/volume1/junk-collector` is one Btrfs subvolume,
-`@syno/junk-collector`, with archive, complete private state and config as ordinary
-children and no nested subvolumes. Read-only inspection established this without
-changing production. Snapshot Replication/Hyper Backup were not installed. No DSM
-package installation or conversion of the existing data layout is required by the
-qualified command-line path.
-
-For another installation, establish these facts first with administrator access:
+## Eligibility
 
 ```sh
 sudo /sbin/btrfs subvolume show /absolute/collector-data
 sudo /sbin/btrfs subvolume list -o /absolute/collector-data
 ```
 
-All authoritative roots, pending uploads/scratch and journals must be inside that
-one subvolume. Resolve absolute config paths, symlinks and additional mounts; the
-shipped container config uses `/data/{archive,state}`. Stop if required data is
-outside it, a nested subvolume is present, or the backend is SMB/NFS/non-Btrfs.
-Snapshots do not recursively capture nested subvolumes. External inboxes, DAT/tool
-paths and optional external tools need their separately recorded recovery policy;
-saved originals must already be in the archive. Keep snapshots/exports **outside**
-the live data root on the same Btrfs filesystem, with private administrator access.
+Archive, state and config (everything under the shipped `/data/{archive,state,config}`
+layout) must be inside that one subvolume, with no nested subvolumes, symlinks or
+extra mounts pointing elsewhere. Snapshots do not include nested subvolumes. Inboxes
+and external tools need their own backup policy. Keep snapshots and exports outside
+the live data directory, on the same filesystem, with administrator-only access.
 
-Use local read-only snapshots for quick rollback. If choosing independent media
-backups, keep a full baseline and every required incremental parent on the selected
-other storage. A same-NAS snapshot/export cannot protect against loss of that NAS.
-Reserve space, retain the last accepted recovery point/chain, and test restoration
-and integrity according to the selected policy. GNU tar's incremental selection uses metadata, not proof of unchanged bytes;
-clock rollback or unreliable/preserved timestamps require a fresh full baseline.
+A snapshot on the same NAS does not protect against losing the NAS. With each
+point, record the image ID, ServerId, cutoff time and parent point. Never downgrade
+only the image against newer data.
 
-Record the exact old image ID/registry digest, config layout, ServerId, checkpoint
-cutoff, parent point and upgrade/storage notes with each point. Ordinary application
-changes may use this short snapshot policy; incompatible storage writes/conversions
-require a validated complete recovery point and the old image before proceeding.
-Never downgrade only the image against later incompatible data.
+## Take a snapshot
 
-## Short stopped-server checkpoint
-
-Choose new absolute paths/names; the following values are examples. Match the CLI
-image to the running Collector's immutable image ID as described in the runbook.
-Use Portainer to stop **only** Collector, or `docker stop YOUR_COLLECTOR_CONTAINER`
-when deliberately operating that service. Wait for it to exit; do not snapshot a
-running SQLite/private-state tree. Keep every other process opening these roots
-stopped until the read-only snapshot completes.
+Stop Collector (in Portainer, or `docker stop YOUR_COLLECTOR_CONTAINER`) and wait
+for it to exit. Keep anything else that opens the data stopped until the snapshot
+completes.
 
 ```sh
 collector_data=/volume1/junk-collector
@@ -72,44 +38,23 @@ collector_cutoff_ns=$(python3 -c 'import time; print(time.time_ns())')
 sudo /sbin/btrfs subvolume snapshot -r "$collector_data" "$collector_recovery/$collector_point"
 ```
 
-Capture the cutoff **before** snapshot creation, on the NAS clock. Record it with
-the checkpoint. If snapshot creation fails, retain the old installation/image and
-resolve the failure. Once it succeeds, the selected service can restart/redeploy
-with its retained mounts/config/groups; exporting the immutable snapshot can happen
-while it serves. This step neither copies nor hashes the masters. Capture one
-complete point before each update, even when independent backup export is deferred.
+Capture the cutoff before creating the snapshot and record it. Once the snapshot
+succeeds the server can restart; exporting can happen while it runs.
 
-## Optional: full baseline once, then incremental exports
+## Optional: incremental exports
 
-Use GNU tar from the retained Collector Debian image, rather than macOS/BSD tar.
-`--no-check-device` prevents a different snapshot device number from forcing a full
-copy. Use the same relative roots on every export. The helper corrects GNU tar's
-cutoff to the filesystem snapshot time: without that correction, an existing file
-changed between capture and export could be omitted from the next increment.
-[GNU tar documents format 2 and its cutoff fields](https://www.gnu.org/software/tar/manual/html_node/Snapshot-Files.html).
-The helper rejects unsupported formats, invalid/later cutoffs, aliases and published
-files. It only changes a private `.part` working copy.
-
-Create a **new** private export directory, e.g.
-`$collector_recovery/exports/$collector_point.part`, with mode 0700. For the first
-baseline, `state.snar.part` must not exist. For an increment, copy the previous
-**accepted** point's `state.snar` to this new directory as `state.snar.part`.
-Never overwrite the previous point or advance it after a failed export.
-Set `collector_export` to this new directory and `collector_old_image` to the retained
-immutable image ID, then run. For example, create the new working directory with:
+Use GNU tar from the Collector image (not BSD tar). Create a new private working
+directory per export. For the first full export, `state.snar.part` must not exist;
+for an increment, copy the previous accepted export's `state.snar` into the new
+directory as `state.snar.part`. Never reuse or overwrite an earlier export.
 
 ```sh
 collector_export="$collector_recovery/exports/$collector_point.part"
 collector_old_image=sha256:REPLACE_WITH_RETAINED_IMAGE_ID
 sudo install -d -m 0700 "$collector_recovery/exports"
 sudo mkdir -m 0700 "$collector_export"
-# For an increment only: copy the accepted parent's state.snar to state.snar.part here.
-```
+# Increment only: copy the parent's state.snar to "$collector_export/state.snar.part".
 
-A pre-existing working directory is a refusal, not permission to reuse its `.snar`.
-Run the export:
-
-```sh
 docker run --rm --user 0:0 --network none --read-only \
   -v "$collector_recovery/$collector_point:/snapshot:ro" \
   -v "$collector_export:/backup" \
@@ -123,59 +68,42 @@ docker run --rm --user 0:0 --network none --read-only \
 sudo python3 freeze-tar-time.py "$collector_export/state.snar.part" "$collector_cutoff_ns"
 ```
 
-Abort on any nonzero exit. Before publication, record parent/image/layout/cutoff
-notes; rename the two `.part` files to `data.tar` and `state.snar`; compute a
-`SHA256SUMS` over the new archive and metadata. These hashes read the new export,
-not unchanged masters. Atomically rename the completed **directory** from
-`$collector_point.part` to `$collector_point` only after all outputs succeed.
-Interrupted directories remain incomplete; retry from the last accepted parent in
-a new working directory. Keep its source snapshot until the selected export/restore acceptance is complete.
+`freeze-tar-time.py` sets the `.snar` cutoff to the snapshot time, so files changed
+between snapshot and export are not missed by the next increment.
 
-Copy the completed point and all prerequisite parents using an authenticated,
-encrypted transport to the chosen independent destination. Copy into a private
-`.part` directory there, compare `SHA256SUMS`, and publish its directory only after
-success. Retain the cutoff/parent/image notes. Backups contain accounts and TLS
-private keys as well as collection data, so destination access must remain private.
-The `.snar` is needed to create the next increment; restoring needs the base and
-all increments in order. A missing/corrupt increment breaks that chain: use the
-last complete chain or a new full baseline, never silently skip it.
+Stop on any error. Then rename the two `.part` files to `data.tar` and `state.snar`,
+write a `SHA256SUMS`, and rename the directory to drop `.part`. A failed export
+stays incomplete; retry from the last good parent in a new directory.
 
-## Full restore and interrupted-update rollback
+Copy completed exports and all their parents over an encrypted channel to the
+other storage, into a `.part` directory, check `SHA256SUMS`, then rename. Exports
+contain accounts and TLS private keys. Restoring needs the full export and every
+increment in order; if one is missing, use the last complete chain or start a new
+full export. Tar selects changes by timestamps, so after a clock rollback start a
+new full export.
 
-Keep the current server stopped, even if its copy is on another host. Use the
-checkpoint's exact image. Retain current data for diagnosis; recover into new empty
-roots, with the recorded absolute/container config layout. Verify every independent
-archive's digest and parent/order before extraction. Use only trusted self-created
-backups and a private destination. GNU incremental extraction applies deletions;
-never extract an incremental chain over the live installation.
+## Restore
 
-Create the new empty host root before binding it (DSM requirement). Mount that root
-at `/recovered` and each backup point read-only at `/backup`, then execute GNU tar
-as root from the retained image for the full baseline followed by every increment:
+Keep the current server stopped. Use the point's image and restore into new empty
+directories; never extract an incremental chain over a live installation (it
+applies deletions).
+
+**Quick rollback:** make a writable snapshot from the read-only point into a new
+path and start the old image on it. Do not make the retained point itself writable,
+and do not restore only SQLite or config.
+
+**From exports:** verify each export's `SHA256SUMS` and order. Create the empty
+target directory, mount it at `/recovered` and each export read-only at `/backup`
+in a root container using the old image, then extract the full export followed by
+each increment:
 
 ```sh
 tar --extract --listed-incremental=/dev/null --file=/backup/data.tar \
   --numeric-owner --same-owner --acls --xattrs --directory=/recovered
 ```
 
-These are **container paths**, not commands to run against host `/`.
-After extraction, prepare only the recovered outer root and its empty `backups`
-directory with UID/GID 10001 and mode 0700. Keep captured child permissions/ownership.
-Set the one-shot CLI and stopped server to that recovered root, run doctor, then
-start exactly one copy of the recovered ServerId. Check account/session/grants,
-config/TLS identity, pending work/resume, inventory/manual authority, original bytes
-and playback as applicable. Periodically validate all retained originals, including
-unknown data, rather than equating a digest-valid tar with catalog verification.
+Give the recovered root and an empty `backups` directory UID/GID 10001 and mode 0700.
+Point the CLI and server at it, run `doctor`, and start exactly one copy. Check
+login, grants, pending work, items, original bytes and playback.
 
-For immediate local rollback after an interrupted update, keep the updated service
-stopped and make a new writable Btrfs snapshot **from the complete old read-only
-point** into a new path. Start the old image against that whole recovered point;
-do not flip the retained read-only point writable or restore only SQLite/config.
-Only switch the real service/data path after recovered-instance acceptance. Do not
-run two writable clones of one identity. The isolated qualification exercises this
-rollback with a pending upload, plus SIGKILL/restart and independent full restore.
-
-The stock/generic `btrfs receive` incremental route failed through the disposable
-bind-mounted filesystem on this DSM host; it is not an accepted alternative here.
-No remount of the host filesystem, raw-device access or production snapshot change
-was attempted to bypass that failure.
+`btrfs receive` failed on DSM in testing and is not a supported alternative.

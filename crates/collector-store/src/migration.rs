@@ -1,6 +1,5 @@
-//! One-time schema-1 to schema-2 archive conversion. This is deliberately narrower
-//! than P01's future publication transaction: immutable per-revision sidecars are
-//! checkpointed and the completion marker is written last.
+//! One-time schema-1 to schema-2 archive conversion. Immutable per-revision
+//! sidecars are checkpointed and the completion marker is written last.
 use super::*;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};

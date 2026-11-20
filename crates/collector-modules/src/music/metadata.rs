@@ -189,29 +189,14 @@ impl MusicBrainzReleaseObservation {
         {
             validate_text(value, false)?;
         }
-        if self.artist_ids.len() > 128 || self.disc_ids.len() > 128 {
-            return Err(Error::Invalid(
-                "MusicBrainz release identifiers are oversized".into(),
-            ));
-        }
-        if self.media.len() > 128 {
-            return Err(Error::Invalid("too many MusicBrainz media".into()));
-        }
         let mut positions = std::collections::BTreeSet::new();
         for medium in &self.media {
-            if medium.position == 0
-                || !positions.insert(medium.position)
-                || medium.tracks.len() > 256
-                || medium.disc_ids.len() > 128
-            {
+            if medium.position == 0 || !positions.insert(medium.position) {
                 return Err(Error::Invalid("invalid MusicBrainz medium".into()));
             }
             let mut track_positions = std::collections::BTreeSet::new();
             for track in &medium.tracks {
-                if track.position == 0
-                    || track.position > 256
-                    || !track_positions.insert(track.position)
-                {
+                if track.position == 0 || !track_positions.insert(track.position) {
                     return Err(Error::Invalid("invalid MusicBrainz track position".into()));
                 }
                 validate_text(&track.title, false)?;
@@ -277,7 +262,6 @@ impl CoverArtArchiveSnapshotObservation {
                     Some("image/png" | "image/jpeg" | "image/webp")
                 ))
             || self.schema_version != COVER_ART_ARCHIVE_SNAPSHOT_SCHEMA_VERSION
-            || self.image_count > 128
             || (listing
                 && (matches!(self.outcome, MetadataProviderOutcome::Candidates)
                     != (self.image_count > 0)))

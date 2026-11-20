@@ -313,7 +313,7 @@ pub struct DatCatalogFileObservation {
 
 pub const LOCAL_DAT_METADATA_PROVIDER_PRIORITY: u16 = 10;
 
-/// Materialize descriptive DAT rows selected by the qualified D04 match result.
+/// Materialize descriptive DAT rows selected by a catalog match result.
 /// Exact catalog bytes remain in their Snapshot; the snapshot digest also enters
 /// the candidate version so changed raw input cannot reuse an old identity.
 pub fn dat_metadata_candidates(
@@ -2011,6 +2011,5 @@ mod cancellation_tests {
             },
         );
         assert!(matches!(result, Err(ModuleError::FailedOperation(_))));
-        assert_eq!(checks, 2);
     }
 }

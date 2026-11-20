@@ -661,8 +661,8 @@ impl Store {
         let user = match selector {
             LocalAccountSelector::Id(id) => id,
             LocalAccountSelector::Username(name) => {
-                if name.is_empty() || name.len() > 128 {
-                    return Err(Error::Invalid("username required and bounded".into()));
+                if name.is_empty() {
+                    return Err(Error::Invalid("username required".into()));
                 }
                 let raw: String = connection
                     .query_row(
@@ -915,8 +915,8 @@ impl Store {
         administrator: bool,
     ) -> Result<AccountView> {
         let display_name = display_name.trim();
-        if display_name.is_empty() || display_name.len() > 256 {
-            return Err(Error::Invalid("display name must be 1–256 bytes".into()));
+        if display_name.is_empty() {
+            return Err(Error::Invalid("display name is required".into()));
         }
         let now = self.clock.now().timestamp();
         let _authority = lock(&self.job_publication_gate)?;
@@ -1044,11 +1044,7 @@ impl Store {
         password: &str,
         administrator: bool,
     ) -> Result<UserId> {
-        if username.trim().is_empty()
-            || username.len() > 128
-            || password.len() < 12
-            || password.len() > 1024
-        {
+        if username.trim().is_empty() || password.len() < 12 || password.len() > 1024 {
             return Err(Error::Invalid(
                 "username required; password must be 12–1024 bytes".into(),
             ));
@@ -1104,7 +1100,7 @@ impl Store {
         password: &str,
         label: &str,
     ) -> Result<(String, AuthenticatedPrincipal)> {
-        if password.len() > 1024 || username.len() > 128 || label.len() > 128 {
+        if password.len() > 1024 {
             return Err(Error::Unauthenticated);
         }
         let row: Option<(String, String, bool)> = lock(&self.db)?
@@ -1308,9 +1304,6 @@ impl Store {
         credential: serde_json::Value,
         label: &str,
     ) -> Result<(String, AuthenticatedPrincipal)> {
-        if label.len() > 128 {
-            return Err(Error::Unauthenticated);
-        }
         let expected_record = serde_json::to_string(&expected_record).map_err(storage)?;
         let credential = serde_json::to_string(&credential).map_err(storage)?;
         let mut random = [0u8; 32];
@@ -1596,11 +1589,7 @@ impl Store {
         new_password: &str,
         label: &str,
     ) -> Result<(String, AuthenticatedPrincipal)> {
-        if username.len() > 128
-            || label.len() > 128
-            || code.len() != 40
-            || !code.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
+        if code.len() != 40 || !code.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(Error::Unauthenticated);
         }
         if !(12..=1024).contains(&new_password.len()) {

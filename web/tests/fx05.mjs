@@ -48,7 +48,7 @@ try{
  // Global Add/import does not promise an active detail after attachment. Open
  // the known entry explicitly before testing playback across replacement.
  await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);
- await page.getByText('Album details, evidence & files',{exact:true}).click();
+ await page.getByText('Album details & files',{exact:true}).click();
  await page.getByRole('button',{name:'Add file to queue',exact:true}).click();
  const player=page.getByRole('region',{name:'Music player'});await player.getByRole('button',{name:'Play',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
@@ -69,7 +69,7 @@ try{
  await editor.getByRole('button',{name:'Close curator'}).click();await clickAction(page,'Replace original files');await clean.getByLabel('Resume original package files').setInputFiles(packageFiles);await clean.getByRole('button',{name:'Resume upload',exact:true}).click();
  await waitItem(item=>item.captures.length===1&&item.captures[0].id!==second.captures[0].id);
  await editor.getByRole('button',{name:'Close curator'}).click();
- await page.setViewportSize({width:390,height:844});await clickAction(page,'Replace original files');await clean.getByRole('button',{name:'Plan another replacement'}).click();await clean.getByRole('button',{name:'Review replacement',exact:true}).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);await page.screenshot({path:'/tmp/fx05-mobile-review.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await clickAction(page,'Replace original files');await clean.getByRole('button',{name:'Plan another replacement'}).click();await clean.getByRole('button',{name:'Review replacement',exact:true}).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'/tmp/fx05-mobile-review.png',fullPage:true});
  await clean.getByRole('button',{name:'Back to options',exact:true}).click();await editor.getByRole('button',{name:'Close curator'}).click();
  page.once('dialog',dialog=>dialog.accept());await clickAction(page,'Remove item');await page.getByRole('button',{name:'Restore entry',exact:true,includeHidden:true}).waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('.music-player audio')?.paused===true);await clickAction(page,'Restore entry');await page.getByRole('button',{name:'Remove item',exact:true,includeHidden:true}).waitFor({state:'attached'});await player.getByRole('button',{name:'Play',exact:true}).click();await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
  assert.deepEqual(errors,[]);console.log('FX-05 browser passed: retained reuse, reviewed defaults, same identity, upload failure/reopen/resume, uninterrupted historical playback, mobile review, removal/restoration.');

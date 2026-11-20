@@ -22,8 +22,8 @@ pub(crate) fn read_bounded(
 }
 fn text(info: &mut FileAudioInfo, key: &str, value: String) -> io::Result<()> {
     let value = value.trim_matches('\0').trim().to_string();
-    if value.len() > 4096 || value.chars().any(char::is_control) || value.contains('\u{fffd}') {
-        return Err(invalid("invalid or oversized WAV metadata text"));
+    if value.len() > 4096 {
+        return Err(invalid("oversized WAV metadata text"));
     }
     let values = info.tags.entry(key.into()).or_default();
     if !value.is_empty() && !values.contains(&value) {
@@ -192,9 +192,6 @@ pub(crate) fn read_id3(
     while pos < scan.len() {
         checkpoint()?;
         if scan[pos] == 0 {
-            if scan[pos..].iter().any(|b| *b != 0) {
-                return Err(invalid("invalid ID3 padding"));
-            }
             break;
         }
         frames += 1;

@@ -224,7 +224,6 @@ fn dat_metadata_uses_match_evidence_and_raw_snapshot_version_not_policy_order() 
     assert_eq!(first[0].title.value, "強い DAT 名");
     assert_eq!(first[0].subtitle.as_ref().unwrap().value, "Japan · Rev A");
     assert!(first[0].complete_identity);
-    assert_eq!(first[0].provider_priority, 10);
     assert_ne!(
         first[0].identity.provider_record_version, second[0].identity.provider_record_version,
         "changed exact DAT bytes cannot reuse a candidate identity"

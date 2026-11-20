@@ -345,16 +345,16 @@ export default function ImportFileTree({layout,reviewed,manualGroups=defaultOrde
   onTracks(files.filter(file=>audioFormat(file.name)===format).map(file=>selected.get(file.name)??{file_name:file.name,disc_position:guesses.get(file.name)??pathDisc(file.name)}));
  }
  return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>Files and album playback · {tracks.length} tracks {reviewed?'selected':'suggested'}{layout.needs_attention&&!reviewed?' · Needs attention':''}</summary>
-  {open&&<><p>All {files.length} originals will be preserved. Check the tracks you want for playback. Moving folders or entering track numbers sets playback order on the affected discs. Automatic numbers fill the open positions.</p>
+  {open&&<><p>All {files.length} files are kept. Check the tracks to play. Move them or enter track numbers to change the order.</p>
    {layout.notices.map(notice=><p key={notice} className="notice">{notice}</p>)}
    <div className="import-format-actions" role="group" aria-label="Choose playback format">{formats.length>1&&formats.map(format=><button key={format} disabled={disabled} onClick={()=>selectFormat(format)}>Select {format.toUpperCase()}</button>)}{layout.needs_attention&&!reviewed&&<button disabled={disabled||!tracks.length} onClick={()=>onTracks(tracks)}>Confirm playback selection</button>}</div>
    <div className="import-disc-setup">
     <label>Number of discs<input type="number" min={1} max={maxMusicNumber} step={1} disabled={disabled} value={countInput??discCount}
      onChange={event=>setCountInput(event.currentTarget.value)} onKeyDown={event=>{if(event.key==='Enter'&&countInput!==undefined)applyDiscCount();}}/></label>
     <button disabled={disabled||!validCount||countInput===undefined} onClick={applyDiscCount}>Apply disc count</button>
-    <small>{validCount&&targetCount<highestDisc?`Tracks on higher discs will move to Disc ${targetCount}.`:countInput!==undefined&&tracks.some(track=>track.disc_position==null)?'Tracks with automatic numbering will start on Disc 1.':'Choose a disc on its first track, then use Apply to below for later checked tracks.'}</small>
+    <small>{validCount&&targetCount<highestDisc?`Tracks on higher discs will move to Disc ${targetCount}.`:countInput!==undefined&&tracks.some(track=>track.disc_position==null)?'Tracks with automatic numbering will start on Disc 1.':'Set a disc on a track, then use Apply to below to copy it down.'}</small>
    </div>
-   {!tracks.length&&<p role="alert">Select at least one audio file for album playback.</p>}
+   {!tracks.length&&<p role="alert">Select at least one track to play.</p>}
    {orderedTree&&<div className="import-file-scroll" role="region" aria-label="Album file table" tabIndex={0}>
     <table className="import-file-tree" aria-label="Album files">
      <colgroup><col className="import-play-column"/><col/><col className="import-disc-column"/><col className="import-track-column"/><col className="import-apply-column"/>

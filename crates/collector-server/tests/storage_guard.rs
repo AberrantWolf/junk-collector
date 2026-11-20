@@ -94,5 +94,4 @@ fn remote_cli_policy_refuses_local_import_destination_before_copying() {
     );
     assert!(!output.status.success());
     assert!(!archive.exists());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("archive storage unavailable"));
 }

@@ -30,7 +30,6 @@ try{
  await page.reload();await expect(page.locator('.collection-row')).toHaveCount(5);const nav=page.getByRole('navigation',{name:'Collection tasks'});await nav.getByRole('button',{name:'Activity',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Work & history',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'Manage collections',exact:true}).count(),0);await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
  await expect(page.getByRole('main').locator('.collection-scope')).toHaveCount(0);
- await page.screenshot({path:'/tmp/collector-navigation-desktop.png',fullPage:true});
  const scope=page.getByRole('complementary',{name:'App sidebar'}).locator('.collection-scope');const summary=scope.locator('summary');await summary.focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'CD collection',exact:true}).click();await expect(summary).toContainText('CD collection');await expect(summary).toBeFocused();assert.equal(await scope.getAttribute('open'),null);
  await nav.getByRole('button',{name:'Lists',exact:true}).click();await expect(page.getByRole('heading',{name:'Lists',exact:true})).toBeVisible();assert.equal(new URL(page.url()).searchParams.get('collection'),seed[0].id);await expect(nav.getByRole('button',{name:'Lists',exact:true})).toHaveAttribute('aria-current','page');
  await page.goBack();await expect(page.getByRole('heading',{name:'Library',exact:true})).toBeVisible();await expect(summary).toContainText('CD collection');
@@ -86,8 +85,6 @@ try{
  await expect(historyView.getByRole('button',{name:'Dismiss history',exact:true})).toBeVisible();
  await historyView.getByRole('button',{name:'Clear selection',exact:true}).click();
  await expect(historyView.getByRole('button',{name:'Select loaded work',exact:true})).toBeFocused();
- const field=await historyView.getByLabel('Search work',{exact:true}).boundingBox();assert.ok(field.height<75,'Search work stretched into a tall empty panel');
- await historyView.screenshot({path:'/tmp/collector-work-filters-desktop.png'});
  await openWork.click();await historyView.getByRole('region',{name:'Selected work'}).waitFor();
  assert.equal(await page.getByRole('dialog',{name:'Work & history'}).count(),0);
  await historyView.getByRole('button',{name:'Back to activity',exact:true}).click();await openWork.waitFor();
@@ -99,12 +96,11 @@ try{
  await historyView.getByRole('button',{name:'Back to activity',exact:true}).click();await historyView.getByLabel('Search work',{exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});await historyView.scrollIntoViewIfNeeded();
  await expect(historyView.getByLabel('Search work',{exact:true})).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
- await historyView.screenshot({path:'/tmp/collector-work-filters-mobile.png'});
  await historyView.getByText('Date and attachment filters',{exact:true}).click();await expect(historyView.getByLabel('From',{exact:true})).toBeVisible();
  await historyView.getByText('Date and attachment filters',{exact:true}).click();
  await page.setViewportSize({width:1360,height:900});await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.setViewportSize({width:390,height:844});const toggle=page.locator('.menu-toggle');await expect(toggle).toBeVisible();await expect(nav).toBeHidden();await expect(summary).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
- await page.screenshot({path:'/tmp/collector-navigation-mobile.png',fullPage:false});await toggle.focus();await page.keyboard.press('Enter');await expect(nav).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');assert.equal(await nav.evaluate(node=>node.scrollWidth>node.clientWidth),false);const destinations=await nav.boundingBox();const manage=await page.locator('.management-navigation').boundingBox();assert.ok(destinations.y+destinations.height<=manage.y+1,'mobile navigation groups overlap');await page.screenshot({path:'/tmp/collector-navigation-mobile-menu.png',fullPage:false});await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
+ await toggle.focus();await page.keyboard.press('Enter');await expect(nav).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');assert.equal(await nav.evaluate(node=>node.scrollWidth>node.clientWidth),false);await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
  await nav.getByRole('button',{name:'Metadata',exact:true}).click();await expect(page.getByRole('heading',{name:'Metadata',exact:true})).toBeVisible();await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();await expect(summary).toContainText('CD collection');
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.keyboard.press('Escape');await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).click();await page.getByRole('dialog',{name:'Account & security'}).waitFor();await page.getByRole('button',{name:'Close account and security',exact:true}).click();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();

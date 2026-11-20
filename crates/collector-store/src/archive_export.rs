@@ -258,8 +258,10 @@ mod tests {
             assert!(import_with_fault(&export, &archive, &FailAt(phase)).is_err());
             assert!(archive.join(RESTORING).is_file());
             let state = root.path().join(format!("state-{index}"));
-            let error = Store::open(&archive, &state).err().unwrap().to_string();
-            assert!(error.contains("incomplete restore"), "{error}");
+            assert!(matches!(
+                Store::open(&archive, &state),
+                Err(Error::Unavailable(_))
+            ));
             assert!(!state.join("private.sqlite").exists());
             assert!(import_archive(&export, &archive).is_err());
         }
@@ -348,10 +350,7 @@ mod tests {
             &ChangeAfterValidation(export.join("archive/unknown.bin")),
         )
         .unwrap_err();
-        assert!(
-            error.to_string().contains("changed during import"),
-            "{error}"
-        );
+        assert!(matches!(error, Error::Storage(_)), "{error}");
         assert!(archive.join(RESTORING).is_file());
     }
 

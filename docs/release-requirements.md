@@ -1,284 +1,127 @@
-# First-release requirements
+# Product requirements
 
-Architectural rules: [ADR 0003](decisions/0003-portable-and-private-authority.md), [ADR 0006](decisions/0006-source-bound-evidence-and-coverage.md), [ADR 0009](decisions/0009-exposure-composition-and-independent-authorization.md), [ADR 0016](decisions/0016-coordinated-pre-release-evolution.md), [ADR 0017](decisions/0017-publish-qualified-artifact-bytes.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
+What Junk Collector is for and the requirements the owner has set. For what is
+implemented now, see [implementation status](implementation-status.md); for open
+work, see [remaining work](remaining-work.md).
 
-Pre-release evolution follows [the accepted compatibility and contract policy](decisions/pre-release-evolution.md). Earlier checkpoint compatibility is not a release requirement; data preservation and recovery remain required.
+## Scope
 
-Beta.22 is the oldest supported direct upgrade source. Qualify durable changes
-from that release using catalog schema v15 and private schema v23 as the storage
-baseline. Older records inside a supported archive remain subject to the
-preservation rules.
+A clean, useful self-hosted tool for a home lab: preserving and cataloguing
+physical video games and music CDs, plus digital music purchases. It keeps
+original data, verification results, descriptive metadata and physical
+inventory — including inventory without files and captures not yet identified.
+Price tracking is secondary. Security should be proportional to a home server
+that may be reachable from the Internet.
 
-The user revised the target on 2026-10-09 toward a clean, useful home-lab tool,
-with proportional public-Internet security, reassessed contracts and meaningful
-provenance. Phono Junk is no longer a target. This explicit direction supersedes
-universal release gates and history-retention assumptions in the earlier plan from
-`98e9187`. [Implementation status](implementation-status.md) describes what exists;
-[remaining work](remaining-work.md) is the single remaining-work queue.
-See [the accepted scope policy](decisions/home-lab-scope.md).
+The server targets Linux (native binary or container) and embeds the web UI for
+listening, curation and administration. Trash Amp is a separate lightweight music
+player that connects to Collector.
 
-## Current home-lab release gate
+Out of scope for now: replication between servers, cross-collection
+deduplication, runtime plugins, video, emulators, ripping hardware, DRM'd
+purchases, synchronized listening, PriceCharting exchange and an iOS app.
 
-The [current capability/evidence checklist](release-readiness.md) records accepted
-coverage and remaining native/owned-format limits without creating another queue.
+## Preservation
 
-- Preserve raw originals, physical collection facts, manual authority, unknown data
-  and meaningful source-bound evidence. Keep accepted metadata/artwork attribution;
-  do not require a permanent history of every lookup or equivalent provider response.
-  Simplification/compaction must preserve actual data and recovery through an
-  explicit tested policy, not silent deletion. The [bounded retention audit](retention-audit.md)
-  records current owned policies and the limits of implemented response reuse/conversion.
-- Deliver actual web and Trash Amp collection/listening workflows. Complete relevant
-  LAN/native qualification and meaningful format/audio oracles for advertised
-  support. Phono-specific acceptance is retired. Missing capabilities stay labeled.
-- Provide an executable stopped-server backup/restore workflow and qualify the
-  intended Linux binary/container and storage layout. The HL-03 CLI and tested
-  [operator runbook](local-alpha-installation.md#stopped-server-backup) provide the
-  stopped-server workflow; [actual isolated NAS install/update/restore](validation/nas-operations-2026-10-20.md)
-  and [public alpha.3 Portainer upgrade/recovery](validation/container-publication-2026-10-21.md)
-  are qualified with their named limits.
-  The [clarified backup scope](decisions/home-lab-scope.md#local-recovery-and-optional-media-backups--clarified-2026-10-20)
-  requires practical local recovery, not automatic full-media backups, cloud storage
-  or a separately chosen independent destination. External copies and backup-age
-  reminders are optional; the current explicit full backup includes media.
-- Publish automatically built Docker images that users can anonymously pull for
-  installation and updates without local compilation or image archive transfer
-  (user requirement, 2026-10-19). Exercise the existing release workflow for amd64
-  and arm64, versioned images/digests and documented moving release channels;
-  stable `latest` must not advance to a prerelease. Qualify a Portainer pull/update
-  with existing configuration, accounts, originals and pending work. Coordinate
-  scalable backup and storage-format-specific recovery instructions. Workflow
-  scaffolding alone is not release acceptance; HL-07 owns completion.
-- For supported public access, qualify trusted HTTPS, listener/page/API exposure,
-  roles, Origin/session controls, recovery/revocation, credential redaction and
-  bounded untrusted work. Reuse the existing backend/LAN/isolated evidence and
-  operator-observed journeys; add a short smoke check at the intended HTTPS URL.
-  A new isolated tunnel and repetition of every configuration/failure/load case
-  through the proxy are not release prerequisites. Keep focused security review;
-  automatic rotation/discovery, exhaustive commercial matrices and distributed
-  limiting are not default prerequisites.
-- Test real user journeys, reasonable collection scale on the intended host,
-  keyboard/mobile use and affected repository/sibling gates. State supported
-  platforms, evidence limits and any upgrade/storage promise explicitly.
+- Keep raw originals byte-for-byte: ISOs, cartridge images, redumper output,
+  BIN/CUE packages, FLAC/MP3/WAV purchases. Never rewrite them.
+- Keep physical collection facts, manual metadata choices, accepted
+  metadata/artwork sources, meaningful evidence and unknown module data. Lookup
+  history that adds nothing does not need to be kept.
+- Simplifying or compacting stored data needs an explicit, tested conversion —
+  never silent deletion.
+- Recovery after an interrupted import or a rebuilt catalog must not lose
+  originals, manual overrides, loans or evidence.
+- Practical local recovery is required: a stopped-server full backup/restore
+  (including media) and a portable full export/import. Automatic, cloud or
+  off-site backups are not required; a backup-age reminder is optional.
 
-A separate Collector Slint app, full offline/activity parity across clients,
-100k-item load gate, general Retro Junk migration, delta export and advanced
-security certification are deferred/conditional outcomes in the backlog. Earlier
-proposed contracts must be reviewed for validity and excessive complexity before
-implementation. No older ticket is a mandatory stability/retention promise merely
-because it was written down.
+## Import
 
-The standalone full portable archive export/import portion of HL-10 is now
-included in public alpha.3; see its [operator workflow](archive-export.md) and
-[local acceptance](validation/archive-export-2026-10-21.md). It transfers preserved
-collection data into a fresh identity, with explicit access recovery. Deltas and
-legacy adoption remain conditional; full operational backup/restore is separate.
+- Import from configured inbox folders or resumable browser uploads. Validate
+  paths, stage, hash, propose identity, let the user review, verify the
+  destination bytes, publish, then run checks and enrichment in the background.
+- Importing a raw dump creates the entry with one owned physical copy by
+  default. Manual entries can exist without an owned copy, or be wishlist-only.
+- Source files are kept by default; removing them from the inbox is an explicit
+  action.
+- Missing optional tools or providers must not prevent basic preservation.
+- Import history lists each import and attempt with actionable outcomes. Users can
+  reopen older imports, discard unpublished staging (showing what space was
+  reclaimed), dismiss/restore finished entries, and fix a wrong association
+  without losing originals or evidence.
+- Items can be removed and restored, with clear rules about what is kept. An
+  existing item can be cleanly reimported without duplicate entries. Users can
+  clean up failed, cancelled and unfinished work.
 
-## Digital purchases — requested 2026-10-19
+## Identification and metadata
 
-[HL-02](remaining-work.md)
-owns complete DRM-free FLAC/MP3 purchase support: preserve exact originals,
-record digital acquisition without a physical copy, review tags/artwork and use
-normal library/search, playback, playlists and Trash Amp online/offline listening.
-Native high-resolution FLAC and MP3 timing/seek behavior require named independent
-vectors and actual client evidence. Private purchase facts/companions remain
-protected through APIs, original downloads and offline manifests. Lossy originals
-remain preservation masters without claims of recovered lossless quality, CD
-identity or catalog/audio verification. The [implementation](digital-purchases.md)
-is delivered; [qualification](validation/digital-purchases-2026-10-19.md) records
-independent vectors, actual Chrome and native GUI playback/seek/download/offline
-acceptance on the named clients. Additional codecs, DRM and album-image splitting
-are outside its first delivery.
-Raw-disc guided imports retain their physical-copy default; digital intake must
-explicitly follow the new acquisition policy. HL-02 records the completed delivery;
-the linked implementation and dated validation records define its supported
-contract and acceptance evidence. Follow-up scope stays in the consolidated queue.
+- Games: upload standard DAT files or ZIPs, review and activate them; existing
+  and future imports are identified automatically. Identity never comes from
+  file names, suffixes or sizes, and malformed input never falls back to a guess.
+  Headerless images need a complete unambiguous match; CRC-only matches are
+  weaker evidence.
+- Music: show proper track names when a matching MusicBrainz release has them,
+  with an obvious lookup action for older albums. Gathering names never requires
+  reimporting.
+- Pick a useful tentative match when ambiguous, keep the alternatives, mark
+  uncertainty visibly, and keep manual corrections across refreshes and provider
+  outages. Identity strength outranks language; the account's metadata language
+  (English by default) picks between variants, and original text is kept.
+- Multi-disc albums show a per-disc checklist: which originals are attached,
+  recorded versus release-listed disc IDs, missing discs, uncertain assignments,
+  and how to complete structure and audio checks. Detailed processing history is
+  available but doesn't dominate the album view.
+- Integrity, structure, DAT matches, AccurateRip and conversion checks are
+  separate kinds of evidence. MusicBrainz identity never proves audio
+  correctness.
+- Scans: equivalent scans can't run twice at once; completed results are the
+  primary action, and repeat results are consolidated with recheck dates/counts.
+  A cached result is not a fresh verification.
 
-## Broader product target reference
+## Browsing and playback
 
-The sections below retain the earlier product goals, detailed safety constraints
-and dated user requirements. Their feature lists and broad acceptance matrix are
-reference scope, not a second execution queue or universal home-lab release gate.
-Current scope and retention policy take precedence. Completed requirements remain
-useful regression criteria; deferred capabilities require fresh bounded design
-before implementation. No unrun check is marked passed by this change.
+- Browsing and search show cover art beside each game or album row, including
+  offline views, with platform/edition/artist details, accessible labels and
+  consistent placeholders. Missing artwork and uncertain identity look different.
+- Library data loads in layers — connection and login, album count, title pages,
+  artwork, then tracks on demand — each request fast on a healthy install.
+  Background work shows as pending without blocking already-published data.
+- Playback streams the requested bytes without first verifying the whole file.
+  A failed read belongs to that stream; the client decides what to do (Trash Amp
+  skips to the next track).
+- Preparing audio is explicit: a whole album (including selected associated
+  discs) can be prepared as separate FLAC tracks; Opus preparation on import is
+  opt-in. Other work keeps running while preparation runs.
+- Lists belong to one collection. Music lists hold individual tracks; adding an
+  album or disc appends its tracks in order. Repeats and custom order are kept;
+  lists can be played or shuffled. Unavailable members and concurrent edits are
+  shown, never silently dropped.
+- Trash Amp supports online and offline listening; offline copies can't be
+  recalled once downloaded.
 
-## Automatic standard-game identification
+## Interface
 
-The accepted 2026-10-10 delivery requires upload → review → activate → automatic
-existing-game identification and future guided imports without technical fields.
-The [supported detection matrix](game-identification.md) is the contract: finite
-standard systems, supported No-Intro/Redump conventions and existing qualified
-byte interpretations. No suffix/name/size-based identity or permissive fallback
-from recognized malformed/unsupported input is permitted. Headerless bytes need a
-complete unambiguous catalog match; CRC-only evidence is explicitly weaker.
-
-Preserve failed inputs, originals, explicit authority, sources and unknown records.
-Automatic/Manual controls must apply detected fields immediately to detail, browse
-and search, while deliberate edits survive refresh. Qualify bounded DAT/ZIP batches,
-multiple active systems, ambiguity/partial coverage, restart/page recovery, shared
-owners, catalog replacement and source/permission fences through the actual worker
-and UI. [Dated delivery evidence](validation/game-identification-2026-10-10.md) does
-not imply universal format understanding or new format-algorithm qualification.
-
-## Collection lists and playlists
-
-Lists belong to one collection and are portable with its archive. Music list units
-are individual audio tracks; album/disc additions append their supported tracks in
-numeric order. Preserve intentional repeats, editable order, Play and Shuffle play.
-Other collection lists use entries; future playable modules require an actual typed
-target resolver. Shared collection roles govern read/play and curation writes.
-Unavailable members and concurrent changes must be visible, never silently removed
-or overwritten. List queries/admission must not hash or read full media payloads.
-
-## Earlier local-alpha delivery
-
-Accepted 2026-09-16: prioritize ingestion of raw dumps, automatic metadata,
-artwork/text browsing, supported CD playback and multiple trusted local users in
-the existing web UI. The [local-alpha plan](local-alpha-plan.md) records the earlier delivery;
-current ordering is in the consolidated backlog. Automatic enrichment is default for its new guided import path;
-playback derivatives remain optional and explicitly requested. Local-only limits
-deployment scope, not authorization or transport protections. A tested stopped-server
-backup/restore procedure is an alpha gate; complete portable export, native/offline
-clients, public deployment and scale qualification remain full-release work.
-LA1 guided ingestion and automatic enrichment is reviewed and corrected locally;
-LA2 album preparation/listening is reviewed and corrected locally (2026-09-17),
-while LA3 installation qualification is next. The alpha is a smaller delivery milestone,
-not evidence that the requirements below are complete. Games initially use DAT
-metadata; general online game artwork remains an explicit follow-up. Actual
-supported dump formats require recorded qualification.
-
-## Product and scope
-
-Junk Collector is a self-hosted preservation and collection system, initially for physical video games and music CDs. It keeps original data, evidence, descriptive metadata and physical inventory, including inventory without files and unidentified captures. Price is secondary. Browsing, search and offline collections must show cover/album art beside text rows for games and CDs, with useful edition/platform/artist information, accessible labels, foreign-language text and consistent placeholders. Missing artwork and uncertain identity are different states.
-
-The first release targets a Linux server and a Slint macOS client. The binary embeds a React/TypeScript web interface for curation and administration. Trash Amp remains a lightweight standalone music player, sharing reusable services and connecting through a collector-provider adapter. SwiftUI iOS through UniFFI and PriceCharting collection exchange are follow-on work. PriceCharting API availability and exchange permissions have not been established here.
-
-## Architectural invariants
-
-Shared libraries own parsing, hashing, analysis, decoding, DSP and optional device adapters. Collection foundation owns typed durable identities, inventory, assets, captures, representations and evidence. Domain modules own game/music schemas, identification, verification and presentation contributions. Application services own authorization, commands, queries, imports, resolution and jobs. Infrastructure owns files, providers, tools, archive transactions and SQLite. HTTP transports services; clients own connections, caches and personal activity; presentations call services.
-
-Domain logic must not depend on HTTP, SQLite, a GUI or an application directory layout. Do not duplicate application policy in frontends. When a capability has no natural architectural home, settle that boundary before implementing it.
-
-Distinguish works/editions, physical specimens, components/carriers, capture events, representations and supporting assets. Ownership, possession, wishlists, loans, acquisition and disposal are independent. A sale or loan never implicitly deletes archived bytes. Durable IDs do not depend on paths, servers or database rows. Hashes, money, dates, languages, coordinates and outcomes use explicit validated types where applicable; arbitrary provider payloads remain structured data, not a substitute for domain types.
-
-Compiled modules have versioned schemas, migrations, capability handlers and presentation contributions. Host services mediate I/O and jobs, leaving a future isolation boundary. Preserve unknown module data during export/import/reindex and provide a generic client display. Runtime plugins are deferred.
-
-Keep junk-libs as independently consumable workspace crates; no umbrella dependency or repository split is needed. Format and device backends are optional. Extract algorithms/audio in separate migrations with sibling-project checks. Reuse Retro Junk processing and Phono Junk primitives, not their scanning, persistence or application flow.
-
-## Preservation and import
-
-Readable directories contain versioned TOML manifests, original files and append-only JSON evidence. Stable IDs survive renames. SQLite catalog projections are rebuildable; accounts, credentials, grants, devices, durable jobs and personal activity are private operational state. SQLite stays on local storage even if archive bytes live on a NAS.
-
-One archive adapter owns a single writer, staging, durable recovery records, publication and atomic projection updates. Expected revisions reject conflicts. Resolve interrupted transactions before accepting writes. Archive-only recovery restores history but requires explicit access reassignment. Full backup includes private state. Retain revisions, tombstones and exportable changes for future replication. Servers initially operate independently and never share an active archive writer.
-
-Configured inboxes and resumable browser uploads inventory complete packages, validate paths, stage and hash, analyze identity candidates, allow review of provisional matches/physical associations, verify destination bytes, publish, then run independent verification/enrichment/derivative jobs. Preserve sources. Bound work, support cancellation and idempotent retries. Missing optional providers/tools cannot prevent basic preservation.
-
-Preserve raw ISOs, cartridge images, redumper outputs and BIN/CUE packages. Integrity, structure, game DAT matches, AccurateRip, reconstruction and derivative validation are distinct evidence types. Record exact inputs, tool versions, catalog snapshots, outcomes and limitations. Changed inputs make old evidence historical. AccurateRip is the initial CD verification method; MusicBrainz identity never proves audio correctness. Qualify each analyzer operation with fixtures and independent reference results.
-
-Select useful tentative metadata when ambiguous, retain alternatives and original provider responses, visibly mark uncertainty, and preserve manual overrides across refreshes/outages. Strong identity evidence outranks language; the persisted default metadata language chooses album variants, with English as the initial account preference, while original text remains retained.
-
-## Layered library reads — requested 2026-11-02
-
-Web and remote players must refresh in independent layers: trusted connection and
-login, authorized album count, byte-bounded title pages, missing/changed artwork,
-and tracks on album demand when their cache is absent or invalid. Target each
-bounded healthy-installation request within one second; expose directly required
-background work as pending without blocking unrelated published data. Responses
-must provide independently queryable revision-bound counts and stateless pagination.
-Clients wanting progress query those counts and track their own state; Collector
-must not manage client refresh sessions, progress counters or cache inventories.
-Library queries and cache validation never read/hash full tracks. Playback streams requested
-bytes without whole-file verification first. Integrity checks remain separate.
-File-read failures belong to the media request/stream; clients decide recovery
-(Trash Amp records the failed file/attempt and advances to the next track).
-See [the implemented source contract and acceptance](layered-library-refresh.md)
-and [delivery evidence](validation/layered-library-refresh-2026-11-02.md). Coordinated
-native pin/merge and actual-host/release qualification remain in [the queue](remaining-work.md).
-
-## Playback and offline use
-
-Expose media through authorized capability readers, not paths. Integer sample positions, seeking, queues and DSP belong below UI layers. Server-side playback derivatives are optional. Users can prepare audio explicitly or opt in to Opus preparation on music import. FLAC remains the default for explicit preparation. Preserve originals, record source and conversion settings, and validate lossless output against source PCM.
-
-Cache by server and immutable representation/profile identity. Downloads resume, include thumbnails/metadata/evidence summaries, support pinned albums, budgets and eviction. Favorites and playback activity synchronize after reconnection; collection edits require connectivity. Revocation prevents future access but cannot recall disconnected copies. There is no offline DRM requirement.
+Every screen offers useful defaults, only valid choices, prerequisite guidance up
+front, and clear outcomes and recovery steps. This applies to new screens too.
 
 ## Networking and security
 
-Client, curation and administration are distinct pages and backing APIs. Public client access is enabled; public curation and administration default off. Enabling public administration also exposes curation; enabling curation alone does not expose administration. Roles remain enforced regardless of exposure.
+- Client, curation and administration are separate pages and APIs. Public client
+  access is on; public curation and administration are off by default. Roles
+  always apply.
+- Public/private is decided by listener, never by source IP or forwarded headers.
+  A public tunnel only reaches the public listener.
+- Native clients trust the server's own certificate after authenticated pairing;
+  there is no general invalid-certificate bypass. Browser trust needs a properly
+  trusted hostname (local DNS, local CA or Tailscale HTTPS).
+- Argon2id passwords, standard WebAuthn passkeys, revocable device credentials,
+  recovery codes and local administrator recovery. Single-user mode hides account
+  selection but is not anonymous access.
 
-Public tunnels/proxies always reach a public listener even when their upstream is localhost. Do not infer private status from source IP or forwarded headers. Private management binds explicit LAN/tailnet interfaces or a dedicated private proxy listener. Tailnet ingress is private but does not bypass authorization. Cloudflare Tunnel maps only to the public listener; tailnet-only Tailscale Serve may map to private management.
+## Distribution
 
-Native clients trust a server-managed local TLS identity provisioned through authenticated pairing or explicit fingerprint/QR enrollment. Verify the handshake and server identity before credentials or endpoint merging. No general invalid-certificate bypass. Learn .local, LAN IP, tailnet and public routes; prefer healthy direct LAN, then reachability/latency with hysteresis. Reject unexpected keys and support authenticated rotation. After pairing, encrypted LAN playback/downloads must work without Internet access. mDNS and Tailscale naming are distinct mechanisms; do not assume .local provides tailnet discovery.
-
-Browser trust is separate: use a browser-trusted hostname/local DNS, trusted local CA or Tailscale HTTPS. Native pairing does not install browser trust. Tailscale HTTPS uses its full tailnet hostname, not arbitrary .local names. Current Chromium localhost onboarding is a convenience, not proof of other browsers or remote HTTPS readiness.
-
-Use Argon2id passwords, standard password-manager-compatible WebAuthn, a stable HTTPS authentication origin, browser-mediated client enrollment, revocable device credentials, recovery codes and local administrator recovery. Single-user mode uses the default profile and hides user selection without making access anonymous. Passkeys remain bound to the authentication origin; enrolled device credentials support alternate routes.
-
-Use versioned JSON APIs, generated OpenAPI/TypeScript contracts, cursor pagination, structured errors, optimistic revisions, idempotent commands, bounded resumable chunks, durable jobs, HTTP events with polling fallback and ranged media. Enforce authorization, private-field filtering, CSRF protection, secure sessions, rate limits, credential redaction and explicit proxy rules.
-
-Authenticated clients obtain bounded collection-type descriptors and server-computed content availability. Item creation inherits the collection owner; generic forms may edit only module-declared scalar fields through owner-validated patches, while structured and unknown data remains preserved. Missing modules and legacy-unassigned collections are visibly read-only without disabling independently authorized access management, personal activity, artwork or media reads. Type labels and safe summaries are data-driven rather than a fixed games/music client enum.
-
-## Release acceptance
-
-- User clarification (2026-09-28): importing raw dumps defaults a newly created
-  entry to one owned physical copy. Manual entry can remain without an owned copy
-  and can be wishlist-only. Music imports should expose proper track names when a
-  matching provider release has them, with an obvious metadata lookup for older
-  albums. Reimport describes replacement of original files; gathering names does
-  not require it.
-- User clarification (2026-09-28): multi-disc albums need a collector-facing
-  per-disc checklist: distinguish each attached original, expose recorded versus
-  release-listed disc IDs and missing media, make uncertain disc assignments
-  explicit, and show how to complete structure and audio checks. Detailed
-  processing history remains accessible but must not dominate the album view.
-
-- User clarification (2026-09-21): provide manual item removal with clear retained
-  history/originals semantics and restoration, plus clean reimport of an existing
-  item without duplicate visible entries or obsolete work becoming current again.
-  Allow selected cleanup of failed/cancelled and unfinished work, with durable
-  cancellation and actual staging reclamation where applicable. Preserve manual
-  information by default and make explicit reset choices reviewable.
-- User clarification (2026-09-21): prevent equivalent active scans server-side as
-  well as in the UI, show completed results as the primary action, and consolidate
-  equivalent results with lightweight actual-recheck dates/counts. Equivalence
-  includes source, algorithm/version, settings, reference content and coverage;
-  identical outcome labels alone do not suffice. Cached reuse is not a fresh
-  verification. [The proposed UX fix set](ux-fix-plan.md) maps these requirements
-  and related unfinished U05/P04 criteria to implementation deliveries.
-
-- User clarification (2026-09-15): explicitly prepare an entire album as separate
-  FLAC tracks, including selected associated discs, using durable batch submission
-  and existing per-track jobs. Independent work remains queueable while earlier
-  jobs run throughout the application; only real dependencies/conflicts or explicit
-  admission limits block it. Verify partial outcomes, duplicate prevention, retry,
-  cancellation and restart. [D07.4–D07.5 and U05](background-work-plan.md) own this
-  web completion requirement; bounded execution is compatible with queued work.
-
-- User clarification (2026-09-15): every interface needs useful valid defaults,
-  eligible choices, up-front prerequisite guidance and clear outcomes/recovery.
-  Audit all implemented screens/actions and resolve findings before claiming web
-  UI completion, not only user-reported examples. Apply the same acceptance
-  standard to future interfaces. [U05](interface-readiness-plan.md) owns this gate;
-  analysis must choose valid CUE/TOC anchors and identify missing package members
-  before execution while preserving basic import without optional analysis.
-
-- User clarification (2026-09-15): web curation is incomplete without identifiable
-  import and per-attempt history, actionable outcomes, reopening older imports,
-  and cleanup of erroneous imports. Discard unpublished staging with explicit
-  byte-reclamation results; dismiss/restore terminal history and correct mistaken
-  published associations while preserving originals/evidence. Acceptance belongs
-  to [P04.4–P04.6](import-management-plan.md).
-
-- Recover interrupted publication and catalog rebuild without losing originals, manual overrides, loans or evidence; retain unknown module data and directory-independent IDs.
-- Exercise duplicate specimens, multi-disc editions, unidentified captures, wishlist-only inventory, lending and disposal.
-- Validate normalized hashes, track structure, AccurateRip offsets and FLAC PCM against independent vectors and real-dump oracles.
-- Demonstrate tentative metadata, durable manual corrections and provider-outage behavior.
-- Verify artwork beside game/CD rows in browsing, search and offline views; placeholders, lazy loading and accessibility work.
-- Exercise all public exposure combinations, pages and APIs, role denials, malicious paths, upload resumption, credential recovery/revocation and spoofed proxy headers.
-- Pair once, disconnect the Internet, and demonstrate native LAN playback/downloads. Exercise spoofed discovery, certificate changes/rotation and actual LAN/public transfer failover.
-- Benchmark 100,000 items and one million file/evidence records with five concurrent users on a recorded four-core/16-GB/local-SSD host. Warm paginated browse/search target: below 500 ms p95.
-- Validate the native Linux binary and minimal non-root container with explicit archive/state/scratch mounts, public tunnels, private tailnet management, NAS payloads/local SQLite and missing optional tools.
-
-Replication, cross-collection byte deduplication, runtime plugins, video, emulators and ripping hardware are outside the initial release. Preserve architectural room for them without implementing them as hidden prerequisites.
+Docker images for amd64 and arm64 are built automatically and can be pulled
+anonymously, so users install and update without compiling. `latest` never points
+at a prerelease. Updating a Portainer stack keeps existing configuration,
+accounts, originals and pending work.

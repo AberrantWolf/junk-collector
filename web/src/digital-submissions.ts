@@ -7,11 +7,11 @@ const active=new Map<string,Promise<{job_id:string}>>();
 export function pendingDigitalSubmissions(userId:string):DigitalSubmission[]{
  const values:DigitalSubmission[]=[];
  let keys:string[];
- try{keys=Object.keys(localStorage).filter(key=>key.startsWith(`${prefix}${userId}.`)).slice(0,128);}catch{return [{key:'storage-unavailable',expected_revision:0,extended:false,itemId:'',title:'Saved queue requests',userId,unreadable:true,error:'Browser storage cannot be read. Inspect Activity before queueing these albums again.',failure:'uncertain'}];}
+ try{keys=Object.keys(localStorage).filter(key=>key.startsWith(`${prefix}${userId}.`)).slice(0,128);}catch{return [{key:'storage-unavailable',expected_revision:0,extended:false,itemId:'',title:'Saved queue requests',userId,unreadable:true,error:'Browser storage cannot be read. Check Activity before queueing these albums again.',failure:'uncertain'}];}
  for(const key of keys){
   const live=liveReceipts.get(key);if(live){values.push(live);continue;}
   try{const saved=JSON.parse(localStorage.getItem(key)||'null');if(!saved||typeof saved.key!=='string'||!saved.key.length||saved.key.length>128||!/^[\x21-\x7e]+$/.test(saved.key)||!Number.isSafeInteger(saved.expected_revision)||saved.expected_revision<0||typeof saved.extended!=='boolean'||saved.refresh!==undefined&&typeof saved.refresh!=='boolean'||saved.error!==undefined&&typeof saved.error!=='string')throw new Error('Invalid receipt');if(confirmed.get(key)===saved.key)continue;values.push({...saved,userId,itemId:key.slice(`${prefix}${userId}.`.length),title:saved.title||'Album',extended:!!saved.extended});}
-  catch{values.push({key:`unreadable:${key}`,expected_revision:0,extended:false,itemId:key.slice(`${prefix}${userId}.`.length),title:'Saved album queue request',userId,unreadable:true,error:'Saved queue receipt is unreadable. Inspect Activity to establish its outcome before queueing this album again.',failure:'uncertain'});}
+  catch{values.push({key:`unreadable:${key}`,expected_revision:0,extended:false,itemId:key.slice(`${prefix}${userId}.`.length),title:'Saved album queue request',userId,unreadable:true,error:'A saved queue request is unreadable. Check Activity before queueing this album again.',failure:'uncertain'});}
  }
  return values;
 }
@@ -19,7 +19,7 @@ export function pendingDigitalSubmissions(userId:string):DigitalSubmission[]{
 function storage(value:DigitalSubmission){return `${prefix}${value.userId}.${value.itemId}`;}
 function changed(value:DigitalSubmission,jobId?:string){window.dispatchEvent(new CustomEvent('collector-digital-submission',{detail:{...value,jobId}}));}
 export function submitDigitalAlbum(value:DigitalSubmission):Promise<{job_id:string}>{
- if(value.unreadable)return Promise.reject(new Error('The saved queue receipt cannot be replayed. Inspect Activity to establish its outcome.'));
+ if(value.unreadable)return Promise.reject(new Error('This saved request cannot be retried. Check Activity to see what happened.'));
  if(getApiIdentity()?.user_id!==value.userId)return Promise.reject(new Error('Sign in to queue this album.'));
  const name=storage(value);const existing=active.get(name);if(existing)return existing;
  const frozen={...value,error:undefined,failure:undefined};localStorage.setItem(name,JSON.stringify(frozen));confirmed.delete(name);liveReceipts.set(name,frozen);changed(frozen);

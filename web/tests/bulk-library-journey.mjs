@@ -21,7 +21,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  assert.equal(await imports.getByLabel('Automatic metadata and artwork').isChecked(),true);
  assert.equal(await imports.getByLabel('Audio preparation after import').inputValue(),'default');
  assert.equal(await imports.locator('.care-row').count(),2,'Nested tracks became separate or unassigned packages');
- await imports.getByText('1 unsupported or unassigned files will remain outside this import',{exact:true}).click();
+ await imports.getByText(/^1 unsupported or unassigned files/).click();
  await imports.getByText(/Bulk library journey\/notes.txt/).waitFor();
  // Interrupt a real browser transfer, reload, then reselect the entire folder.
  let releaseUpload;const held=new Promise(resolve=>{releaseUpload=resolve;});
@@ -31,7 +31,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const intakeId=new URL(page.url()).searchParams.get('item');assert.ok(intakeId);
  releaseUpload();await page.reload({waitUntil:'domcontentloaded'});
  await expect.poll(async()=>{const count=await page.getByRole('region',{name:'Imports workspace'}).count();if(!count){const status=await page.evaluate(async()=>{const c=new AbortController();setTimeout(()=>c.abort(),2000);try{return (await fetch('/api/v1/me',{signal:c.signal})).status;}catch(e){return String(e);}});console.log('Bulk reload account status:',status);}return count;},{timeout:60000}).toBe(1);
- await chooseFolder(page,imports.getByLabel('Reselect original folder to resume the complete batch'),folder);
+ await chooseFolder(page,imports.getByLabel('Reselect folder to resume upload'),folder);
  await expect.poll(()=>page.evaluate(async id=>{const r=await fetch(`/api/v1/intakes/${id}`);if(!r.ok)return 0;return (await r.json()).preserved;},intakeId),{timeout:60000}).toBe(2);
  const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
  const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Conflicting release disc placements must remain available for reviewed grouping');
@@ -82,7 +82,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
   await preparation.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
   const batch=page.getByRole('region',{name:'Review batch'});
-  await batch.getByText('2 tracks planned · 0 already ready',{exact:true}).waitFor();
+  await batch.getByText(/2 tracks planned/).waitFor();
   const batchId=new URL(page.url()).searchParams.get('batch');assert.ok(batchId);
   await nav.getByRole('button',{name:'Activity',exact:true}).click();
   await page.getByRole('region',{name:'Activity workspace'}).getByRole('button',{name:/FLAC preparation · 1 albums/}).click();

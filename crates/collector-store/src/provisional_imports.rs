@@ -119,7 +119,7 @@ fn validate(record: &ImportRecord) -> Result<()> {
     let mut names = HashSet::new();
     for file in &view.files {
         crate::files::safe_name(&file.name)?;
-        if !names.insert(file.name.to_lowercase()) {
+        if !names.insert(collector_core::archive_relative_path(&file.name).to_lowercase()) {
             return Err(Error::Invalid(
                 "Import file inventory has a case-colliding name".into(),
             ));
@@ -377,9 +377,9 @@ impl Store {
         records: &[ImportRecord],
         intents: &[GuidedIngestIntent],
     ) -> Result<Vec<collector_app::ImportView>> {
-        if records.is_empty() || records.len() != intents.len() || records.len() > 64 {
+        if records.is_empty() || records.len() != intents.len() {
             return Err(Error::Invalid(
-                "guided acceptance requires 1–64 paired packages".into(),
+                "guided acceptance requires paired packages".into(),
             ));
         }
         let mut views = Vec::with_capacity(records.len());
@@ -814,7 +814,12 @@ impl ProvisionalImportPort for Store {
                 import_publication_files(&record)?
                     .iter()
                     .map(|file| {
-                        index_checkpoint::stamp(&stage.path().join("payload").join(&file.name))
+                        index_checkpoint::stamp(
+                            &stage
+                                .path()
+                                .join("payload")
+                                .join(collector_core::archive_relative_path(&file.name)),
+                        )
                     })
                     .collect::<Result<Vec<_>>>()
             })
@@ -912,9 +917,9 @@ impl ProvisionalImportPort for Store {
         mut records: Vec<ImportRecord>,
         intents: Vec<GuidedIngestIntent>,
     ) -> Result<Vec<collector_app::ImportView>> {
-        if records.is_empty() || records.len() != intents.len() || records.len() > 64 {
+        if records.is_empty() || records.len() != intents.len() {
             return Err(Error::Invalid(
-                "guided acceptance requires 1..=64 paired packages".into(),
+                "guided acceptance requires paired packages".into(),
             ));
         }
         let _writer = lock(&self.writer)?;
@@ -1504,7 +1509,8 @@ impl Store {
         file: &collector_app::ImportDeclaredFile,
     ) -> Result<PathBuf> {
         safe_name(&file.name)?;
-        let path = fs::canonicalize(root.join(&file.name)).map_err(storage)?;
+        let path = fs::canonicalize(root.join(collector_core::archive_relative_path(&file.name)))
+            .map_err(storage)?;
         if !path.starts_with(root) {
             return Err(Error::Forbidden);
         }
@@ -1792,7 +1798,11 @@ impl Store {
                         files
                             .iter()
                             .map(|file| {
-                                index_checkpoint::stamp(&path.join("payload").join(&file.name))
+                                index_checkpoint::stamp(
+                                    &path
+                                        .join("payload")
+                                        .join(collector_core::archive_relative_path(&file.name)),
+                                )
                             })
                             .collect::<Result<Vec<_>>>()
                     });

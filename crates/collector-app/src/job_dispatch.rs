@@ -22,9 +22,9 @@ impl Default for JobSettings {
 }
 impl JobSettings {
     pub fn validate(&self) -> Result<()> {
-        if !(1..=8).contains(&self.processing_workers) {
+        if self.processing_workers == 0 {
             return Err(Error::Invalid(
-                "jobs.processing_workers must be between 1 and 8".into(),
+                "jobs.processing_workers must be at least 1".into(),
             ));
         }
         if self.copy_workers == 0 || self.copy_workers > self.processing_workers {
@@ -39,9 +39,7 @@ impl JobSettings {
     }
 }
 
-/// Preferences are transient, shared across execution loops, and never own Jobs.
-/// Two continuation admissions allow one copied disc's analysis/publication to
-/// finish with one worker, then give copying its turn. Blocked work pins nothing.
+/// Transient scheduling preferences shared by the execution loops.
 #[derive(Default)]
 pub struct JobDispatchPolicy {
     pub settings: JobSettings,

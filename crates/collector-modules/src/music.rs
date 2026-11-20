@@ -800,27 +800,6 @@ fn validate_strict_cue_text(cue_text: &str) -> ModuleResult<()> {
                 line_index + 1
             )));
         }
-        if !matches!(
-            keyword.as_str(),
-            "FILE"
-                | "TRACK"
-                | "INDEX"
-                | "PREGAP"
-                | "POSTGAP"
-                | "REM"
-                | "TITLE"
-                | "PERFORMER"
-                | "SONGWRITER"
-                | "CATALOG"
-                | "CDTEXTFILE"
-                | "ISRC"
-                | "FLAGS"
-        ) {
-            return Err(ModuleError::FailedOperation(format!(
-                "unsupported CUE directive on line {}",
-                line_index + 1
-            )));
-        }
     }
     Ok(())
 }
@@ -843,14 +822,6 @@ fn prepare_cue(
             .resolve_relative(cue_file_id, name)
             .map_err(|error| junk_libs_core::AnalysisError::InvalidFormat(error.to_string()))
     };
-    let mut source_ids = std::collections::BTreeSet::new();
-    for file in &sheet.files {
-        if !source_ids.insert(resolve(&file.filename).map_err(module_disc_error)?.id) {
-            return Err(ModuleError::FailedOperation(
-                "CUE repeats a package source file".into(),
-            ));
-        }
-    }
     let resolved = junk_libs_disc::compute_cue_resolved_layout(&sheet, |name| {
         resolve(name).map(|file| file.bytes.0)
     })
@@ -1849,9 +1820,7 @@ fn verify_selection(
     Ok(CdProcessingResult::AudioVerification { verification })
 }
 
-/// Detect the one supported CD package anchor without opening any archive path.
-/// Application read/command services use this to present and prepare the same
-/// music-owned track mapping as processing jobs.
+/// Detect supported CD package anchors from file names alone.
 fn package_anchors(names: &[PackageFileName]) -> Vec<(usize, AudioPackageKind)> {
     names
         .iter()
@@ -1879,8 +1848,7 @@ pub fn detect_package(inventory: &PackageInventory) -> ModuleResult<AudioPackage
     );
     let [(anchor_file_index, package_kind)] = anchors.as_slice() else {
         return Err(ModuleError::UnavailableCapability(
-            "CD analysis needs exactly one CUE or redumper TOC anchor; review may continue unidentified"
-                .into(),
+            "CD analysis needs exactly one .cue or redumper .toc file".into(),
         ));
     };
     Ok(AudioPackageSelection {
@@ -2084,12 +2052,12 @@ impl CollectionModule for Music {
             return ImportReadiness { anchors, blockers };
         }
         match selected.as_slice() {
-            [] => issue(IngestBlockerKind::MissingAnchor, "CD analysis needs a CUE or redumper TOC anchor. Originals can still be preserved.".into()),
+            [] => issue(IngestBlockerKind::MissingAnchor, "CD analysis needs a .cue or redumper .toc file. The files can still be imported without it.".into()),
             [(index, AudioPackageKind::Redumper)] => {
                 let base = &names[*index].as_str()[..names[*index].as_str().len()-4];
                 for extension in ["scram", "state", "subcode"] {
                     let required = format!("{base}.{extension}");
-                    if !names.iter().any(|name| name.as_str().eq_ignore_ascii_case(&required)) { issue(IngestBlockerKind::MissingCompanion, format!("Missing redumper companion {required}; add it for analysis or preserve without analysis.")); }
+                    if !names.iter().any(|name| name.as_str().eq_ignore_ascii_case(&required)) { issue(IngestBlockerKind::MissingCompanion, format!("Missing redumper file {required}.")); }
                 }
             }
             [(_, AudioPackageKind::Cue)] if names.len()==1 => issue(IngestBlockerKind::MissingCompanion, "The CUE has no companion data file. Add its referenced files or preserve without analysis.".into()),

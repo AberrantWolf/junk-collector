@@ -8,7 +8,7 @@ export class AuthenticationCoordinator {
  cancel(){const pending=this.pending;if(!pending)return;this.pending=undefined;pending.controller.abort();for(const waiter of pending.waiters){waiter.detach();waiter.reject(new DOMException('Authentication cancelled','AbortError'));}pending.waiters.clear();}
  wait(identity:AuthenticationIdentity,signal?:AbortSignal):Promise<AuthenticationIdentity>{
   signal?.throwIfAborted();
-  if(this.pending&&this.pending.identity.user_id!==identity.user_id)return Promise.reject(new Error('Account changed. Review and submit the action again.'));
+  if(this.pending&&this.pending.identity.user_id!==identity.user_id)return Promise.reject(new Error('Account changed. Check the action and submit it again.'));
   let pending=this.pending;const start=!pending;
   if(!pending){pending={identity:{...identity},controller:new AbortController(),waiters:new Set()};this.pending=pending;}
   const current=pending;

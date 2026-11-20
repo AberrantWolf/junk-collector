@@ -1,8 +1,8 @@
 # Junk Collector
 
-**Keep your games and music in one self-hosted archive.** Save original dumps,
-organize collections, find metadata and artwork, and play supported audio.
-Each collection contains either games or music.
+A self-hosted archive for your games and music. Keep original dumps and files,
+organize collections, find metadata and artwork, and play supported audio in the
+browser or in Trash Amp. Each collection holds either games or music.
 
 ## Start here
 
@@ -15,48 +15,45 @@ Each collection contains either games or music.
 | Connect Trash Amp | [Connect the app](docs/getting-started.md#connect-trash-amp) |
 | Add users or configure HTTPS | [Configuration and access](docs/configuration.md) |
 | Update a container | [Update steps](deploy/container/README.md#update) |
-| Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server commands](docs/server-operations.md) |
+| Back up or recover | [Docker recovery](deploy/container/recovery.md) · [Server operations](docs/server-operations.md) |
 | Fix a common problem | [Troubleshooting](docs/getting-started.md#troubleshooting) |
+
+All documentation is listed in the [documentation index](docs/index.md).
+
+## Features
+
+- Keep original files alongside metadata, artwork and verification results.
+- Import complete dump packages, or FLAC, MP3 and PCM WAV files.
+- Identify games against No-Intro/Redump DAT catalogs and check CDs with AccurateRip.
+- Prepare CD audio for browser playback and Trash Amp.
+- Share collections with Viewer, Curator and Owner roles.
+
+See [implementation status](docs/implementation-status.md),
+[audio formats](docs/audio-preparation.md) and [remaining work](docs/remaining-work.md).
 
 ## Releases
 
-Use a versioned image or digest from the [published releases](https://github.com/AberrantWolf/junk-collector/releases).
-The installation bundle pins its validated image. `preview` follows prereleases;
-`latest` is reserved for stable releases. Source candidates are not publication evidence.
-See [current capabilities and release evidence](docs/implementation-status.md).
+Container images are published to `ghcr.io/aberrantwolf/junk-collector` for each
+[GitHub release](https://github.com/AberrantWolf/junk-collector/releases), tagged
+with the version. `preview` follows prereleases and `latest` follows stable
+releases. Each release also attaches an installation bundle pinned to its image.
 
-Keep a complete consistent recovery point before updating. Prerelease interfaces
-and storage can change; follow the selected release's upgrade and recovery notes.
-
-## What it supports
-
-- Keep original files alongside metadata, artwork and recorded evidence.
-- Import complete dump packages or supported FLAC/MP3 and integer PCM WAV originals.
-- Prepare supported CD audio for browser playback and Trash Amp.
-- Share collections with Viewer, Curator and Owner roles.
-- Check supported game catalogs and AccurateRip results with explicit coverage.
-
-See [current capabilities](docs/implementation-status.md),
-[audio formats](docs/audio-preparation.md) and the [roadmap](docs/remaining-work.md).
-Hashing, structural checks and descriptive metadata are separate from catalog verification.
+This is prerelease software: storage and interfaces can still change. Make a
+backup before updating and read the release notes.
 
 ## Development
 
-Use the [documentation index](docs/index.md) to find current guidance and evidence.
-Read the [architecture](docs/architecture.md) before changing a subsystem.
-[AGENTS.md](AGENTS.md) lists required checks.
+Read the [architecture](docs/architecture.md) and [AGENTS.md](AGENTS.md) first.
 
 ```sh
-# Rebuild the web assets, then embed them in the server.
 npm --prefix web ci
 npm --prefix web run check
-npm --prefix web run build
+npm --prefix web run build     # web assets are embedded in the server binary
 cargo build -p collector-server
 ```
 
-The [short browser smoke test](web/tests/quick-smoke.mjs) uses a temporary installation.
-Set `CHROME_PATH` if Chrome is outside the default macOS location.
+See [testing](docs/testing.md) for the full check suite.
 
 ## License
 
-MIT. Third-party dependencies retain their respective licenses.
+MIT. Third-party dependencies keep their own licenses.

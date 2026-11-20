@@ -6,7 +6,7 @@ type Summary=components['schemas']['IngestSummary'];
 const states={running:'Active',queued:'Queued',waiting:'Waiting',cancelling:'Cancelling'};
 export default function IngestStatus({summary}:{summary:Summary}){
  return <div className="ingest-work" aria-label="Current ingest activity">
-  {summary.preparation_profile&&<small>Requested audio preparation · {profileLabel(summary.preparation_profile)}</small>}
+  {summary.preparation_profile&&<small>Audio format · {profileLabel(summary.preparation_profile)}</small>}
   {summary.outcome!=='active'&&<small>{presentationLabel(summary.outcome)}</small>}
   {summary.work.map(work=><small key={`${work.kind}:${work.state}:${work.phase}:${work.shared}`}>
    <strong className={`ingest-work-${work.state}`}>{states[work.state]}</strong> · {presentationLabel(work.kind,'Processing')}
@@ -14,6 +14,6 @@ export default function IngestStatus({summary}:{summary:Summary}){
    {work.shared&&<> · Shared download</>}
    {work.jobs>1&&<> · {work.jobs} tasks</>}
   </small>)}
-  {summary.outcome==='active'&&!summary.work.length&&<small>{summary.permissions.can_resume_upload?'Waiting for upload':summary.phase==='awaiting_review'?'Waiting to save originals':'Waiting for next stage'}</small>}
+  {summary.outcome==='active'&&!summary.work.length&&<small>{summary.permissions.can_resume_upload?'Waiting for upload':summary.phase==='awaiting_review'?'Ready to save originals':'Waiting'}</small>}
  </div>;
 }

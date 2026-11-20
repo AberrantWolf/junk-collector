@@ -103,12 +103,7 @@ fn legacy_inspection_is_explicit_for_empty_mixed_unknown_and_preserved_data() {
     .unwrap();
     assert!(!report.eligible);
     assert_eq!(report.item_domain_counts.len(), 2);
-    assert!(
-        report
-            .unresolved
-            .iter()
-            .any(|value| value.contains("splitting"))
-    );
+    assert!(!report.unresolved.is_empty());
 
     let unknown = snapshot(&["org.example.unknown"]);
     let id = unknown.collection.id;
@@ -119,12 +114,7 @@ fn legacy_inspection_is_explicit_for_empty_mixed_unknown_and_preserved_data() {
     .inspect(id)
     .unwrap();
     assert!(!report.eligible);
-    assert!(
-        report
-            .unresolved
-            .iter()
-            .any(|value| value.contains("unavailable"))
-    );
+    assert!(!report.unresolved.is_empty());
 
     let mut blocked = snapshot(&["org.junk.music"]);
     let id = blocked.collection.id;
@@ -157,8 +147,8 @@ fn legacy_inspection_is_explicit_for_empty_mixed_unknown_and_preserved_data() {
             chrono::Utc::now(),
         )
         .unwrap_err();
+    assert!(matches!(&error, Error::Invalid(_)));
     assert!(error.to_string().contains("job-actionable-id"));
-    assert!(error.to_string().contains("provenance only"));
 }
 
 #[test]

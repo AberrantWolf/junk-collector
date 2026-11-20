@@ -394,34 +394,33 @@ fn mixed_game_audio_keeps_disc_numbers_and_never_decodes_data() {
 }
 
 #[test]
-fn game_audio_rejects_malformed_or_truncated_cue_sources() {
+fn game_audio_rejects_truncated_cue_sources_and_tolerates_odd_sheets() {
     use collector_modules::disc_audio::*;
-    for (cue, length) in [
-        (
-            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n",
-            2351,
-        ),
-        (
-            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\nFILE \"./audio.bin\" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:00:00\n",
-            2352,
-        ),
-        (
-            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n UNSUPPORTED 1\n",
-            2352,
-        ),
-    ] {
+    let inspect_cue = |cue: &str, length: usize| {
         let host = Host::new(vec![
             ("game.cue", cue.as_bytes().to_vec()),
             ("audio.bin", vec![0; length]),
         ]);
-        assert!(
-            inspect(
-                &host,
-                host.access,
-                &host.package_inventory(host.access).unwrap(),
-                0
-            )
-            .is_err()
-        );
+        inspect(
+            &host,
+            host.access,
+            &host.package_inventory(host.access).unwrap(),
+            0,
+        )
+    };
+    // A .bin that is not a whole number of sectors is truncated.
+    assert!(
+        inspect_cue(
+            "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n",
+            2351
+        )
+        .is_err()
+    );
+    // Unknown commands and repeated FILE references occur in real sheets.
+    for cue in [
+        "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n UNSUPPORTED 1\n",
+        "FILE \"audio.bin\" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\nFILE \"./audio.bin\" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:00:00\n",
+    ] {
+        assert!(inspect_cue(cue, 2352).is_ok(), "{cue}");
     }
 }

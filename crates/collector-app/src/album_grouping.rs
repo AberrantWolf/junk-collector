@@ -136,12 +136,12 @@ impl CollectionService {
         actor: &Principal,
         command: &PreviewAlbumGroup,
     ) -> Result<Vec<(Item, Option<MetadataAuthorityRecord>)>> {
-        if !(2..=32).contains(&command.entries.len())
-            || command.choices.assemblies.len() > 32
+        if !(2..=1024).contains(&command.entries.len())
+            || command.choices.assemblies.len() > 1024
             || command.choices.disc_positions.len() > 1024
         {
             return Err(Error::Invalid(
-                "Choose 2–32 entries and at most 1,024 disc positions for one album group.".into(),
+                "Choose 2–1,024 entries for one album group.".into(),
             ));
         }
         let mut ids = BTreeSet::new();
@@ -239,7 +239,9 @@ impl CollectionService {
                     .insert(component, position)
                     .is_some_and(|old| old != position)
                 {
-                    return Err(Error::Invalid("Alternative dumps disagree on this physical disc's album position. Resolve their metadata before grouping.".into()));
+                    return Err(Error::Invalid(
+                        "Copies of this disc disagree on its position in the album.".into(),
+                    ));
                 }
             }
         }
@@ -381,7 +383,10 @@ impl CollectionService {
         }
         for (item, _) in records {
             if command.choices.domain_from.is_none() && !identical(&item.domain, &result.domain)? {
-                conflicts.push(conflict(GroupConflictKind::DomainInformation,"Choose the album's descriptive module information; all original values remain in group history."));
+                conflicts.push(conflict(
+                    GroupConflictKind::DomainInformation,
+                    "Choose which album details to keep.",
+                ));
                 break;
             }
         }
@@ -518,8 +523,10 @@ impl CollectionService {
                 continue;
             }
             if members.iter().any(|copy| copy.components.is_empty()) {
-                conflicts.push(conflict(GroupConflictKind::PhysicalInventory,
-                    "A physical set mapping needs recorded disc components. Add the missing discs under the entry’s Copies section, then review their positions here. Keep copies distinct until their physical inventory is known."));
+                conflicts.push(conflict(
+                    GroupConflictKind::PhysicalInventory,
+                    "Add each copy's discs under Copies before combining them.",
+                ));
                 continue;
             }
             let mut merged = members[0].clone();
@@ -538,7 +545,10 @@ impl CollectionService {
                 .map(|value| value.position)
                 .any(|position| !occupied.insert(position))
             {
-                conflicts.push(conflict(GroupConflictKind::PhysicalInventory,"Two discs occupy the same position in the proposed physical set; map their positions explicitly."));
+                conflicts.push(conflict(
+                    GroupConflictKind::PhysicalInventory,
+                    "Two discs have the same position; set their positions.",
+                ));
                 continue;
             }
             for id in &all {
@@ -832,7 +842,7 @@ impl CollectionService {
         for entry in &publication.entries {
             let item = self.reader.item(entry.after.id)?;
             if !identical(&item, &entry.after)? {
-                reason=Some("An affected entry, copy, capture or image changed after grouping; automatic undo is unavailable.".into());
+                reason=Some("Something in this group changed since grouping, so it can't be undone automatically.".into());
                 break;
             }
             let authority = self

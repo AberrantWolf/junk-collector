@@ -26,6 +26,5 @@ export default function PlaybackFormatControl({compact=false}:{compact?:boolean}
    <summary aria-label="Opus bitrate settings" title="Opus bitrate settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 8h16M4 16h16M9 5v6M15 13v6"/></svg></summary>
    <div className="dock-bitrate-panel">{bitrateFields}</div>
   </details>:bitrateFields)}
-  {!compact&&<p className="muted">Saved for this account in this browser. Changes apply the next time you press Play or start a track. Live conversion uses the normal Collector audio connection.</p>}
  </form>;
 }

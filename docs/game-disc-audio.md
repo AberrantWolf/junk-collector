@@ -1,29 +1,19 @@
 # Game-disc CD audio
 
-Included in Collector beta.2, following source, owned-disc/browser and isolated
-native streaming/offline acceptance. The matching Trash Amp integration and native
-recovery improvements are committed on `codex/game-disc-audio`; this Docker release
-does not publish a new Trash Amp application package. The authoritative assignment
-is [HL-09](remaining-work.md).
+Standard BINARY CUE/BIN game packages can expose their CD-DA tracks through the
+normal audio preparation, player, song search, playlists and Trash Amp cache. The
+game keeps its collection identity, originals and artwork. Proprietary game sound
+files, CHD and mixed-mode raw redumper timelines are not supported.
 
-The game keeps its collection identity, originals and artwork. Standard BINARY
-CUE/BIN packages can expose their real CD-DA tracks through the existing audio
-preparation, player, song search, playlists and Trash Amp cache. Proprietary game
-sound files, CHD and mixed-mode raw redumper timelines remain outside this delivery.
-A source-specific manual title/printed numbering survives metadata refresh.
+- Only AUDIO tracks are playable.
+- Pregaps follow the shared CUE playback policy: a gap between two audio tracks
+  belongs to the preceding track; data-track pregaps never do. Hidden audio before
+  track 1 is not queued automatically.
+- Explicit synthetic gaps produce silence; missing or truncated bytes are errors.
+- No de-emphasis is applied and no bit-perfect output is claimed.
+- A manual title or track numbering for a source survives metadata refresh.
 
-Only AUDIO tracks become playable. Stored INDEX 00 and explicit synthetic gaps
-follow the existing shared CUE playback policy: audio-to-audio following gaps belong
-to the preceding audio track; data-track pregaps never do. First-track hidden audio
-is not queued implicitly. Explicit synthetic gaps produce declared silence; missing
-or truncated bytes are errors. No de-emphasis or bit-perfect output claim is made.
-
-Import/explicit inspection records bounded geometry, with source fingerprints and
-logical plus physical frame coordinates. Catalog reads/admission do not hash raw
-masters. Background preparation checks consumed sources and frozen geometry, then
-uses the existing cancellable encoder, immutable recipe and durable publication.
-Extraction/integrity checks are separate from catalog or whole-disc audio verification.
-
-Synthetic independent vectors and private owned-disc runs supply separate evidence.
-Results are recorded in [dated acceptance](validation/game-disc-audio-2026-10-21.md);
-beta.2 advertises only these accepted formats and bounded claims.
+Import records the disc geometry with source fingerprints and frame coordinates.
+Catalog reads do not hash raw masters. Background preparation re-checks the sources
+against the recorded geometry before encoding. Extraction checks are separate from
+catalog verification.

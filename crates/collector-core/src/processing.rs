@@ -79,9 +79,25 @@ pub enum PackageScope {
     Representation(RepresentationId),
 }
 
+/// Maps a package-relative name to the relative path used for its bytes in the
+/// archive. Characters that Windows, SMB shares or macOS can't store in a file
+/// name become look-alike Unicode characters; every other name is unchanged.
+pub fn archive_relative_path(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            ':' => '\u{FF1A}',
+            '\\' => '\u{FF3C}',
+            '\u{7F}' => '\u{2421}',
+            c if (c as u32) < 0x20 => char::from_u32(0x2400 + c as u32).unwrap_or('_'),
+            c if c.is_control() => '\u{FFFD}',
+            c => c,
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
-/// A validated package-relative logical name, never an adapter filesystem path.
+/// A package-relative file name. Use [`archive_relative_path`] for its archive path.
 pub struct PackageFileName(String);
 
 impl PackageFileName {
@@ -90,8 +106,6 @@ impl PackageFileName {
         if value.is_empty()
             || value.len() > 1024
             || value.starts_with('/')
-            || value.contains(['\\', ':'])
-            || value.chars().any(char::is_control)
             || value
                 .split('/')
                 .any(|part| part.is_empty() || matches!(part, "." | ".."))
@@ -154,7 +168,8 @@ impl PackageInventory {
         let mut ids = std::collections::BTreeSet::new();
         let mut names = std::collections::BTreeSet::new();
         if self.files.iter().any(|file| {
-            !ids.insert(file.id) || !names.insert(file.display_name.as_str().to_lowercase())
+            !ids.insert(file.id)
+                || !names.insert(archive_relative_path(file.display_name.as_str()).to_lowercase())
         }) {
             return Err(Error::Invalid(
                 "package inventory contains a duplicate file identity or name".into(),
@@ -180,14 +195,12 @@ impl PackageInventory {
         declaring_file: PackageFileId,
         declared_name: &str,
     ) -> Result<&PackageInventoryFile> {
-        if declared_name.is_empty()
-            || declared_name.len() > 1024
-            || declared_name.starts_with('/')
-            || declared_name.contains(['\\', ':'])
-            || declared_name.chars().any(char::is_control)
+        if declared_name.is_empty() || declared_name.len() > 1024 || declared_name.starts_with('/')
         {
             return Err(Error::Invalid("unsafe package-relative reference".into()));
         }
+        // CUE sheets written on Windows use backslash separators.
+        let declared_name = declared_name.replace('\\', "/");
 
         let declaring_name = self
             .files
@@ -627,9 +640,14 @@ impl ConversionSettings {
         match self {
             Self::Flac { level: 5 } => Ok(()),
             Self::Opus {
-                bitrate_kbps: 96 | 128 | 192,
+                bitrate_kbps,
                 frame_milliseconds: 20,
-            } => Ok(()),
+            } if crate::ConversionProfile::PRESETS.contains(&crate::ConversionProfile::Opus {
+                bitrate_kbps: *bitrate_kbps,
+            }) =>
+            {
+                Ok(())
+            }
             _ => Err(Error::Invalid("unsupported conversion settings".into())),
         }
     }

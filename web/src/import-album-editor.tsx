@@ -40,7 +40,7 @@ export default function ImportAlbumEditor({albums,onClose,onChanged,onSessionExp
      const path=`/items/${album.id}/metadata`;
      const review=await api<S['MetadataReviewView']>(path,{signal});
      if(!review.permissions.can_update)throw new Error('You need permission to edit this album.');
-     if(chosen.some(({key})=>key==='digital_source')&&!review.digital_source_eligible)throw new Error('Digital source requires a digital-only album.');
+     if(chosen.some(({key})=>key==='digital_source')&&!review.digital_source_eligible)throw new Error('Digital source only applies to digital-only albums.');
      const manual=review.authority.field_overrides;
      const current={
       title:manual.find(field=>field.field==='title')?.value,
@@ -73,7 +73,7 @@ export default function ImportAlbumEditor({albums,onClose,onChanged,onSessionExp
   <button type="button" className="close" aria-label="Close album editor" onClick={dialog.dismiss}>×</button>
   <h2>Edit selected albums</h2>
   {remaining.length>0&&<form onSubmit={event=>{event.preventDefault();void save();}}>
-   <p>Choose which fields to overwrite for {remaining.length} {remaining.length===1?'album':'albums'}. Digital source applies only to digital-only albums.</p>
+   <p>Fields to change for {remaining.length} {remaining.length===1?'album':'albums'}. Digital source only applies to digital-only albums.</p>
    <fieldset className="intake-album-fields" disabled={busy}>
     <legend>Album metadata</legend>
     {fields.map(({key,label,maxLength})=><div key={key}>
@@ -88,7 +88,7 @@ export default function ImportAlbumEditor({albums,onClose,onChanged,onSessionExp
   </form>}
   {busy&&<p role="status">Processed {progress} of {remaining.length} albums…</p>}
   {!busy&&saved>0&&<p role="status">{saved} {saved===1?'album':'albums'} saved.</p>}
-  {results.length>0&&<div className="notice error" role="alert"><p>Could not confirm changes for {results.length} {results.length===1?'album':'albums'}.</p>
+  {results.length>0&&<div className="notice error" role="alert"><p>Could not save {results.length} {results.length===1?'album':'albums'}.</p>
    <ul>{results.map(({album,message})=><li key={album.id}>{album.title} · {message}</li>)}</ul>
   </div>}
   {remaining.length===0&&<button type="button" onClick={onClose}>Done</button>}

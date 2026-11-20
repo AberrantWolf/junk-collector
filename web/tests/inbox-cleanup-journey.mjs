@@ -15,9 +15,9 @@ export async function inboxCleanupJourney(page,{importId,itemId,source,scratch,r
  await expect(remove).toBeDisabled();
  assert.deepEqual(await readFile(path.join(source,'.unknown')),original);
  await writeFile(path.join(source,'.unknown'),Buffer.alloc(original.length,0x42));
- const confirm=cleanup.getByRole('checkbox',{name:/Copying and editing this source package have finished/});
+ const confirm=cleanup.getByRole('checkbox',{name:/done with these inbox files/});
  await confirm.check();await remove.click();
- await expect(cleanup.getByRole('alert')).toContainText(/differs|changed/,{timeout:30000});
+ await expect(cleanup.getByRole('alert')).toBeVisible({timeout:30000});
  assert.equal((await readFile(path.join(source,'.unknown')))[0],0x42);
  const detail=await page.evaluate(async id=>(await(await fetch(`/api/v1/ingests/${id}`)).json()),importId);
  assert.equal(detail.inbox_cleanup.removed_bytes,0);

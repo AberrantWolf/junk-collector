@@ -4,19 +4,16 @@
 
 ## Build from source
 
-- Rust 1.99.1 (the tested release toolchain, pinned in `rust-toolchain.toml`), a C/C++ build toolchain, CMake, and pkg-config. Linux builds also need OpenSSL development headers.
-- Network access on the first build to fetch Cargo dependencies, including the exact `junk-libs` Git revision pinned in `Cargo.toml`. No sibling checkout is required.
-- Writable storage for the archive and private server state.
-- Optional: `flac` for lossless CD preparation; `opusenc` for smaller audio copies.
+You need:
 
-Built web assets are included. Node.js 22+ is needed only to rebuild the WebUI, not to run the server.
+- the Rust toolchain pinned in `rust-toolchain.toml`, a C/C++ toolchain, CMake and
+  pkg-config (plus OpenSSL headers on Linux);
+- network access on the first build, to fetch Cargo dependencies including the
+  `junk-libs` Git revision pinned in `Cargo.toml`;
+- optionally `flac` (lossless CD preparation), `opusenc` (Opus copies) and `ffmpeg`
+  (live playback conversion).
 
-The pinned version is the tested release baseline; a lower minimum supported version
-has not been established. See [release toolchain maintenance](release-toolchain.md).
-
-### Initialize the server
-
-Run these commands from the repository root. A release build is recommended for normal use, especially hashing and audio processing.
+Built web assets are committed, so Node.js 22+ is only needed to rebuild the web UI.
 
 ```sh
 cargo build --locked --release -p collector-server
@@ -25,169 +22,120 @@ cargo build --locked --release -p collector-server
 ./target/release/collector-server serve
 ```
 
-Startup reuses an unchanged catalog. A missing or damaged catalog is rebuilt from the archive.
-See [catalog recovery and measurements](validation/p06-indexing.md) for details.
+Use a release build for real use; hashing and audio processing are slow in debug builds.
 
-`setup` prompts for a password of at least 12 characters and creates:
+`setup` asks for a password (at least 12 characters) and creates:
 
 - `collector.toml`, the server configuration;
-- `.collector/archive`, containing saved files and collection records;
-- `.collector/state`, containing databases, accounts, TLS identity, jobs, and temporary work;
-- the initial administrator account, named `owner` by default.
+- `.collector/archive`, the saved files and collection records;
+- `.collector/state`, databases, accounts, TLS identity, jobs and temporary work;
+- the first administrator account, `owner` unless you pass `--username NAME`.
 
-To choose a different account name, use `setup --username YOUR_NAME`. Passwords can also be supplied through standard input; do not put them in command arguments.
+The password can also be piped on standard input. Never pass it as an argument.
 
-Open **http://localhost:9842** on the server computer and sign in. Use `localhost` exactly: `127.0.0.1` is a different browser origin. Local HTTP sign-in is tested with Chromium-based browsers; use browser-trusted HTTPS for remote browsers.
+Open **http://localhost:9842** on the server and sign in. Use `localhost` exactly;
+`127.0.0.1` is a different browser origin. For other computers, use browser-trusted
+HTTPS (see [configuration](configuration.md#access-from-another-computer)).
 
-The site follows your system color theme. Open **Account & security → Appearance**
-to choose **Light** or **Dark** for this browser, or **Use system setting** to
-follow device changes again.
-
-For permanent storage locations or custom certificate names, create `collector.toml` using the [configuration reference](configuration.md) **before running setup**. Supply a custom configuration path before the command:
+To use permanent storage paths or custom certificate names, write `collector.toml`
+**before** running `setup`, and pass it before the command:
 
 ```sh
 ./target/release/collector-server --config /absolute/path/collector.toml setup
 ./target/release/collector-server --config /absolute/path/collector.toml serve
 ```
 
-Run the server as an ordinary user with access to its storage and configured inboxes. Only one server process may write an archive.
+Run the server as an ordinary user with access to its storage and inboxes. Only one
+server process may write an archive. Startup reuses an unchanged catalog and rebuilds
+a missing or damaged one from the archive.
 
 ## Add your first collection
 
-1. Sign in at a management-enabled address. Choose **Create collection**, then games or music.
-2. Open **Imports**. Select the collection and **Browser folder / files** or **Server inbox**.
-3. For digital albums, choose a music collection and open **Files and album playback**. Other packages show **Files and analysis**.
-4. Choose **Start import**. Keep the page open until browser uploading finishes.
-5. Open the item to see files, metadata, artwork and evidence.
-
-### Import options
+1. Sign in on a management address and choose **Create collection** (games or music).
+2. Open **Imports**, select the collection, and choose **Browser folder / files** or **Server inbox**.
+3. Review the detected packages. Music collections show **Files and album playback**;
+   other packages show **Files and analysis**.
+4. Choose **Start import** and keep the page open until the browser upload finishes.
+5. Open the item to see its files, metadata, artwork and checks.
 
 | Option | Use |
 | --- | --- |
-| Folders | Review discovered packages and their album playback trees. Set **Folder layout** for a browser selection. Server inbox files and directories use **Review packages**. |
-| Individual files | Assemble one package. Unassigned files appear separately. |
-| Analysis anchor | Choose the intended CUE or Redumper anchor when several exist. Review shared files. |
-| Digital album playback | Check the suggested tracks or select a format, then set the disc count and assign checked tracks to discs. All originals are preserved. |
-| Album group | Give related discs the same label. Leave manual title empty for automatic metadata. |
-| Physical copy label | Matching labels within an album mean one purchased copy. Different labels mean separate copies, not disc numbers. |
-| Metadata/artwork | Acquired automatically when available. Manual edits remain authoritative. |
-| Prepare FLAC after import | Optional for supported CDs. FLAC/MP3 purchases play directly without physical-copy records. |
-| Interrupted upload | Reopen the saved batch and reselect its original folder/files to resume. |
-| Edit / attach files | Change metadata, copies and loans, add images or attach another capture. |
+| Folders | Review discovered packages. Set **Folder layout** for a browser selection; inbox entries use **Review packages**. |
+| Individual files | Assemble one package. Unassigned files are listed separately. |
+| Analysis anchor | Pick the intended CUE or Redumper file when there are several. |
+| Digital album playback | Choose tracks or a format, set the disc count and assign tracks to discs. All originals are kept. |
+| Album group | Give related discs the same label. Leave the title empty to use automatic metadata. |
+| Physical copy label | The same label within an album means one purchased copy; different labels mean separate copies. |
+| Prepare FLAC after import | Optional for supported CDs. FLAC/MP3 purchases play directly. |
+| Interrupted upload | Reopen the saved batch and reselect the same folder/files to resume. |
 | Add / import → manual entry | Record inventory without files. |
 
-**Keep complete dump packages together.** BIN/CUE sets need their referenced BIN files.
-Supported Redumper CDs need TOC, SCRAM, STATE and SUBCODE companions.
-Preservation can succeed even when identification or verification is unavailable.
+Keep dump packages complete: BIN/CUE sets need their BIN files, and Redumper CDs need
+the TOC, SCRAM, STATE and SUBCODE files. Files are preserved even when identification
+or verification is unavailable. One intake can hold up to 10,000 packages / 100,000
+files; split larger folders at package boundaries. Synology/macOS housekeeping files
+are skipped; other hidden files are kept.
 
-For a raw CD capture with redumper already installed, run:
+### Ripping a CD
+
+With redumper installed:
 
 ```sh
-cargo build --release --locked -p collector-cd-identity # once, for automatic lookup
+cargo build --release --locked -p collector-cd-identity   # once, for automatic naming
 ./scripts/rip-cd.sh --auto /path/to/dumps disk7
+./scripts/rip-cd.sh "Album - Disc 1" /path/to/dumps disk7  # fixed folder name, no lookup
 ```
 
-This captures into a fresh `cd-<UTC timestamp>-<random suffix>` folder with
-`disc.*` raw masters, sidecars and logs, without generating BIN/CUE or playback
-derivatives. After a successful capture, automatic naming waits at most 15 seconds
-total for a MusicBrainz lookup, without retries or additional audio reads. Exactly
-one release, matching medium/track count and safe catalog number permits naming
-the folder, for example `SQEX-11226`; multi-disc releases append ` - Disc N`.
-Missing/ambiguous metadata, unavailable tools/network, unsupported TOCs and existing
-destinations keep the generated folder. Naming is descriptive, not verification.
-Failures report their specific cause, including HTTP status, identity-tool
-diagnostics, missing/ambiguous catalog metadata, timeouts or the occupied path.
-The lookup uses Python 3 and `collector-cd-identity` from PATH or this checkout's
-`target/release`; `COLLECTOR_CD_IDENTITY=/path/to/collector-cd-identity` overrides
-the executable. Ripping remains available without these optional naming tools.
-For a manual folder name without any lookup, use:
+The last argument is the drive (`diskN` on macOS, `/dev/sgN` on Linux); omit it to use
+the first drive. Linux media must be unmounted. `RETRIES` (default 100) and
+`REDUMPER=/path/to/redumper` are honoured. See `./scripts/rip-cd.sh --help`.
 
-```sh
-./scripts/rip-cd.sh "Album - Disc 1" /path/to/dumps disk7
-```
+The helper writes `disc.*` raw files and logs into a new `cd-<timestamp>-<suffix>`
+folder. It runs a refine pass only if the dump reports SCSI or C2 errors. With
+`--auto` it then spends up to 15 seconds on a MusicBrainz lookup and renames the folder
+(for example `SQEX-11226`, with ` - Disc N` for multi-disc releases) only when exactly
+one release matches; otherwise the generated name stays. Naming needs Python 3 and
+`collector-cd-identity` on PATH or in `target/release` (override with
+`COLLECTOR_CD_IDENTITY`). After a successful capture the disc is ejected.
 
-The optional last argument is the drive (`diskN` on macOS, `/dev/sgN` on Linux);
-omit it only when the first available drive is the intended one. The helper reads
-the selected device from the initial dump log and pins it for later stages. Keep the same
-disc inserted for all stages. Use `diskutil list` to find a macOS drive; Linux
-media must be unmounted before dumping. `RETRIES=100` is the default;
-`REDUMPER=/path/to/redumper` selects an executable outside PATH.
-Refinement runs only when the initial dump reports SCSI or C2 errors. Q-subchannel
-errors alone do not trigger this normal refinement pass. An unreadable error
-summary stops the helper for review without starting refinement.
-For ordinary music CDs, documented Q-only imperfections are an accepted home-lab
-tradeoff. Retain the complete raw package and logs, then use **Check audio with
-AccurateRip** to assess the audio within its reported coverage. A match does not
-establish complete subchannels; a mismatch or missing reference is inconclusive
-on its own. Further Q-only refinement is optional, not a prerequisite to import
-or listening when the existing structural requirements are met. See the
-[accepted policy and optional fish command](decisions/cd-audio-capture-tradeoff.md).
-After successful capture and naming (including a generated-name fallback), the
-helper ejects the same selected drive. Failed/incomplete captures leave the disc
-inserted. macOS uses `diskutil eject /dev/diskN` directly (including when redumper
-was given `/dev/rdiskN`); other platforms use redumper eject. Eject failures are
-reported separately and do not invalidate saved files.
-Existing folders are refused and failed captures are retained. Review `disc.log`
-for unresolved errors, then import the complete folder with `disc.toc` as the
-analysis anchor. Command completion/file presence does not establish error-free
-audio or catalog verification. See `./scripts/rip-cd.sh --help`.
+Check `disc.log` for errors, then import the folder with `disc.toc` as the analysis
+anchor. Q-subchannel errors alone are acceptable for ordinary music CDs; run
+**Check audio with AccurateRip** to check the audio itself.
 
-Intake supports **10,000 packages / 100,000 files**. Split larger folders at package boundaries.
-Known Synology/macOS housekeeping is excluded; other hidden and unknown files stay.
+## Play music
 
-Attaching a disc to an existing album removes its unused automatic placeholder from browsing.
-Entries with meaningful inventory or manual information stay. Archived files and history are retained.
+FLAC/MP3 purchases play directly. For CDs, live playback converts on demand, or you can
+save prepared copies: configure the [encoders](configuration.md#audio-encoders), open
+**Prepare audio**, select albums and start. See [audio support](audio-preparation.md).
 
-### Play music
+On an album choose **Play album**, **Play original** or a track's **Play**. Play replaces
+your queue; **Add album to queue** appends. The player keeps running while you navigate.
 
-Supported FLAC/MP3 purchases play directly after import. For CDs, configure the
-[FLAC encoder](configuration.md#audio-encoders), open **Prepare audio**, select albums, preview the
-FLAC preparation and start it. Individual tracks and configured Opus profiles are
-also available in the editor's music preparation view. Preparation is explicit
-background work; prepared files are saved automatically.
-See the [audio support matrix](audio-preparation.md) for qualified tools,
-profiles, clients and remaining limits.
+The site follows the system color theme; **Account & security → Appearance** overrides it
+for this browser.
 
-Open an album and choose **Play album**, **Play original** for one import, or a
-track's **Play** button. Play replaces the personal queue and starts immediately;
-**Add album to queue** appends instead. Album playback follows disc/track order.
-Unavailable audio and ambiguous originals need review before whole-album playback;
-available individual tracks remain usable. Viewers can play authorized audio.
-Closing details or navigating between tasks leaves the persistent player running.
-Browser codec support determines which existing formats play directly; downloads
-remain available.
+## Connect Trash Amp
 
-### Connect Trash Amp
+In Trash Amp, open **Settings → Servers**, enter the server URL and choose
+**Connect / Reconnect**. For normal trusted HTTPS, leave **Owner-provided trust file**
+empty. For a self-signed server, get its public certificate PEM or pairing JSON from the
+owner, compare its SHA-256 with the server's startup output, and enter its path. Never
+copy the private key or disable certificate checks.
 
-In Trash Amp, open **Settings → Servers**, enter the **Collector server URL**, and
-choose **Connect / Reconnect**. For ordinary system-trusted HTTPS, leave
-**Owner-provided trust file** empty. For a self-signed server, obtain its public
-PEM or pairing JSON through a trusted owner channel; independently compare the
-PEM-file SHA-256 with server startup output before entering its path in that field.
-Never transfer the private TLS key or bypass certificate validation.
-
-Use the displayed browser approval link/code and sign in with the intended account.
-The app receives separate revocable access. Trusting a certificate in Trash Amp
-does not establish browser trust; same-computer approval can use the printed local
-management `/pair` address. Remote browser approval requires its own trusted HTTPS
-origin. Names in configuration do not create DNS records. See Administration →
-Server settings → HTTPS certificate for download and trust instructions.
+Approve the app with the displayed link/code while signed in as the intended account.
+The app gets its own revocable access. Trusting the certificate in Trash Amp does not
+make browsers trust it.
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Login reports `origin_not_allowed` | Open the exact configured address. Add its origin to `allowed_origins` and restart. `localhost` and `127.0.0.1` are different origins. |
-| Management pages are missing | Use a private listener, or intentionally enable the relevant public exposure setting. |
-| “You do not have access to this resource” | Check the signed-in account's collection role. Public exposure does not grant permission. |
-| Certificate warning | Use a hostname covered by a browser-trusted certificate. Pairing JSON alone does not make a browser trust it. |
-| Music preparation is unavailable | Run `doctor`; check encoder paths, restart after configuration changes, and inspect the package's reported limitations. |
-| Metadata or artwork is unavailable | Check the provider user agent and the job's error. Manual curation and preservation remain available during provider outages. |
-| An import or preparation failed | Read the job/track error and fix its cause before retrying. Keep the complete source package and its original relative filenames. |
+| Login reports `origin_not_allowed` | Open the exact configured address, or add its origin to `allowed_origins` and restart. |
+| Management pages are missing | Use a private listener, or enable the public exposure setting. |
+| "You do not have access to this resource" | Check the account's collection role. Exposure never grants permission. |
+| Certificate warning | Use a hostname covered by a browser-trusted certificate. |
+| Music preparation is unavailable | Run `doctor`, check encoder paths, restart after config changes. |
+| Metadata or artwork is unavailable | Check `musicbrainz_user_agent` and the job's error. Manual editing still works. |
+| An import or preparation failed | Read the job error and fix the cause before retrying. Keep the source package and its filenames intact. |
 
-## Development checks
-
-Use [change-based validation](testing.md) for local work and candidate packaging.
-Text-only edits do not require unit tests. The short smoke and affected browser
-journeys replace unrelated full-suite runs during UI iteration; full functional
-qualification remains available for RC/stable and broad infrastructure changes.
+For development checks see [testing](testing.md).

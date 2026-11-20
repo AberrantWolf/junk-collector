@@ -10,8 +10,8 @@ struct Cursor {
     track: u16,
     source: String,
 }
-/// Positional inserts require this exact projection shape. A beta.1 startup
-/// could stamp an older seven-column table as current without rebuilding it.
+/// Positional inserts require this exact projection shape; an older table
+/// stamped as current must still be rebuilt.
 pub(super) fn schema_is_current(db: &Connection) -> Result<bool> {
     let mut statement = db
         .prepare("PRAGMA table_info(music_search)")
@@ -162,8 +162,8 @@ pub(super) fn search(
 ) -> Result<Page<MusicSearchRecord>> {
     let limit = query.limit.unwrap_or(50);
     let search = collector_app::normalized_music_search(&query.search.unwrap_or_default());
-    if !(1..=200).contains(&limit) || search.len() > 256 {
-        return Err(Error::Invalid("invalid music search bounds".into()));
+    if !(1..=200).contains(&limit) {
+        return Err(Error::Invalid("invalid music search page size".into()));
     }
     let scope =
         Digest::sha256(&serde_json::to_vec(&(collection, user, &search)).map_err(storage)?).hex;

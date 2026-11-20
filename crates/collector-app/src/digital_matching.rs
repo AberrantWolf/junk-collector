@@ -337,7 +337,9 @@ impl CollectionService {
                         .find(|t| t.position == row.track_position)
                         .ok_or(Error::Conflict)?;
                     if source.files[t.file_index].visibility != Visibility::Shared {
-                        return Err(Error::Unavailable("Restricted audio cannot be sent to fingerprint providers; review file visibility first".into()));
+                        return Err(Error::Unavailable(
+                            "Private audio files can't be sent for identification".into(),
+                        ));
                     }
                     files.push(t.file_id);
                     tracks.push(FrozenMatchTrack {
@@ -374,7 +376,7 @@ impl CollectionService {
                                     DIGITAL_FINGERPRINT_OPERATION,
                                 )?)?
                                 .1,
-                            junk_libs_music::fingerprint::IMPLEMENTATION,
+                            crate::digital_pipeline::FINGERPRINT_IDENTITY,
                         ))
                         .map_err(|e| Error::Storage(e.to_string()))?,
                     );
@@ -690,7 +692,9 @@ impl CollectionService {
                     || choice.mappings.len() != f.tracks.len()
                     || choice.duration_conflicts > 0)
         {
-            return Err(Error::Invalid("This release needs a complete tracklist and a confirmed assignment for every file before it can be applied".into()));
+            return Err(Error::Invalid(
+                "Assign every file to a track before applying this release".into(),
+            ));
         }
         let snapshot_id = *result.snapshots.get(release_id).ok_or(Error::Conflict)?;
         let record = self.processing.snapshot(SnapshotQuery {

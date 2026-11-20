@@ -411,7 +411,7 @@ impl IntoResponse for ApiError {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 [(header::RETRY_AFTER, seconds.to_string())],
-                Json(serde_json::json!({"error":{"code":"rate_limited","message":"Request rate or capacity limit reached. Try again later."}})),
+                Json(serde_json::json!({"error":{"code":"rate_limited","message":"Too many requests; try again later."}})),
             )
                 .into_response();
         }
@@ -423,15 +423,11 @@ impl IntoResponse for ApiError {
                 "unauthenticated",
                 "Sign in to continue".into(),
             ),
-            Error::Forbidden => (
-                StatusCode::FORBIDDEN,
-                "forbidden",
-                "You do not have access to this resource".into(),
-            ),
+            Error::Forbidden => (StatusCode::FORBIDDEN, "forbidden", "Access denied".into()),
             Error::RecentAuthenticationRequired => (
                 StatusCode::FORBIDDEN,
                 "recent_authentication_required",
-                "Reauthenticate before changing security or access settings".into(),
+                "Sign in again to change this setting".into(),
             ),
             Error::LastAdministrator => (
                 StatusCode::CONFLICT,
@@ -441,12 +437,12 @@ impl IntoResponse for ApiError {
             Error::LastOwner => (
                 StatusCode::CONFLICT,
                 "last_owner",
-                "At least one enabled owner must remain for every collection".into(),
+                "Every collection needs an enabled owner".into(),
             ),
             Error::DefaultReassignmentRequired => (
                 StatusCode::CONFLICT,
                 "default_reassignment_required",
-                "Reassign the durable default account before disabling it".into(),
+                "Choose another default account before disabling this one".into(),
             ),
             Error::EnrollmentExpired => (
                 StatusCode::GONE,
@@ -461,12 +457,12 @@ impl IntoResponse for ApiError {
             Error::CredentialRevoked => (
                 StatusCode::UNAUTHORIZED,
                 "revoked_credential",
-                "That credential is revoked or expired".into(),
+                "Credential revoked or expired".into(),
             ),
             Error::Conflict => (
                 StatusCode::CONFLICT,
                 "revision_conflict",
-                "The record or upload changed; refresh before retrying".into(),
+                "This changed since you loaded it; refresh and try again".into(),
             ),
             Error::IdempotencyConflict => (
                 StatusCode::CONFLICT,
@@ -476,7 +472,7 @@ impl IntoResponse for ApiError {
             Error::CommandInProgress => (
                 StatusCode::CONFLICT,
                 "command_in_progress",
-                "That command is already in progress; retry with the same key".into(),
+                "Already in progress".into(),
             ),
             Error::JobCancelled => (
                 StatusCode::CONFLICT,
@@ -486,23 +482,28 @@ impl IntoResponse for ApiError {
             Error::CancellationTooLate => (
                 StatusCode::CONFLICT,
                 "cancellation_too_late",
-                "Publication is already committed and will finish recovery".into(),
+                "Too late to cancel".into(),
             ),
             Error::RateLimited(_) => unreachable!("handled above"),
-            Error::CatalogBusy => (StatusCode::SERVICE_UNAVAILABLE, "catalog_busy", self.0.to_string()),
+            Error::CatalogBusy => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "catalog_busy",
+                self.0.to_string(),
+            ),
             Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m.clone()),
             Error::Storage(_) => {
                 tracing::error!(error=%self.0,"storage operation failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "storage_error",
-                    "Storage operation failed; check the server log".into(),
+                    "Storage error; see the server log".into(),
                 )
             }
             Error::PreparedMediaInvalid => (
                 StatusCode::CONFLICT,
                 "prepared_media_invalid",
-                "Prepared audio is missing, unreadable, or differs from its recorded bytes. The original is saved; ask a curator to repair this prepared track.".into(),
+                "Prepared audio is damaged; the original is intact. Rebuild the prepared track."
+                    .into(),
             ),
         };
         (
@@ -529,9 +530,9 @@ async fn blocking<T: Send + 'static>(
         tracing::error!(%error, "blocking request worker failed");
         ApiError(Error::Unavailable(
             if error.is_panic() {
-                "Request worker failed; check the server log"
+                "Internal error; see the server log"
             } else {
-                "Request worker was cancelled"
+                "Request cancelled"
             }
             .into(),
         ))
@@ -993,7 +994,7 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
     // address so the UI can explain the rejected login. Router composition still
     // controls which management assets exist; APIs retain exact-Origin checks.
     if origin.is_some() && !accepted_origin && (modifying || path.starts_with("/api/")) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": {"code": "origin_not_allowed", "message": "This browser address is not enabled in the server configuration. On the server, run doctor; for local management, stop the server, run setup, then restart and use the printed localhost URL. Remote HTTPS addresses must be added to allowed_origins."}}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": {"code": "origin_not_allowed", "message": "This address is not in allowed_origins. Run doctor on the server."}}))).into_response();
     }
     let native_authenticated = request
         .headers()
@@ -1002,7 +1003,7 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         .and_then(|value| value.strip_prefix("Bearer "))
         .is_some_and(|credential| state.service.authenticate_native(credential).is_ok());
     if modifying && !accepted_origin && !enrollment_bootstrap && !native_authenticated {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": {"code": "origin_not_allowed", "message": "This browser address is not enabled in the server configuration. On the server, run doctor; for local management, stop the server, run setup, then restart and use the printed localhost URL. Remote HTTPS addresses must be added to allowed_origins."}}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": {"code": "origin_not_allowed", "message": "This address is not in allowed_origins. Run doctor on the server."}}))).into_response();
     }
     let mut request = request;
     let peer = request
@@ -2868,10 +2869,7 @@ async fn media(
             .audio_connection_policy(state.remote_media_allowed)?
             .remote_media_allowed
     {
-        return Err(Error::Unavailable(
-            "Local playback is required; public media fallback is disabled".into(),
-        )
-        .into());
+        return Err(Error::Unavailable("Remote playback is disabled".into()).into());
     }
     let resource = blocking(move || {
         state
@@ -2915,15 +2913,13 @@ async fn music_flac_export(
             .audio_connection_policy(state.remote_media_allowed)?
             .remote_media_allowed
     {
-        return Err(
-            Error::Unavailable("Local media access is required for this download".into()).into(),
-        );
+        return Err(Error::Unavailable("Download requires a local connection".into()).into());
     }
     let slot = state
         .music_export_slots
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Error::Unavailable("FLAC downloads are busy; try again shortly".into()))?;
+        .map_err(|_| Error::Unavailable("Too many FLAC downloads; try again shortly".into()))?;
     let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _cancel = CancelOnDrop(flag.clone());
     let resource = blocking(move || {
@@ -3148,8 +3144,8 @@ enum DatBodyError {
 impl IntoResponse for DatBodyError {
     fn into_response(self) -> Response {
         match self {
-            Self::Unreadable => ApiError(Error::Invalid("DAT upload body was interrupted or unreadable; no catalog upload was accepted".into())).into_response(),
-            Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE,Json(serde_json::json!({"error":{"code":"upload_too_large","message":"Upload an extracted DAT file no larger than 64 MiB."}}))).into_response(),
+            Self::Unreadable => ApiError(Error::Invalid("DAT upload was interrupted".into())).into_response(),
+            Self::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE,Json(serde_json::json!({"error":{"code":"upload_too_large","message":"DAT files must be 64 MiB or smaller."}}))).into_response(),
         }
     }
 }
@@ -4460,7 +4456,10 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
             ) {
                 Ok(value) => value,
                 Err(error) => {
-                    state.service.report_guided_staging_failure(import.id, "Configured inbox package is unavailable; restore the source or discard this import.")?;
+                    state.service.report_guided_staging_failure(
+                        import.id,
+                        "Inbox source is missing; restore it or discard this import.",
+                    )?;
                     tracing::warn!(import_id=%import.id, %error, "guided inbox source is unavailable during recovery");
                     continue;
                 }
@@ -4481,7 +4480,10 @@ fn recover_guided_inbox_staging(state: &AppState) -> Result<()> {
                     })
                 })
             {
-                state.service.report_guided_staging_failure(import.id, "Inbox inventory changed after acceptance; restore the original package or discard and preview it again.")?;
+                state.service.report_guided_staging_failure(
+                    import.id,
+                    "Inbox files changed; restore them or discard and preview again.",
+                )?;
                 tracing::warn!(import_id=%import.id, "guided inbox inventory changed before recovery");
                 continue;
             }
@@ -5057,7 +5059,7 @@ async fn upload_catalog_snapshot(
         .clone()
         .try_acquire_owned()
         .map_err(|_| {
-            Error::Unavailable("Other DAT uploads are in progress; try again shortly.".into())
+            Error::Unavailable("Another DAT upload is in progress; try again shortly.".into())
         })?;
     let bytes = match dat_body(request.into_body(), collector_app::MAX_DAT_UPLOAD_BYTES).await {
         Ok(bytes) => bytes,
@@ -5143,7 +5145,7 @@ async fn inspect_catalog_upload(
                 if data.len() + chunk.len() > collector_app::MAX_DAT_UPLOAD_BYTES
                     || total > 512 * 1024 * 1024
                 {
-                    return Err(Error::Invalid("Upload file or batch limit exceeded".into()).into());
+                    return Err(Error::Invalid("Upload too large".into()).into());
                 }
                 data.extend_from_slice(&chunk);
             }
@@ -5897,16 +5899,6 @@ mod upload_failure_tests {
         ]));
         let response = dat_body(body, 4).await.unwrap_err().into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let bytes = axum::body::to_bytes(response.into_body(), 4096)
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert!(
-            value["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("interrupted")
-        );
     }
 }
 

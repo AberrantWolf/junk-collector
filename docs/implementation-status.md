@@ -1,75 +1,27 @@
 # Implementation status
 
-Reviewed 2026-11-10. Source implementation,
-published release and installation acceptance are separate states. This document
-makes no claim about any reader's installed version. The [ADRs](decisions/README.md)
-define architectural rules rather than implementation or qualification status. See [documentation authority](index.md).
+What the server currently does. Planned work is in [remaining work](remaining-work.md).
 
-## Playback modes
-
-Original serves the selected file or a seekable PCM WAV view of a raw CD
-track. High Bandwidth defaults to existing compatible audio or live FLAC.
-Low Bandwidth defaults to Opus 128 kbps VBR with a configurable target.
-Imports require an explicit FLAC selection for saved FLAC preparation.
-See [playback settings and API](configuration.md#live-playback-format).
-
-## Live playback format preference — 2026-11-10
-
-The web player and Account settings share a browser/account preference for
-saved audio, FLAC, or Opus with a custom bitrate. Normal authenticated HTTP can
-play recorded CD track coordinates from authorized originals without preparation.
-Live conversion uses an independent bounded encoder per stream and leaves the
-archive and Jobs untouched. The separate media transports still serve saved files.
-See [configuration and limits](configuration.md#live-playback-format) and
-[delivery validation](validation/live-playback-format-2026-11-10.md).
-
-## Amazon Japan order and delivery notices — source delivery, 2026-11-09
-
-Purchase inbox reads the full item title and order reference from the observed
-English Amazon Japan HTML layout and distinguishes Ordered, Shipped, Out for
-delivery and Delivered. The layout requires a labelled order reference and
-marked product links. The review follow-up handles subject separator variants,
-legacy labelled receipts, equivalent HTML alternatives and separate product rows
-with identical titles. Items with unresolved titles remain visible alongside
-parsed items. Rescans fill missing fields on the same unaccepted suggestion
-without undoing dismissals or changing accepted history. See
-[parser coverage and validation](email-purchases.md#import-and-parser-coverage).
-
-## Beta.28 published and deployed — 2026-11-12
-
-The signed beta.28 image is available from the preview channel. The split-host
-installation passed deployment acceptance. See the
-[qualification, publication and deployment record](validation/container-beta28-publication-2026-11-12.md).
-
-| Capability | Implemented behavior | Limits / evidence |
+| Area | Implemented | Limits |
 | --- | --- | --- |
-| Preservation and inventory | Exact originals, physical/digital inventory, manual authority, unknown-data retention, removal/restoration and reindex | No generic history pruning; [retention policy](retention-audit.md) |
-| Intake | Browser resumable uploads, configured inboxes, grouped package review, durable progress/recovery and explicit source cleanup. Current source reclaims published private staging and serves published replays from archive masters. | [Getting started](getting-started.md), [inbox cleanup](inbox-cleanup.md), [staging contract](architecture.md#published-import-staging), [source validation](validation.md#published-import-staging-reclamation--2026-11-14) |
-| Games | Manual DAT upload/review/activation and automatic identification | Finite [system/format matrix](game-identification.md); no universal container support |
-| Digital music | FLAC/MP3 originals, integer and 32-bit float PCM WAV analysis, integer WAV FLAC preparation, tags/artwork and retained-audio analysis. Source review supports preferred-format playback, file ordering, and disc and track number assignments. Guided analysis accepts large reviewed inventories without duplicating file metadata in the analysis request. | [Supported inputs](digital-purchases.md), [audio matrix](audio-preparation.md) |
-| CD audio | Supported raw/CUE layouts, explicit FLAC/Opus preparation, durable AccurateRip workflows and defaults | Named algorithms/coverage; [audio qualification](audio-preparation.md) |
-| Digital album matching | Source-bound fingerprints, AcoustID/MusicBrainz discovery, expansion, tentative assignments and side-by-side review, explicit AcoustID contributions | Bounded identity suggestions. Contributions use a personal AcoustID key and are processed asynchronously by AcoustID. [Track review validation](validation/digital-album-track-review-2026-11-18.md) |
-| Metadata/artwork | Automatic/manual authority, independent digital source and artwork choices, retained candidate history | Source/revision fences; [latest review](validation/github-metadata-review-2026-11-03.md) |
-| Library/player | Progressive counts/pages, lazy tracks, artwork, search, queues and collection lists. Background reads preserve the current workspace. The sidebar shows the active collection and the signed-in name. Web appearance follows the system or uses a browser preference. | [Read contract](layered-library-refresh.md), [player contract](album-metadata-consumers.md), [web acceptance](validation.md#web-interface-issue-acceptance--2026-11-16) |
-| Media transport | Normal authenticated audio by default, optional private or isolated direct HTTPS service, and requested-byte reads | Browser/network qualification is bounded; [private playback](automatic-private-playback.md), [direct media](../deploy/container/media.md) |
-| Accounts/access | Passwords, passkeys, browser enrollment, collection roles, recovery/revocation and exposure controls | [Security contract](decisions/security.md); no implicit administrator collection grant |
-| Documents | Authorized PDF/text originals and bounded browser previews | [Dated acceptance](validation/documents-2026-10-21.md); no server PDF renderer |
-| Purchase inbox | Optional Proton Bridge, explicit receipt review, folder editing, credential repair and cursor recovery | [Email guide](email-purchases.md); no Gmail adapter |
-| Backup/export | Stopped-server full backup/restore, portable full export/import, optional backup-age reminder | [Operations](server-operations.md); no scheduled backup or database-only recovery mode |
-| Packaging | Native AMD64/ARM64 images, exact-byte validation/promotion, pinned install bundles | [Release pipeline](container-release-pipeline.md); candidate success is not publication |
-| Withdrawn publication cleanup | Cancellation, lost-claim and typed-contention exits settle their own uncommitted V4 journal/staging while holding the writer; non-missing observation lookup errors propagate | [Repair/recovery evidence](validation/cancelled-publication-2026-11-03.md); committed revisions and uncertain-failure recovery remain protected |
-| Contention/error handling | Typed contention yields/retries and differentiated mutation/refresh outcomes | [Contention review](validation/github-background-contention-2026-11-03.md), [error review](validation/github-error-presentation-2026-11-03.md) |
-| Import-time catalog reads | Source uses separate read-only WAL connections for Library, authentication and shared query paths. Production imports hand verified Capture preparation to a single publication worker. | [Architecture](architecture.md#catalog-reads-and-import-publication--2026-11-13) · [Library contract](layered-library-refresh.md) · [Source validation](validation/import-time-library-2026-11-13.md). Installed performance remains to be measured. |
+| Preservation and inventory | Exact originals, physical and digital inventory, manual metadata authority, unknown-data retention, removal/restoration, reindex | No generic history pruning |
+| Intake | Resumable browser uploads, configured inboxes, grouped package review, durable progress and recovery, explicit [inbox cleanup](inbox-cleanup.md) | |
+| Games | DAT upload and activation, automatic identification | Finite [system/format list](game-identification.md) |
+| Digital music | FLAC/MP3 originals, integer and float PCM WAV, tags and artwork, FLAC preparation from integer WAV, file ordering and disc/track assignment | [Supported inputs](digital-purchases.md) |
+| CD audio | Supported raw/CUE layouts, FLAC/Opus preparation, AccurateRip checks | [Audio support](audio-preparation.md) |
+| Album matching | AcoustID/MusicBrainz suggestions with side-by-side review; optional AcoustID contributions | Suggestions only; contributions need a personal AcoustID key |
+| Metadata and artwork | Automatic and manual authority, independent source and artwork choices, candidate history | |
+| Library and player | Progressive counts and pages, lazy tracks, artwork, search, queues, collection lists; light/dark appearance | [Read contract](layered-library-refresh.md), [player API](album-metadata-consumers.md) |
+| Playback | Original, High Bandwidth (saved audio or live FLAC) and Low Bandwidth (Opus, default 128 kbps) modes; per-account format preference; live conversion without touching the archive | [Settings](configuration.md) |
+| Media transport | Normal authenticated audio by default; optional [private](automatic-private-playback.md) or isolated [direct HTTPS](../deploy/container/media.md) media service | |
+| Accounts and access | Passwords, passkeys, browser enrollment, collection roles, recovery/revocation, listener exposure controls | Administrators get no implicit collection access |
+| Documents | PDF/text originals with browser previews | No server-side PDF rendering |
+| Purchase inbox | Optional Proton Bridge [email intake](email-purchases.md) with receipt review | No Gmail |
+| Backup and export | Stopped-server backup/restore, [portable export/import](archive-export.md), optional backup-age reminder | No scheduled backups |
+| Packaging | AMD64/ARM64 container images, pinned install bundles | |
 
-Trash Amp has separate source, packaging and device acceptance. Collector changes
-cannot establish which native app is installed. Reuse its dated transport/offline
-[evidence](validation/native-failure-recovery-2026-10-21.md) only where applicable.
+Trash Amp is a separate project with its own releases.
 
-Synchronized listening, broader codecs/layouts, generic retention, delta export,
-legacy adoption, event delivery and advanced trust/routing remain conditional or
-incomplete. [Remaining work](remaining-work.md) owns their disposition. The retired
-Phono client is not a target; existing data and reusable mechanisms remain protected.
-
-The [earlier status in Git](https://github.com/AberrantWolf/junk-collector/blob/7f4a56c8d6b38724a371549d09b978bbcb8e5cb1/docs/implementation-status.md) preserves
-checkpoint outcomes. Its earlier “pending,” branch and deployment statements are
-historical, not additional current status.
+Not implemented: synchronized listening, AAC/ALAC/Opus originals, generic history
+pruning, delta export, migration from other products, event push to clients, and
+relay/advanced routing. See [remaining work](remaining-work.md).

@@ -1,12 +1,7 @@
 //! Durable archive-publication journal primitives.
 //!
 //! Journals deliberately contain no users, grants, credentials, or other private
-//! policy state. Application-owned publication plans are adopted by later P01
-//! children; this module owns only crash-recoverable filesystem mechanisms.
-#![allow(
-    dead_code,
-    reason = "P01.2 provides the kernel adopted by the P01.3-P01.5 writers"
-)]
+//! policy state; this module owns only crash-recoverable filesystem mechanisms.
 
 use crate::{storage, sync_directory};
 use collector_core::{CollectionId, Digest, Error, Result, Revision, TransactionId};

@@ -67,8 +67,8 @@ async function performRequest<T>(path:string,init:ApiRequestInit,retried:boolean
    init.signal?.throwIfAborted();
    const verified=await performRequest<AuthenticationIdentity>('/me',{signal:init.signal},true,submittedIdentity);
    if(verified.user_id!==submittedIdentity.user_id||identity?.user_id!==submittedIdentity.user_id)throw new Error('Account changed. The pending action was not submitted.');
-   if(authenticationPolicy==='review')throw new ApiRequestError(409,'authentication_review_required','Authentication changed the session. Review the refreshed sessions and choose the action again.');
-   if(init.body instanceof ReadableStream)throw new Error('This upload must be resubmitted after authentication.');
+   if(authenticationPolicy==='review')throw new ApiRequestError(409,'authentication_review_required','Your session changed after signing in. Check the session list and try again.');
+   if(init.body instanceof ReadableStream)throw new Error('Sign-in interrupted this upload. Start it again.');
    return performRequest<T>(path,{...request,authenticationPolicy,operation},true,submittedIdentity);
   }
   throw new ApiRequestError(response.status,code,operation?`${operation}: ${message}`:message);

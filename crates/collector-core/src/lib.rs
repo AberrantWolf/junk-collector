@@ -417,8 +417,7 @@ pub struct Collection {
     pub revision: Revision,
     pub name: String,
     pub created_at: DateTime<Utc>,
-    /// Absent in pre-CT.2 creation manifests. Deserialization classifies those
-    /// archives without rewriting their immutable original metadata.
+    /// Absent in older creation manifests, which deserialize as `LegacyUnassigned`.
     #[serde(default)]
     pub binding: CollectionBinding,
 }
@@ -972,11 +971,14 @@ pub enum ConversionProfile {
     },
 }
 impl ConversionProfile {
-    pub const PRESETS: [Self; 4] = [
+    pub const PRESETS: [Self; 7] = [
         Self::Flac,
+        Self::Opus { bitrate_kbps: 64 },
         Self::Opus { bitrate_kbps: 96 },
         Self::Opus { bitrate_kbps: 128 },
+        Self::Opus { bitrate_kbps: 160 },
         Self::Opus { bitrate_kbps: 192 },
+        Self::Opus { bitrate_kbps: 256 },
     ];
 
     pub fn validate(&self) -> Result<()> {

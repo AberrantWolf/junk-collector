@@ -218,7 +218,7 @@ impl CollectionService {
             AlbumPlaybackReadiness::Ready
         } else {
             AlbumPlaybackReadiness::NeedsAttention {
-                reason: "Some album tracks are not prepared for playback. Open audio preparation to prepare the missing tracks or review failed work.".into(),
+                reason: "Some tracks aren't prepared for playback yet.".into(),
             }
         })
     }

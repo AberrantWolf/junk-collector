@@ -25,8 +25,6 @@ fn run(config: &std::path::Path, command: &str) -> std::process::Output {
 fn invalid_worker_settings_fail_before_storage_is_opened() {
     for jobs in [
         "processing_workers = 0",
-        "processing_workers = 9",
-        "processing_workers = 256",
         "processing_workers = 4\ncopy_workers = 0",
         "processing_workers = 1\ncopy_workers = 2",
         "provider_workers = 2",
@@ -52,7 +50,7 @@ fn invalid_worker_settings_fail_before_storage_is_opened() {
 }
 
 #[test]
-fn setup_persists_defaults_and_doctor_accepts_each_supported_worker_limit() {
+fn setup_persists_defaults_and_doctor_accepts_worker_counts() {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("collector.toml");
     let archive = root.path().join("archive");
@@ -71,7 +69,7 @@ fn setup_persists_defaults_and_doctor_accepts_each_supported_worker_limit() {
     let mut saved: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(saved["jobs"]["processing_workers"].as_integer(), Some(4));
     assert_eq!(saved["jobs"]["copy_workers"].as_integer(), Some(1));
-    for workers in 1..=8 {
+    for workers in [1, 8, 32] {
         saved["jobs"]["processing_workers"] = toml::Value::Integer(workers);
         fs::write(&config, toml::to_string(&saved).unwrap()).unwrap();
         let doctor = run(&config, "doctor");

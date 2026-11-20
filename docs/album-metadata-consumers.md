@@ -1,9 +1,5 @@
 # Album metadata and artwork for players
 
-Architectural rules: [ADR 0007](decisions/0007-manual-metadata-authority.md), [ADR 0013](decisions/0013-bounded-projections-and-client-refresh-state.md).
-This document retains detailed requirements, rationale and evidence; the ADRs do
-not replace its supported-scope and recovery limits.
-
 Collector resolves accepted/manual metadata and artwork on the server. Remote
 players such as Trash Amp read that published state; a Library refresh does not
 query MusicBrainz, acquire Cover Art Archive images or prepare audio. Metadata
@@ -81,12 +77,11 @@ exposure; a working web login does not grant a separate native account access.
 
 ## Diagnosing a player-only failure
 
-For the **same account**, inspect one album row and its exact authenticated
-thumbnail request. Record status, asset/revision, pending state and whether cached
-bytes decode; never record credentials. If Collector web shows a cover and that
-request succeeds, inspect the player's cache association, incremental publication
-and UI invalidation. If the pair is absent, compare pending state, selected
-account/collection and permissions before investigating provider acquisition.
+For the same account, check one album row and its thumbnail request: status,
+asset/revision, pending state and whether cached bytes decode. If the web interface
+shows the cover and the request succeeds, the problem is in the player's cache or
+UI. If the artwork pair is absent, check pending state, account, collection and
+permissions before looking at provider acquisition.
 
 The [generated OpenAPI](../api/openapi.v1.json) is the exact wire schema;
 [API maintenance](../api/README.md) describes generation and command semantics.

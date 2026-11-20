@@ -1,60 +1,49 @@
-# API v1 contract and Wave 1 migration
+# API v1
 
-Player consumers: see [album metadata and artwork](../docs/album-metadata-consumers.md)
-for the authenticated read sequence, artwork IDs/revisions, pending states,
-independent thumbnail loading and failure diagnosis. See
-[layered Library refresh](../docs/layered-library-refresh.md) for pagination and
+`openapi.v1.json` is generated from the annotated route groups the server is built
+from, and `web/src/generated/api.ts` is generated from that. Do not edit either by hand.
+
+After changing an annotated route or DTO, run `python3 scripts/api_contract.py --write`.
+`python3 scripts/api_contract.py` (or `npm --prefix web run check:api`) fails on
+drift. The server does not serve the document or a Swagger UI.
+
+Player clients: see [album metadata and artwork](../docs/album-metadata-consumers.md)
+for the read sequence and artwork handling, and
+[layered library refresh](../docs/layered-library-refresh.md) for pagination and
 lazy track reads.
 
-`openapi.v1.json` is generated from the same annotated route groups used to
-compose the server. `web/src/generated/api.ts` is generated from that document;
-neither file is hand-edited.
+## Mutations
 
-Run `python3 scripts/api_contract.py --write` after changing an annotated route
-or DTO. Run `python3 scripts/api_contract.py` (or `npm --prefix web run
-check:api`) to regenerate into temporary files and fail on drift. The server does
-not expose the document or a Swagger UI route.
+Application commands require an `Idempotency-Key` of 1–128 visible ASCII characters.
+Authentication ceremonies, logout, upload chunks and one-time secret issuance use
+their own state or offset semantics instead. Retrying with the same key and request
+returns the original result; the same key with a different request returns
+`idempotency_conflict`; a duplicate still in progress returns `command_in_progress`.
 
-## Mutation contract
+Mutable resources take an `expected_revision` (zero means create). A stale revision
+returns `revision_conflict`.
 
-Application commands require an `Idempotency-Key` containing 1–128 visible ASCII
-characters. Authentication ceremonies, logout, resumable upload chunks, and
-one-time secret issuance use their own state-machine or offset semantics and are
-exceptions. A successful retry with the same typed request returns the original
-result; changing the request while reusing the key returns
-`idempotency_conflict`. An active duplicate returns `command_in_progress`.
+AcoustID contributions bind the receipt to the item, lookup, release and reviewed
+file assignments. The personal key is not stored. A replay returns the accepted
+submission IDs, or `unknown` if the contribution may have reached AcoustID.
 
-Mutable resources carry an `expected_revision`; zero means create. A stale
-revision returns `revision_conflict` without publishing a revision or consuming a
-new command receipt.
+## Item saves
 
-AcoustID contributions bind the receipt to the item, completed lookup, release
-and reviewed file assignments. The personal key authorizes delivery and is not
-stored in the receipt. Replay returns the accepted submission IDs or an
-`unknown` outcome for a contribution that may have reached AcoustID.
-
-## Item-save compatibility
-
-New clients send the following envelope (command fields abbreviated here):
+Clients send:
 
 ```json
 {"command":{"collection_id":"…","title":"…"},"expected_revision":1}
 ```
 
-The command schema contains the complete editable field set. IDs in the path and
-command, revision history, timestamps, deletion state, metadata observations,
-Capture representations/locators, Evidence, and Assets remain server-owned.
+The command holds the full editable field set. IDs, revision history, timestamps,
+deletion state, metadata observations, captures, evidence and assets are server-owned.
 
-For Wave 1 clients, the endpoint temporarily also accepts
-`{"item":{…},"expected_revision":1}`. Before delegation, the application service
-loads the canonical item and rejects any difference in server-owned fields. A
-new legacy item must have revision zero and empty/default server-owned state. The
-adapter therefore cannot publish compatibility Capture or Asset snapshots or
-overwrite an authoritative standalone Capture revision. Clients should migrate
-to the command envelope; the compatibility shape is not the long-term
-architecture.
+The endpoint still accepts the older `{"item":{…},"expected_revision":1}` shape,
+but rejects any change to server-owned fields; a new item in that shape must have
+revision zero and default server-owned state. Clients should use the command envelope.
 
-Interactive reads can return `503` with the typed `catalog_busy` code during brief
-publication contention. Read clients can retry with bounded delays and cancellation;
-permanent `unavailable` or storage failures keep their own meaning. The web client
-retries GET/HEAD at most three times and preserves the submitted account identity.
+## Read retries
+
+Reads can return `503` `catalog_busy` during brief publication contention; retry
+with a bounded backoff. `unavailable` and storage errors are not transient. The web
+client retries GET/HEAD up to three times.

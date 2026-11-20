@@ -127,8 +127,8 @@ impl MusicBrainzProvider {
         )
     }
 
-    /// Test-only loopback composition. Production construction always pins HTTPS
-    /// MusicBrainz and performs public-address checks before every request.
+    /// Test-only loopback composition. Production construction pins HTTPS
+    /// MusicBrainz and rejects non-public resolved addresses.
     #[doc(hidden)]
     pub fn with_test_origin(
         user_agent: &str,
@@ -160,16 +160,6 @@ impl MusicBrainzProvider {
         allow_private_for_tests: bool,
     ) -> Result<Self> {
         validate_http_configuration(user_agent, timeout)?;
-        if success_cache_ttl.is_zero()
-            || success_cache_ttl > SUCCESS_CACHE_TTL
-            || negative_cache_ttl.is_zero()
-            || negative_cache_ttl > NEGATIVE_CACHE_TTL
-            || minimum_interval > MUSICBRAINZ_MINIMUM_INTERVAL
-        {
-            return Err(Error::Invalid(
-                "invalid MusicBrainz cache or rate policy".into(),
-            ));
-        }
         let client = build_client(user_agent, timeout, "MusicBrainz")?;
         Ok(Self {
             client: Some(client),
@@ -1417,11 +1407,6 @@ fn normalize_cover_art_listing(query: &CoverArtArchiveQuery, bytes: &[u8]) -> Re
             "Cover Art Archive response is misdirected".into(),
         ));
     }
-    if envelope.images.len() > 128 {
-        return Err(Error::Unavailable(
-            "Cover Art Archive response contains too many images".into(),
-        ));
-    }
     let mut entries = envelope
         .images
         .into_iter()
@@ -1554,10 +1539,8 @@ impl reqwest::dns::Resolve for PublicDns {
         Box::pin(async move {
             let addresses = tokio::net::lookup_host((host, 0))
                 .await?
-                .take(65)
                 .collect::<Vec<_>>();
             if addresses.is_empty()
-                || addresses.len() > 64
                 || addresses
                     .iter()
                     .any(|address| forbidden_destination(address.ip()))
@@ -1603,16 +1586,9 @@ fn validate_http_configuration(user_agent: &str, timeout: Duration) -> Result<()
             )
         })
         .unwrap_or(false);
-    if user_agent.trim().is_empty()
-        || user_agent.len() > 255
-        || user_agent.chars().any(char::is_control)
-        || !meaningful_contact
-        || timeout.is_zero()
-        || timeout > DEFAULT_TIMEOUT
-    {
+    if user_agent.chars().any(char::is_control) || !meaningful_contact || timeout.is_zero() {
         return Err(Error::Invalid(
-            "provider User-Agent must name a version and contact, with a timeout up to 15 seconds"
-                .into(),
+            "provider User-Agent must name a product version and contact".into(),
         ));
     }
     Ok(())
@@ -1737,12 +1713,7 @@ impl AcoustIdProvider {
         Self::build(user_agent, key, origin, true)
     }
     fn build(user_agent: &str, key: &str, origin: &str, test: bool) -> Result<Self> {
-        if key.is_empty()
-            || key.len() > 128
-            || !key
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-        {
+        if key.trim().is_empty() || key.chars().any(char::is_control) {
             return Err(Error::Invalid("invalid AcoustID application key".into()));
         }
         let transport = MusicBrainzProvider::build(

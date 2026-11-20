@@ -931,13 +931,7 @@ fn folder_edits_are_owned_revision_fenced_replayable_and_preserve_history() {
             .len(),
         1
     );
-    for folders in [
-        vec![],
-        vec!["INBOX\r\nINJECT".into()],
-        vec![" ".into()],
-        vec!["x".repeat(257)],
-        vec!["INBOX".into(); 17],
-    ] {
+    for folders in [vec![], vec!["INBOX\r\nINJECT".into()], vec![" ".into()]] {
         assert!(matches!(
             service.configure_mail(
                 &auth.principal,

@@ -1,9 +1,4 @@
-# Portable full archive export
-
-HL-10's full export/import workflow is included in public **alpha.3**, 2026-10-21;
-see [publication acceptance](validation/container-publication-2026-10-21.md). The
-[local acceptance record](validation/archive-export-2026-10-21.md) describes the
-tested commands and recovery cases.
+# Portable archive export
 
 Use this to transfer preserved collection data to a fresh installation. It keeps
 originals, artwork, inventory, manual metadata, collection lists, recipes, evidence,
@@ -15,7 +10,7 @@ Accounts, grants, passwords, sessions, native credentials, TLS, server identity,
 private pending work and configuration are not copied. Private collection facts,
 receipts, notes and original files **are** collection data and can be included.
 Treat the export as private. This is not a redacted sharing feature or a complete
-installation recovery point; use [full backup/restore](local-alpha-installation.md#stopped-server-backup)
+installation recovery point; use [full backup/restore](server-operations.md)
 when you need credentials, access assignments and unfinished work preserved.
 
 ## Export and check

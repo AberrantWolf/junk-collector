@@ -36,12 +36,11 @@ try{
  await page.getByLabel('Find a list').fill('Beta');
  await expect(page.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Alpha (0)','Beta (0)']);
  await expect(page.getByLabel('Destination list')).toHaveValue('a');
- await page.getByRole('button',{name:'Append to list',exact:true}).click();await page.getByText('Album added to Alpha.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Append to list',exact:true}).click();await page.getByRole('status').filter({hasText:'Alpha'}).waitFor();
  assert.deepEqual(writes,['/api/v1/collections/c/lists/a']);
- assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden');
  await page.getByLabel('Find a list').focus();await page.keyboard.press('Shift+Tab');await expect(page.getByRole('button',{name:'Close',exact:true})).toBeFocused();
  await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByRole('button',{name:'Open chooser'})).toBeFocused();
- assert.equal(await page.evaluate(()=>document.body.style.overflow),'');await page.close();
+ await page.close();
 
  const racing=await browser.newPage();racing.setDefaultTimeout(10000);
  let releaseOld,oldStarted,oldFinished;
@@ -86,7 +85,7 @@ try{
   else{await uncertain.getByRole('button',{name:'Reload lists'}).click();}
   await expect(uncertain.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Alpha (1)']);
   await expect(uncertain.getByLabel('Destination list')).toBeDisabled();
-  await uncertain.getByRole('button',{name:'Retry addition',exact:true}).click();await uncertain.getByText('Album added to Alpha.',{exact:true}).waitFor();
+  await uncertain.getByRole('button',{name:'Retry addition',exact:true}).click();await uncertain.getByRole('status').filter({hasText:'Alpha'}).waitFor();
   assert.equal(appendCount,1,'uncertain retry added a duplicate occurrence');assert.deepEqual(submissions[0],submissions[1]);
   await uncertain.getByRole('button',{name:'Append to list',exact:true}).click();
   await expect.poll(()=>appendCount).toBe(2);assert.notEqual(submissions[2].key,submissions[0].key,'intentional repeated append reused the earlier receipt');
@@ -109,7 +108,7 @@ try{
  });
  await open(creation);await creation.getByLabel('New list name').fill('New mix');await creation.getByRole('button',{name:'Append to list',exact:true}).click();await creation.getByRole('alert').waitFor();
  await creation.getByRole('button',{name:'Close',exact:true}).click();await creation.reload();await creation.getByRole('button',{name:'Open chooser'}).click();
- await expect(creation.getByLabel('New list name')).toHaveValue('New mix');await creation.getByRole('button',{name:'Retry addition',exact:true}).click();await creation.getByText('Album added to New mix.',{exact:true}).waitFor();
+ await expect(creation.getByLabel('New list name')).toHaveValue('New mix');await creation.getByRole('button',{name:'Retry addition',exact:true}).click();await creation.getByRole('status').filter({hasText:'New mix'}).waitFor();
  assert.equal(creates,1);assert.equal(createdAppends,1);assert.deepEqual(createAttempts[0],createAttempts[1]);await creation.close();
 
  // A real conflict permits a revised command, even when the selected list is
@@ -126,7 +125,7 @@ try{
  });
  await open(conflict);await conflict.getByLabel('Destination list').selectOption('a');await conflict.getByLabel('Find a list').fill('Beta');await expect(conflict.getByLabel('Destination list').locator('option')).toHaveCount(3);
  await conflict.getByRole('button',{name:'Append to list',exact:true}).click();await conflict.getByRole('alert').waitFor();await conflict.getByRole('button',{name:'Reload lists'}).click();
- await expect(conflict.getByRole('button',{name:'Append to list',exact:true})).toBeEnabled();await conflict.getByRole('button',{name:'Append to list',exact:true}).click();await conflict.getByText('Album added to Alpha.',{exact:true}).waitFor();await conflict.close();
+ await expect(conflict.getByRole('button',{name:'Append to list',exact:true})).toBeEnabled();await conflict.getByRole('button',{name:'Append to list',exact:true}).click();await conflict.getByRole('status').filter({hasText:'Alpha'}).waitFor();await conflict.close();
  // A delayed exact refresh must not restore a destination the user just
  // cleared while loading. The command stays bound to the visible choice.
  const changed=await browser.newPage();changed.setDefaultTimeout(10000);

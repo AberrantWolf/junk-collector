@@ -66,10 +66,8 @@ impl CollectionService {
         let role = self.authorize(actor, collection, Action::Browse)?;
         let search = query.search.unwrap_or_default();
         let limit = query.limit.unwrap_or(50);
-        if search.len() > 256 || !(1..=100).contains(&limit) {
-            return Err(Error::Invalid(
-                "Use a search of at most 256 bytes and a page size of 1–100.".into(),
-            ));
+        if !(1..=100).contains(&limit) {
+            return Err(Error::Invalid("Use a page size of 1–100.".into()));
         }
         let mut page = self
             .lists
@@ -109,41 +107,110 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<CollectionListSummary> {
         self.authorize(actor, collection, Action::Curate)?;
-        self.execute_command(actor, context, "collection.list.update", &(collection, id, &command), |effects| {
-            let mut list = self.readable_list(actor, collection, id)?;
-            if list.revision != command.expected_revision { return Err(Error::Conflict); }
-            let mut sources = vec![];
-            match &command.change {
-                CollectionListChange::Rename {name} => list.name = name.trim().into(),
-                CollectionListChange::Delete => list.deleted = true,
-                CollectionListChange::Remove {entry_id} => {
-                    let index = list.entries.iter().position(|e| e.id == *entry_id).ok_or(Error::Conflict)?;
-                    list.entries.remove(index);
+        self.execute_command(
+            actor,
+            context,
+            "collection.list.update",
+            &(collection, id, &command),
+            |effects| {
+                let mut list = self.readable_list(actor, collection, id)?;
+                if list.revision != command.expected_revision {
+                    return Err(Error::Conflict);
                 }
-                CollectionListChange::Move {entry_id, before} => {
-                    if before == &Some(*entry_id) { return Err(Error::Invalid("Choose a different destination for this entry.".into())); }
-                    let index = list.entries.iter().position(|e| e.id == *entry_id).ok_or(Error::Conflict)?;
-                    let entry = list.entries.remove(index);
-                    let to = before.map(|id| list.entries.iter().position(|e| e.id == id).ok_or(Error::Conflict)).transpose()?.unwrap_or(list.entries.len());
-                    list.entries.insert(to, entry);
+                let mut sources = vec![];
+                match &command.change {
+                    CollectionListChange::Rename { name } => list.name = name.trim().into(),
+                    CollectionListChange::Delete => list.deleted = true,
+                    CollectionListChange::Remove { entry_id } => {
+                        let index = list
+                            .entries
+                            .iter()
+                            .position(|e| e.id == *entry_id)
+                            .ok_or(Error::Conflict)?;
+                        list.entries.remove(index);
+                    }
+                    CollectionListChange::Move { entry_id, before } => {
+                        if before == &Some(*entry_id) {
+                            return Err(Error::Invalid(
+                                "Choose a different destination for this entry.".into(),
+                            ));
+                        }
+                        let index = list
+                            .entries
+                            .iter()
+                            .position(|e| e.id == *entry_id)
+                            .ok_or(Error::Conflict)?;
+                        let entry = list.entries.remove(index);
+                        let to = before
+                            .map(|id| {
+                                list.entries
+                                    .iter()
+                                    .position(|e| e.id == id)
+                                    .ok_or(Error::Conflict)
+                            })
+                            .transpose()?
+                            .unwrap_or(list.entries.len());
+                        list.entries.insert(to, entry);
+                    }
+                    CollectionListChange::Append {
+                        item_id,
+                        source_representation_id,
+                        track_position,
+                    } => {
+                        let item = self.reader.item(*item_id)?;
+                        if item.collection_id != collection {
+                            return Err(Error::Forbidden);
+                        }
+                        if item.deleted {
+                            return Err(Error::NotFound);
+                        }
+                        sources.push(ListSourceRevision {
+                            item_id: item.id,
+                            item_revision: item.revision,
+                            metadata_revision: self
+                                .processing
+                                .metadata_authority(item.collection_id, item.id)?
+                                .map_or(Revision(0), |record| record.revision),
+                            captures: item.captures.iter().map(|c| (c.id, c.revision)).collect(),
+                        });
+                        let targets = if list.kind == CollectionListKind::Items {
+                            if source_representation_id.is_some() || track_position.is_some() {
+                                return Err(Error::Invalid(
+                                    "This list contains collection entries.".into(),
+                                ));
+                            }
+                            vec![ListTarget::Item { item_id: item.id }]
+                        } else {
+                            self.list_music_targets(
+                                actor,
+                                &item,
+                                *source_representation_id,
+                                *track_position,
+                            )?
+                        };
+                        if list.entries.len() + targets.len() > MAX_LIST_ENTRIES {
+                            return Err(Error::Invalid(
+                                "Lists can hold at most 5,000 entries.".into(),
+                            ));
+                        }
+                        list.entries.extend(targets.into_iter().map(|target| {
+                            CollectionListEntry {
+                                id: ListEntryId::new(),
+                                target,
+                            }
+                        }));
+                    }
                 }
-                CollectionListChange::Append {item_id, source_representation_id, track_position} => {
-                    let item = self.reader.item(*item_id)?;
-                    if item.collection_id != collection { return Err(Error::Forbidden); }
-                    if item.deleted { return Err(Error::NotFound); }
-                    sources.push(ListSourceRevision {item_id: item.id, item_revision: item.revision, metadata_revision: self.processing.metadata_authority(item.collection_id,item.id)?.map_or(Revision(0),|record|record.revision), captures: item.captures.iter().map(|c|(c.id,c.revision)).collect()});
-                    let targets = if list.kind == CollectionListKind::Items {
-                        if source_representation_id.is_some() || track_position.is_some() { return Err(Error::Invalid("This list contains collection entries.".into())); }
-                        vec![ListTarget::Item {item_id: item.id}]
-                    } else { self.list_music_targets(actor, &item, *source_representation_id, *track_position)? };
-                    if list.entries.len() + targets.len() > MAX_LIST_ENTRIES { return Err(Error::Invalid("This addition would exceed the list’s 5,000-entry limit. Remove entries or choose a smaller addition.".into())); }
-                    list.entries.extend(targets.into_iter().map(|target| CollectionListEntry {id: ListEntryId::new(), target}));
-                }
-            }
-            list.revision = Revision(list.revision.0.checked_add(1).ok_or(Error::Conflict)?);
-            list.validate()?;
-            effects.publish_collection_list(actor.user_id, list, command.expected_revision, sources)
-        })
+                list.revision = Revision(list.revision.0.checked_add(1).ok_or(Error::Conflict)?);
+                list.validate()?;
+                effects.publish_collection_list(
+                    actor.user_id,
+                    list,
+                    command.expected_revision,
+                    sources,
+                )
+            },
+        )
     }
     pub(super) fn list_music_targets(
         &self,
@@ -237,7 +304,10 @@ impl CollectionService {
                         candidate.source_representation_id,
                     )?
                 else {
-                    return Err(Error::Invalid("The complete disc track list is not recorded. Inspect the CD structure before adding the disc or album; individual available tracks can still be added.".into()));
+                    return Err(Error::Invalid(
+                        "This disc's track list isn't known yet. Add individual tracks instead."
+                            .into(),
+                    ));
                 };
                 let recorded = tracks
                     .iter()
@@ -253,7 +323,9 @@ impl CollectionService {
                     .map(|row| row.track_position)
                     .collect::<BTreeSet<_>>();
                 if recorded != available {
-                    return Err(Error::Invalid("The complete disc audio scope is unavailable. Restore or inspect its original files before adding the disc or album; individual available tracks can still be added.".into()));
+                    return Err(Error::Invalid(
+                        "This disc's audio isn't available. Add individual tracks instead.".into(),
+                    ));
                 }
             }
         }
@@ -302,7 +374,7 @@ impl CollectionService {
                     .any(|s| s.medium_position.is_none() && !(file_sources.contains(&s.source_representation_id)
                         && rows.iter().filter(|row| row.primary_playback() && row.source_representation_id == s.source_representation_id && row.album_selection == collector_api_types::MusicAlbumSelection::Included).all(|row| row.disc_position.is_some())))
             {
-                return Err(Error::Invalid("Assign each original to an album disc before adding the whole multi-disc album. You can add discs individually now.".into()));
+                return Err(Error::Invalid("Assign each original to a disc before adding the whole album.".into()));
             }
             let mut digital_discs = BTreeMap::new();
             for row in rows.iter().filter(|row| {

@@ -47,7 +47,7 @@ try{
   };
   let {curator,preparation,batch}=await openPreparation();
   if(fixture.scenario.startsWith('prepare-opus-')||fixture.scenario.startsWith('restored-opus-')){
-   assert.ok([96,128,192].includes(fixture.bitrate));
+   assert.ok([64,96,128,160,192,256].includes(fixture.bitrate));
    const label=`Opus ${fixture.bitrate} kbps`;
    if(fixture.scenario.startsWith('prepare-opus-'))await preparation.getByRole('button',{name:`Prepare ${label}`,exact:true}).click();
    const link=preparation.getByRole('link',{name:new RegExp(`^Download ${label} ·`)});
@@ -92,7 +92,7 @@ try{
  if(expectedOpusMedia){assert.equal(new URL(await player.locator('audio').evaluate(audio=>audio.currentSrc)).pathname,expectedOpusMedia);await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.duration)).toBeCloseTo(3,1);}
  await player.getByRole('slider').fill('1');await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.currentTime)).toBeGreaterThan(.9);
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
- await page.getByText('Album details, evidence & files',{exact:true}).click();
+ await page.getByText('Album details & files',{exact:true}).click();
  for(const [name,expected] of Object.entries(fixture.originals)){
   const link=page.locator('.entry-inspection').getByRole('link',{name,exact:true});const href=await link.getAttribute('href');assert.ok(href);
   const response=await page.request.get(new URL(href,fixture.origin).toString());assert.equal(response.status(),200);const bytes=await response.body();assert.equal(bytes.length,expected.bytes);assert.equal(createHash('sha256').update(bytes).digest('hex'),expected.sha256);

@@ -224,9 +224,6 @@ pub fn open_conversion(
             .range_reader_with(track.start_frame, track.end_frame, |name| {
                 let get = || -> ModuleResult<Box<dyn junk_libs_core::ReadSeek + Send>> {
                     host.checkpoint()?;
-                    let name = name
-                        .to_str()
-                        .ok_or_else(|| error("CUE filename is not UTF-8"))?;
                     let member = inventory.resolve_relative(id, name).map_err(error)?;
                     Ok(Box::new(Reader(host.package_file(access, member.id)?)))
                 };

@@ -256,18 +256,84 @@ impl CollectionService {
         command: DiscoverIngestCommand,
         context: &CommandContext,
     ) -> Result<IntakeDiscovery> {
-        self.execute_command(actor,context,"intake.discover",&command,|effects| {
-            let eligibility=self.content_write_eligibility(actor,command.collection_id)?;
-            crate::guided_ingest::validate_intake_files(&command.files,INTAKE_FILE_LIMIT as usize)?;
-            let files=command.files.iter().filter(|file| !is_intake_housekeeping(&file.name,false)).cloned().collect::<Vec<_>>();
-            let names=crate::guided_ingest::discovery_names(&files,command.directory.as_deref())?;
-            let found=self.modules.discover_imports(&eligibility.owner,&names)?;
-            if found.len()>INTAKE_PACKAGE_LIMIT as usize {return Err(Error::Invalid("This folder contains more than 10,000 packages. Select a smaller folder or split it into separate intakes.".into()));}
-            let mut used=BTreeSet::new();let mut selections=Vec::new();
-            for p in found {let files=p.file_indices.into_iter().map(|index|{if !used.insert(index){return Err(Error::Invalid("Overlapping discovered packages".into()));}files.get(index).cloned().ok_or_else(||Error::Invalid("Invalid discovered file".into()))}).collect::<Result<Vec<_>>>()?;selections.push(IngestPackageSelection { album_tracks: None,purchase:None,source:ImportSourceSummary{kind:ImportSourceKind::Browser,label:None,package_name:p.label},files,anchor_file_index:None});}
-            let mut packages=Vec::new();for page in selections.chunks(64){packages.extend(self.plan_ingest(actor,PlanIngestCommand{collection_id:command.collection_id,packages:page.to_vec()})?.packages);}
-            let unassigned=files.iter().enumerate().filter(|(i,_)|!used.contains(i)).map(|(_,f)|f.name.clone()).collect::<Vec<_>>();
-            effects.freeze_intake_discovery(actor.user_id,IntakeDiscovery{id:deterministic_job_id(actor.user_id,"intake.discover",context.key()),collection_id:command.collection_id,package_count:packages.len() as u32,unassigned_count:unassigned.len() as u32},packages,unassigned)
+        self.execute_command(actor, context, "intake.discover", &command, |effects| {
+            let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+            crate::guided_ingest::validate_intake_files(
+                &command.files,
+                INTAKE_FILE_LIMIT as usize,
+            )?;
+            let files = command
+                .files
+                .iter()
+                .filter(|file| !is_intake_housekeeping(&file.name, false))
+                .cloned()
+                .collect::<Vec<_>>();
+            let names =
+                crate::guided_ingest::discovery_names(&files, command.directory.as_deref())?;
+            let found = self.modules.discover_imports(&eligibility.owner, &names)?;
+            if found.len() > INTAKE_PACKAGE_LIMIT as usize {
+                return Err(Error::Invalid(
+                    "This folder has more than 10,000 packages. Choose a smaller folder.".into(),
+                ));
+            }
+            let mut used = BTreeSet::new();
+            let mut selections = Vec::new();
+            for p in found {
+                let files = p
+                    .file_indices
+                    .into_iter()
+                    .map(|index| {
+                        if !used.insert(index) {
+                            return Err(Error::Invalid("Overlapping discovered packages".into()));
+                        }
+                        files
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| Error::Invalid("Invalid discovered file".into()))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                selections.push(IngestPackageSelection {
+                    album_tracks: None,
+                    purchase: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: p.label,
+                    },
+                    files,
+                    anchor_file_index: None,
+                });
+            }
+            let mut packages = Vec::new();
+            for page in selections.chunks(64) {
+                packages.extend(
+                    self.plan_ingest(
+                        actor,
+                        PlanIngestCommand {
+                            collection_id: command.collection_id,
+                            packages: page.to_vec(),
+                        },
+                    )?
+                    .packages,
+                );
+            }
+            let unassigned = files
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !used.contains(i))
+                .map(|(_, f)| f.name.clone())
+                .collect::<Vec<_>>();
+            effects.freeze_intake_discovery(
+                actor.user_id,
+                IntakeDiscovery {
+                    id: deterministic_job_id(actor.user_id, "intake.discover", context.key()),
+                    collection_id: command.collection_id,
+                    package_count: packages.len() as u32,
+                    unassigned_count: unassigned.len() as u32,
+                },
+                packages,
+                unassigned,
+            )
         })
     }
     pub fn intake_discovery_page(
@@ -290,31 +356,46 @@ impl CollectionService {
         context: &CommandContext,
     ) -> Result<IntakeSession> {
         self.execute_command(actor, context, "intake.create", &command, |effects| {
-            if command.expected_packages == 0 || command.expected_packages > INTAKE_PACKAGE_LIMIT
-                || command.expected_files > INTAKE_FILE_LIMIT {
-                return Err(Error::Invalid("Plan 1–10,000 packages and at most 100,000 files per intake. Split larger selections into separate intakes.".into()));
+            if command.expected_packages == 0
+                || command.expected_packages > INTAKE_PACKAGE_LIMIT
+                || command.expected_files > INTAKE_FILE_LIMIT
+            {
+                return Err(Error::Invalid(
+                    "An import can have up to 10,000 packages and 100,000 files.".into(),
+                ));
             }
             let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
             if command.prepare_music && command.audio_preparation.is_some() {
-                return Err(Error::Invalid("Choose one import preparation option.".into()));
+                return Err(Error::Invalid(
+                    "Choose one import preparation option.".into(),
+                ));
             }
-            let profile = command.audio_preparation.map(ImportAudioPreparation::profile).transpose()?.flatten();
+            let profile = command
+                .audio_preparation
+                .map(ImportAudioPreparation::profile)
+                .transpose()?
+                .flatten();
             let music = eligibility.owner.0 == "org.junk.music";
             if !music && (command.prepare_music || profile.is_some()) {
-                return Err(Error::Invalid("Import preparation applies to music collections.".into()));
+                return Err(Error::Invalid(
+                    "Import preparation applies to music collections.".into(),
+                ));
             }
-            let opus_import = if music && !command.prepare_music && command.audio_preparation.is_none() {
-                let reviewed = match command.reviewed_opus_import {
-                    Some(reviewed) => reviewed,
-                    None => self.care.cd_settings(command.collection_id)?.opus_import,
+            let opus_import =
+                if music && !command.prepare_music && command.audio_preparation.is_none() {
+                    let reviewed = match command.reviewed_opus_import {
+                        Some(reviewed) => reviewed,
+                        None => self.care.cd_settings(command.collection_id)?.opus_import,
+                    };
+                    reviewed.validate()?;
+                    Some(reviewed)
+                } else if command.reviewed_opus_import.is_some() {
+                    return Err(Error::Invalid(
+                        "Choose one import preparation option for a music collection.".into(),
+                    ));
+                } else {
+                    None
                 };
-                reviewed.validate()?;
-                Some(reviewed)
-            } else if command.reviewed_opus_import.is_some() {
-                return Err(Error::Invalid("Choose one import preparation option for a music collection.".into()));
-            } else {
-                None
-            };
             let now = self.authentication.now();
             effects.create_intake(PrivateIntake {
                 user_id: actor.user_id,
@@ -379,11 +460,17 @@ impl CollectionService {
                     self.content_write_eligibility(actor, intake.session.collection_id)?;
                 self.validate_frozen_binding(&eligibility, &intake.binding)?;
                 if command.packages.is_empty() || command.packages.len() > 64 {
-                    return Err(Error::Invalid(
-                        "Add 1–64 packages per manifest page.".into(),
-                    ));
+                    return Err(Error::Invalid("Add 1–64 packages at a time.".into()));
                 }
-                if command.packages.iter().map(|p|p.package.files.len()).sum::<usize>()>10000 {return Err(Error::Invalid("Each manifest page accepts at most 10,000 files. Add fewer packages per page; the session supports 100,000 files.".into()));}
+                if command
+                    .packages
+                    .iter()
+                    .map(|p| p.package.files.len())
+                    .sum::<usize>()
+                    > 10000
+                {
+                    return Err(Error::Invalid("Add at most 10,000 files at a time.".into()));
+                }
                 for package in &command.packages {
                     match &package.destination {
                         IntakeDestination::AlbumGroup {
@@ -392,7 +479,9 @@ impl CollectionService {
                             copy_key,
                         } => {
                             validate_intake_label(key)?;
-                            if let Some(title) = title { validate_intake_label(title)?; }
+                            if let Some(title) = title {
+                                validate_intake_label(title)?;
+                            }
                             validate_intake_label(copy_key)?;
                         }
                         IntakeDestination::Existing {
@@ -423,8 +512,15 @@ impl CollectionService {
                             .collect(),
                     },
                 )?;
-                if plan.packages.iter().any(|package| package.music_layout.as_ref().is_some_and(|layout| layout.needs_attention)) {
-                    return Err(Error::Invalid("Review the album playback files before importing this layout.".into()));
+                if plan.packages.iter().any(|package| {
+                    package
+                        .music_layout
+                        .as_ref()
+                        .is_some_and(|layout| layout.needs_attention)
+                }) {
+                    return Err(Error::Invalid(
+                        "Review the album playback files before importing this layout.".into(),
+                    ));
                 }
                 preflight(&plan)?;
                 let packages = plan
@@ -698,7 +794,20 @@ impl CollectionService {
                         for ((position, record), intent) in
                             positions.into_iter().zip(records).zip(intents)
                         {
-                            match self.intake_port.admit_intake_members(claim,&[position],vec![record],vec![intent]){Ok(())=>{},Err(Error::Conflict)=>self.intake_port.reject_intake_member(claim,position,"The destination changed after review. Choose its current revision or preserve this package as a separate entry.")?,Err(error)=>return Err(error)}
+                            match self.intake_port.admit_intake_members(
+                                claim,
+                                &[position],
+                                vec![record],
+                                vec![intent],
+                            ) {
+                                Ok(()) => {}
+                                Err(Error::Conflict) => self.intake_port.reject_intake_member(
+                                    claim,
+                                    position,
+                                    "The destination changed after review. Review it again.",
+                                )?,
+                                Err(error) => return Err(error),
+                            }
                         }
                     }
                     Err(error) => return Err(error),
@@ -766,9 +875,7 @@ impl CollectionService {
 }
 fn validate_intake_label(value: &str) -> Result<()> {
     if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
-        return Err(Error::Invalid(
-            "Album group titles, group keys and copy names must contain 1–512 characters.".into(),
-        ));
+        return Err(Error::Invalid("Names must be 1–512 characters.".into()));
     }
     Ok(())
 }

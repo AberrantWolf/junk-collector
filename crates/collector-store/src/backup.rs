@@ -926,10 +926,11 @@ mod tests {
                 b"must never be opened or migrated",
             )
             .unwrap();
-            let local_error = Store::local_accounts(&s, None, 10).unwrap_err().to_string();
-            assert!(local_error.contains("incomplete restore"), "{local_error}");
-            let error = Store::open(&a, &s).err().unwrap().to_string();
-            assert!(error.contains("incomplete restore"), "{error}");
+            assert!(matches!(
+                Store::local_accounts(&s, None, 10),
+                Err(Error::Unavailable(_))
+            ));
+            assert!(matches!(Store::open(&a, &s), Err(Error::Unavailable(_))));
             assert_eq!(
                 fs::read(s.join("private.sqlite")).unwrap(),
                 b"must never be opened or migrated"
@@ -960,9 +961,10 @@ mod tests {
         let c = root.path().join("new.toml");
         for (path, name) in [(&archive, ".writer.lock"), (&state, ".private.lock")] {
             let guard = root_lock(path, name).unwrap();
-            let error = restore_backup(&backup, &a, &s, &c, &config(&a, &s), RestoreScope::Full)
-                .unwrap_err();
-            assert!(error.to_string().contains("in use"));
+            assert!(matches!(
+                restore_backup(&backup, &a, &s, &c, &config(&a, &s), RestoreScope::Full),
+                Err(Error::Unavailable(_))
+            ));
             assert!(!a.exists() && !s.exists() && !c.exists());
             drop(guard);
         }

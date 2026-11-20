@@ -53,10 +53,10 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  const old=await page.evaluate(async id=>{const status=await(await fetch(`/api/v1/album-groups/${id}/undo`)).json();return status.group.sources[0];},album.merge_group);
  await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${old}`);
  const history=page.getByRole('region',{name:'Album grouping history'});
- await expect(history.getByText(/Grouped automatically from matching MusicBrainz/)).toBeVisible();
+ await expect(history.getByText(/Grouped automatically/)).toBeVisible();
  assert.equal(new URL(page.url()).searchParams.get('item'),destination);
  await page.goBack();if(!process.env.GROUPING_AMBIGUITY)await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track')).toHaveCount(4);
- await page.goForward();await expect(history.getByText(/Grouped automatically from matching MusicBrainz/)).toBeVisible();
+ await page.goForward();await expect(history.getByText(/Grouped automatically/)).toBeVisible();
  if(process.env.GROUPING_AMBIGUITY){
   const review=page.getByRole('region',{name:'Review selected metadata'});
   await expect(review.getByRole('button',{name:'Use this album release',exact:true}).first()).toBeVisible();
@@ -68,7 +68,7 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  if(process.env.GROUPING_AMBIGUITY){
   const readMetadata=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/metadata`)).json()),destination);
   const review=page.getByRole('region',{name:'Review selected metadata'});
-  await review.locator('article.candidate').filter({has:page.getByText('Bulk resolved album',{exact:true})}).first().getByRole('button',{name:'Use this album release',exact:true}).click();
+  await review.getByRole('article').filter({has:page.getByText('Bulk resolved album',{exact:true})}).first().getByRole('button',{name:'Use this album release',exact:true}).click();
   await expect.poll(async()=>(await readMetadata()).authority.selected_candidate?.provider_record_id).toBe('11111111-1111-4111-8111-111111111111');
   await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeDisabled();
   await restartServer();await page.reload({waitUntil:'domcontentloaded'});

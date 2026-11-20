@@ -18,12 +18,12 @@ export default function DestinationChooser({collectionId,selected,onSelect,disab
 
  return <section className="destination-chooser" aria-label="Destination entry">
   <p><strong>Destination</strong> · {selected?`${selected.title}${selected.subtitle?` · ${selected.subtitle}`:''}`:emptyMode==='create'?'Create a new entry for the package':'Leave unattached'}</p>
-  <p className="muted">Search by title, artist or edition to choose a destination.</p>
+  
   {selected&&<button type="button" disabled={disabled} onClick={()=>onSelect(null)}>{emptyMode==='create'?'Create a new entry instead':'Leave unattached'}</button>}
   <button type="button" disabled={disabled} aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'Close search':'Search existing entries'}</button>
   {open&&<><label>Search existing entries<input type="search" value={query} onChange={event=>{setQuery(event.target.value);setRows([]);setCursor(null);}} placeholder="Title, artist or edition"/></label>
    {loading&&!visibleRows.length&&<p role="status">Searching entries…</p>}{error&&<p role="alert" className="notice error">{error} <button type="button" onClick={()=>setRevision(value=>value+1)}>Retry</button></p>}
-   {!loading&&!error&&!visibleRows.length&&<p>No matching entries. Try another search.</p>}
+   {!loading&&!error&&!visibleRows.length&&<p>No matching entries.</p>}
    <div className="destination-results">{visibleRows.map(item=>{const artwork=item.assets.find(asset=>asset.id===item.primary_artwork);const context=item.presentation.fields.filter(field=>field.label!=='Collection type').slice(0,2).map(field=>field.value).join(' · ');return <button type="button" key={item.id} disabled={disabled} aria-pressed={selected?.id===item.id} onClick={()=>{onSelect(item);setOpen(false);}}>{artwork?<img src={`/api/v1/collections/${item.collection_id}/assets/${artwork.id}/thumbnail`} alt={artwork.alt_text||`${item.title} artwork`} loading="lazy"/>:<span className="destination-placeholder" aria-label="No artwork">◇</span>}<span><strong>{item.title}</strong><small>{[item.subtitle,context].filter(Boolean).join(' · ')||'No edition details'}</small></span></button>;})}</div>
    {loadedScope===scope&&cursor&&<button type="button" disabled={loading} onClick={()=>void more()}>{loading?'Loading…':'More results'}</button>}
   </>}

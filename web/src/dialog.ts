@@ -8,10 +8,10 @@ export function useDialogDismiss(onClose:()=>void,enabled=true){
  function dismiss(){
   const element=ref.current;if(!element)return false;
   if(element.querySelector('[data-uploading="true"]')){
-   if(!window.confirm('Pause this upload and close? Saved entries and received bytes are kept. Reopen Import original files and select the same folder or files to resume.'))return false;
+   if(!window.confirm('Pause this upload and close? To resume, select the same files again.'))return false;
   }else if(element.matches('[data-unsaved="true"]')||element.querySelector('[data-unsaved="true"]')){
-   if(!window.confirm('Discard unsaved changes and close? Saved records and uploaded files will be kept.'))return false;
-  }else if(element.getAttribute('aria-busy')==='true'&&!window.confirm('Work is still in progress. Close this window? Submitted work may continue on the server.'))return false;
+   if(!window.confirm('Discard unsaved changes and close?'))return false;
+  }
   close.current();return true;
  }
  const latest=useRef(dismiss);latest.current=dismiss;

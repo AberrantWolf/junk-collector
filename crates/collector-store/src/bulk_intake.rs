@@ -372,8 +372,8 @@ impl BulkIntakePort for Store {
         expected: Revision,
         mut packages: Vec<IntakePackageRecord>,
     ) -> Result<IntakeSession> {
-        if packages.is_empty() || packages.len() > 64 {
-            return Err(Error::Invalid("Append 1–64 packages at a time.".into()));
+        if packages.is_empty() {
+            return Err(Error::Invalid("Append at least one package.".into()));
         }
         let mut db = lock(&self.db)?;
         let tx = db.transaction().map_err(storage)?;

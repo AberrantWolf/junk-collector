@@ -1,35 +1,32 @@
-# ADR 0011: Input-bound command receipts and effects
+# 0011: Input-bound command receipts
 
-Status: Accepted. Formalized 2026-11-03 from existing documented decisions and
-implemented constraints; this is not a claim that implementation or qualification
-first occurred on that date. Source reviewed: `eaff933`.
+Status: proposed, not yet reviewed by the owner.
 
 ## Context
 
-Commands can commit while their responses are lost. Retrying against newly resolved configuration or uncoordinated effects risks duplicate or different mutations.
+A command can commit and then lose its response. A retry that re-resolves
+configuration, or repeats an external effect, can mutate twice or differently.
 
 ## Decision
 
-- Application commands using receipts must bind retry identity to the submitted typed inputs before resolving mutable configuration.
-- Repeated matching requests must recover the committed result; reusing the identity with changed inputs must be rejected. Expected revisions must independently reject stale mutations.
-- Receipts and effects must share their owning transaction or an explicit recoverable publication-marker protocol. A success receipt must not precede its committed effect.
-- AcoustID contributions must claim a receipt before sending. AcoustID cannot replay the request by Collector's command key, so an interrupted delivery must recover as unknown. The same command must replay that outcome without sending again.
-- Interrupted command outcomes must be reconciled before a new attempt performs the effect. Malformed or inconsistent receipts must not be silently discarded to start a fresh command.
-- Shared effects must use one effect implementation rather than nesting independently committed commands. Authentication ceremonies, upload offsets and one-time issuance must retain their explicit alternative retry semantics.
+- A command's retry key is bound to its typed inputs before any mutable
+  configuration is resolved.
+- Repeating the same request returns the committed result; reusing the key with
+  different inputs is rejected. Expected revisions separately reject stale writes.
+- A receipt and its effect commit in the same transaction (or via an explicit
+  recoverable marker). A success receipt never precedes its effect.
+- Interrupted outcomes are reconciled before a new attempt. Malformed receipts are
+  not discarded to start over.
+- External effects that can't be replayed, such as AcoustID submissions, claim a
+  receipt before sending; an interrupted send is recorded as unknown and is not
+  re-sent.
+- Shared effects have one implementation rather than nested independently
+  committed commands. Authentication ceremonies, upload offsets and one-time
+  issuance keep their own retry rules.
 
-## Consequences and scope
+## Consequences
 
-This gives commands recoverable replay semantics, not universal exactly-once execution across arbitrary external services. Key syntax, endpoint DTOs and exceptions belong in the API contract.
+Commands replay safely; this is not exactly-once delivery to external services.
 
-## Supporting requirements and evidence
-
-- [API mutation contract and exceptions](../../api/README.md#mutation-contract)
-- [Receipt/effect persistence](../../crates/collector-store/src/commands.rs)
-- [Concurrent/restart replay tests](../../crates/collector-store/tests/archive.rs)
-
-Implementation and tests are supporting evidence, not a fresh qualification run.
-Detailed subsystem requirements and existing dated validation limits remain applicable.
-
-## Reconsideration
-
-Revisit for new mutation families or external side effects, defining both response-loss and interrupted-publication recovery.
+See: [API mutation contract](../../api/README.md),
+[receipts](../../crates/collector-store/src/commands.rs).

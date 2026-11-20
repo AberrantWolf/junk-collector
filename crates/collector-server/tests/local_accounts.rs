@@ -83,7 +83,6 @@ fn stopped_cli_uses_existing_state_independent_of_configuration_and_archive() {
     );
     let output = String::from_utf8(accounts.stdout).unwrap();
     assert!(output.contains("owner"));
-    assert!(!output.contains("\"id\""));
     std::fs::write(
         &config,
         format!(

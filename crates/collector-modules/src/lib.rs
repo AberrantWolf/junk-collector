@@ -573,8 +573,6 @@ impl Registry {
         if descriptor.schema_version == 0
             || !safe_descriptor_text(&descriptor.display_name, 120)
             || !safe_descriptor_text(&descriptor.collection_type_label, 120)
-            || descriptor.fields.len() > 32
-            || descriptor.capabilities.len() > 128
         {
             return Err(Error::Invalid("invalid module descriptor".into()));
         }

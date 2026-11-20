@@ -1,4 +1,4 @@
-//! Wave 4 archive records and package-reader mechanisms.
+//! Processing archive records and package-reader mechanisms.
 use super::*;
 use collector_app::{
     MetadataAuthorityRecord, PortableProcessingRecord, ProcessingPort, ProcessingQuery,
@@ -270,7 +270,9 @@ impl Store {
                         .join(capture.id.to_string())
                         .join("payload")
                         .join(id.to_string())
-                        .join(inventory.files[index].display_name.as_str())
+                        .join(collector_core::archive_relative_path(
+                            inventory.files[index].display_name.as_str(),
+                        ))
                 };
                 open_package_file(&self.archive, &path, inventory.files[index].bytes)
             }

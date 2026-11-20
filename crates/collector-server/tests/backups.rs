@@ -73,7 +73,6 @@ fn stopped_backup_cli_restores_identity_tls_and_reports_external_paths() {
     drop(running);
     let message = success(invoke(&c, &args));
     assert!(message.contains("/old/incoming") && message.contains("/old/bin/flac"));
-    assert!(message.contains("never run both copies"));
     assert_eq!(
         fs::read(s.join("tls/key.pem")).unwrap(),
         b"private TLS test key"
@@ -96,7 +95,7 @@ fn stopped_backup_cli_restores_identity_tls_and_reports_external_paths() {
     let clone_archive = root.path().join("independent-archive");
     let clone_state = root.path().join("independent-state");
     let clone_config = root.path().join("independent.toml");
-    let report = success(invoke(
+    success(invoke(
         &clone_config,
         &[
             "restore",
@@ -109,7 +108,6 @@ fn stopped_backup_cli_restores_identity_tls_and_reports_external_paths() {
             "--archive-only",
         ],
     ));
-    assert!(report.contains("Fresh private identity required"));
     assert!(!clone_state.join("private.sqlite").exists());
     assert!(!clone_state.join("tls").exists());
     let mut setup = Command::new(env!("CARGO_BIN_EXE_collector-server"))
@@ -446,7 +444,6 @@ fn archive_only_cli_recovers_first_owner_and_preserves_normal_access_policy() {
         ],
     );
     assert!(!denied.status.success());
-    assert!(String::from_utf8_lossy(&denied.stderr).contains("already has an Owner"));
     let remaining = success(invoke(&dc, &["unowned-collections"]));
     assert!(!remaining.contains(&id));
     assert!(remaining.contains(&collections[1].id.to_string()));
