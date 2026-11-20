@@ -2,8 +2,9 @@
 
 This layout runs Collector on a Linux application host with private state on local
 SSD and the archive on a separate NFS host (e.g. a NAS). Substitute your own paths,
-mount sources and addresses. A single Btrfs snapshot does not cover this layout;
-use [paired recovery points](#paired-recovery-points).
+mount sources and addresses. State and archive live on different hosts, so snapshot
+both; see [scheduled snapshots](#scheduled-snapshots) and
+[recovery points](#recovery-points).
 
 ## Layout
 
@@ -84,7 +85,9 @@ Use `compose.yaml`, `compose.media.yaml`, `compose.inbox.yaml` and
 `compose.remote.yaml`, **in that order**, with a reviewed copy of
 [remote.env.example](remote.env.example) at `/etc/junk-collector/remote.env`
 (mode 0600). The remote overlay disables the generic initializer and Docker
-automatic restarts. Media waits for the core to be ready. CLI import/restore get
+automatic restarts; the systemd unit restarts the stack 30 seconds after any exit,
+running the preflight first, so wrong mounts keep it down. Media waits for the
+core to be ready. CLI import/restore get
 the NFS source through `COLLECTOR_NFS_SOURCE` (same as `--nfs-source`).
 
 In the local `collector.toml`:
@@ -118,6 +121,21 @@ Permissions: core runs as `10001:10001`; set `COLLECTOR_ARCHIVE_GID` and
 is fine. Do not recursively chown/chmod the NAS. Test real UID/GID access,
 including `fsync`, rename and media's read-only refusal, on a disposable export first.
 
+### Proton Bridge and Cloudflare Tunnel
+
+To add them, put `-f compose.mail.yaml -f compose.remote-mail.yaml -f compose.tunnel.yaml`
+after `compose.remote.yaml` in all three Compose commands of the unit, add
+`cloudflared` to the `ExecStart` service list, and start Bridge before the stack
+(it isn't tied to the core's lifetime):
+
+```ini
+ExecStartPre=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml -f compose.mail.yaml -f compose.remote-mail.yaml -f compose.tunnel.yaml up -d --no-deps --pull never proton-bridge
+```
+
+Set the optional variables at the end of [remote.env.example](remote.env.example).
+The tunnel's token file stays on the host (mode 0600). Docker restarts Bridge
+only if it crashes; the connector keeps its metrics on `127.0.0.1:20241`.
+
 ## Reconnecting after an outage
 
 1. Stop the service and keep offline tools stopped. Save logs and pending Job and
@@ -132,64 +150,77 @@ including `fsync`, rename and media's read-only refusal, on a disposable export 
 5. Check metadata, artwork, original downloads, grants, pending work and playback
    before resuming writes.
 
-## Paired recovery points
+## Scheduled snapshots
 
-Take one stopped-writer point across both hosts before updates or migration. It
-does not copy or hash media.
+Keep the local roots (config, state, backups, Caddy data and mail) in one Btrfs
+subvolume, for example `/srv/junk-collector`, and snapshot it on a timer. A
+snapshot is atomic, so each SQLite database is captured together with its WAL and
+recovers as it would after a power loss; it can be taken while Collector runs.
 
-1. Stop core, media, Caddy and offline tools on both hosts, disable restart owners
-   and wait for processes to exit. Record image digests, ServerId, archive UUID,
-   paths, mount options, groups and pending work IDs.
-2. Run `sync -f` on the archive mount and the local filesystems; abort on any error.
-   Then take a read-only NAS snapshot of the **whole archive** and a read-only
-   snapshot of **all** local state/config (including `state/imports`, uploads,
-   databases with WAL files, TLS keys, Caddy data, Compose/env and the systemd/mount
-   configuration). Copy the authority volume's service key into the point's
-   private directory with its ownership and mode. If any root is overridden to
-   live outside `COLLECTOR_DATA`, snapshot it as part of the same point. Without
-   a snapshot tool, copy the complete stopped local tree with ownership and ACLs.
-3. Write a private pair record (both snapshot IDs, config copies, old image
-   digests) only after **both** sides succeed. A half-finished pair is not usable.
-   Keep the last good pair, then restart.
+```sh
+snapper -c junk-collector create-config /srv/junk-collector
+snapper -c junk-collector set-config TIMELINE_CREATE=yes TIMELINE_LIMIT_HOURLY=24 \
+  TIMELINE_LIMIT_DAILY=7 TIMELINE_LIMIT_WEEKLY=0 TIMELINE_LIMIT_MONTHLY=0 \
+  TIMELINE_LIMIT_YEARLY=0 NUMBER_LIMIT=10
+systemctl enable --now snapper-timeline.timer
+```
 
-Inbox packages need their own retention policy. `cli backup` remains available as
-a full independent copy. A NAS snapshot alone, local SQLite alone, or WAL files
-copied while running are not recoverable installations.
+The timer serves every snapper config, so check that others (such as `root`) have
+`TIMELINE_CREATE="no"` unless you want them on it too.
 
-**Restore** both members of the same pair into new roots with the old images,
-keeping writers fenced, and test in an isolated network first. A matching UUID
-does not prove matching snapshot times; check the pair record. Only one copy of a
-ServerId may serve. Never restore only SQLite beside a newer archive.
+Snapshot the archive's share on the NAS as well. On a Synology with a Btrfs volume,
+use Snapshot Replication: daily, keeping 14 daily and 8 weekly snapshots, with
+**Make snapshot visible** off so the snapshot folder doesn't appear over NFS.
+Btrfs snapshots only use space for data that later changes or is deleted.
 
-After new writes, running old private state against the newer archive is unsafe.
-Either roll forward, or stop everything, take a new pair and restore **both** old
-members with old config and images, accepting the loss of later changes. Do not
-merge databases or rsync old files over live roots. Restoring private state also
-restores old passwords, grants and sessions: reapply later security changes and
-revoke sessions as needed before reopening public access.
+Snapshots share disks with what they protect. Keep a separate copy of the archive
+(for example Hyper Backup to a USB drive or another site) for NAS failure.
 
-Before switching traffic, sign in, check ServerId/TLS/passkeys/grants and item
-counts, compare a sample original with its recorded digest, play and seek a
-track, resume a pending import and restart once more.
+## Recovery points
+
+Before an update, stop the service, then take one local snapshot and one NAS
+snapshot with the same description (for example `before v0.1.0-beta.35`). Lock the
+NAS snapshot so its retention policy can't remove it. Delete both once the new
+version has run for a few days.
+
+```sh
+snapper -c junk-collector create --description "before <version>"
+```
+
+**Restore** both snapshots of the same point together, with the old images and
+`remote.env`. Never restore only the local state beside a newer archive, or rsync
+old files over live roots. Restoring local state also restores old passwords,
+grants and sessions: reapply later security changes and revoke sessions as needed
+before reopening public access. Sign in, check item counts and play a track before
+switching traffic back.
 
 ## Routine updates
 
-When a release changes only the Collector and media images:
+When the release notes list no data conversion and the Compose files, preflight
+and unit are unchanged, only the image changes:
 
-1. Read the release notes. Pull the new image before downtime with
-   `docker pull --platform linux/amd64 ghcr.io/aberrantwolf/junk-collector:<tag>`
-   and keep the old one locally. The digest for `remote.env` is printed by
-   `docker image inspect --format '{{index .RepoDigests 0}}' <image>`, and
-   `docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' <image>`
-   should print the release's commit. Keep imports idle, and note the current
-   image digests and the item, Job and import counts for step 4.
-2. `systemctl stop junk-collector-remote.service`, confirm every writer on both
-   hosts has stopped, and take a [paired recovery point](#paired-recovery-points).
-3. Edit only `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` in `remote.env`, then
-   `systemctl start junk-collector-remote.service` (the preflight runs first).
-4. Check login over the public, LAN and media origins, a sample item, the Bridge
-   sync and receipt scanning, accounts and grants, and that item, Job and import
-   counts match the stopped state.
+1. Before downtime, pull the image and note its digest and the Library counts:
+
+   ```sh
+   docker pull ghcr.io/aberrantwolf/junk-collector:<tag>
+   docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/aberrantwolf/junk-collector:<tag>
+   ```
+
+2. `systemctl stop junk-collector-remote.service`, check that `docker ps -a` shows
+   every container exited, and take a [recovery point](#recovery-points).
+3. Copy `remote.env` aside, set `COLLECTOR_IMAGE` and `COLLECTOR_MEDIA_IMAGE` to the
+   new digest, `diff` the two files, then `systemctl start junk-collector-remote.service`.
+4. Sign in, play a track and compare the counts. The first Library load rebuilds
+   its cached rows.
+
+To roll back a release without a data conversion, copy the old `remote.env` back
+and restart, before using anything the release notes say the old version can't
+read. When a release converts data or changes mounts, Compose files, the unit or
+config, apply those changes during step 3 and test the affected workflows; going
+back after a conversion means restoring the recovery point.
+
+Once the new version has proven itself, remove the recovery point and the images
+older than the previous release.
 
 To run root commands on a host without sudo, use the Docker operator route with
 an already-installed helper image pinned by its local image ID:
@@ -201,11 +232,6 @@ host_admin() {
 }
 host_admin /usr/bin/id -u  # prints 0
 ```
-
-If the release calls for a data conversion, or the update changes mounts, ingress,
-config, companion images or the service unit, plan the full paired recovery and
-test the affected workflows. If a check fails, keep the pair and diagnose. To roll
-back after new writes, restore both snapshots with their old config and images.
 
 ## Testing on disposable VMs
 
@@ -249,4 +275,4 @@ It checks filesystem semantics only, not power-loss durability or application
 recovery. Worth exercising on the fixture: restarting `nfs-server` during staging,
 copying, encoding and the final renames with work pending; starting with the
 archive missing or wrong; Docker daemon restart and client reboot (services must
-stay down); and restoring a paired point into new roots.
+stay down); and restoring a recovery point into new roots.

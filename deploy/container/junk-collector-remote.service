@@ -1,4 +1,4 @@
-# Install only during an approved migration, after editing paths for that host.
+# Edit the mount paths and unit names for your host before installing.
 [Unit]
 Description=Junk Collector with guarded remote archive
 Requires=docker.service
@@ -16,8 +16,10 @@ ExecStartPre=/usr/bin/python3 /opt/junk-collector/deploy/container/remote-prefli
 ExecStart=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml up --abort-on-container-exit --exit-code-from collector collector media media-https
 ExecStop=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml stop
 TimeoutStopSec=120
-# Failure requires an operator to verify/recover mounts, then restart this unit.
-Restart=no
+# Restart after any exit (a companion failing stops Collector cleanly); the
+# preflight runs again first and keeps the stack down if the mounts are wrong.
+Restart=always
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target

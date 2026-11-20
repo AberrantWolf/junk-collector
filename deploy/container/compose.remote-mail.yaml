@@ -1,0 +1,5 @@
+# Proton Bridge under the remote-archive profile; list it after compose.mail.yaml.
+# The systemd unit starts Bridge, and Docker restarts it only after a crash.
+services:
+  proton-bridge:
+    restart: on-failure

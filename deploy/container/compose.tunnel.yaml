@@ -1,0 +1,20 @@
+# Optional Cloudflare Tunnel connector for the remote-archive profile.
+# It starts once Collector is healthy; the systemd unit owns its lifecycle.
+services:
+  cloudflared:
+    image: ${COLLECTOR_CONNECTOR_IMAGE:?Set the cloudflared image digest}
+    network_mode: host
+    restart: "no"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      collector:
+        condition: service_healthy
+    # Keep metrics on loopback; with host networking they would otherwise be
+    # reachable from the LAN.
+    command: [tunnel, --metrics, "127.0.0.1:20241", --no-autoupdate, run, --token-file, /run/secrets/collector_tunnel_token]
+    secrets: [collector_tunnel_token]
+secrets:
+  collector_tunnel_token:
+    file: ${COLLECTOR_TUNNEL_TOKEN_FILE:?Set the private tunnel token file}
