@@ -2593,7 +2593,10 @@ wait
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(availability.as_array().unwrap().len(), 4);
+    assert_eq!(
+        availability.as_array().unwrap().len(),
+        collector_core::ConversionProfile::PRESETS.len()
+    );
     assert_eq!(availability[0]["title"], "Track 01");
     assert_eq!(availability[0]["start_frame"], 0);
     assert_eq!(availability[0]["frame_count"], 2352);
