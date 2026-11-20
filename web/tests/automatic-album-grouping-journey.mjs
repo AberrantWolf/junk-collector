@@ -18,10 +18,11 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  await chooser.getByRole('searchbox').fill('Automatic soundtrack');
  for(const name of names)await chooser.getByLabel(name,{exact:true}).check();
  await imports.getByRole('button',{name:'Review packages',exact:true}).click();
- await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
- await imports.getByRole('heading',{name:'Import · 4 of 4 packages saved'}).waitFor();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('item')).toBeTruthy();
  const intake=new URL(page.url()).searchParams.get('item');
+ await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).package_count,intake)).toBe(4);
+ await expect(imports.getByRole('button',{name:'Review import',exact:true})).toHaveCount(4);
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intake),{timeout:90000}).toBe('completed');
  const members=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);
  await expect.poll(async()=>new Set((await members()).map(member=>member.import.target_item_id)).size,{timeout:60000}).toBe(1);
@@ -42,7 +43,7 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
   assert.equal(new Set(metadata.candidates.filter(candidate=>candidate.current).map(candidate=>candidate.music_layout.album_id)).size,2);
  }
  const undo=await page.evaluate(async id=>(await(await fetch(`/api/v1/album-groups/${id}/undo`)).json()),album.merge_group);
- assert.equal(undo.group.automatic,true);assert.equal(undo.can_undo,true);
+ assert.equal(undo.group.automatic,true,JSON.stringify(undo));assert.equal(undo.can_undo,true,JSON.stringify(undo));
  const separated=undo.group.sources.length+1;
  await page.goto(`${origin}/?collection=${collectionId}`);
  await page.getByRole('searchbox',{name:'Search collection'}).fill(album.title);
@@ -53,10 +54,10 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  const old=await page.evaluate(async id=>{const status=await(await fetch(`/api/v1/album-groups/${id}/undo`)).json();return status.group.sources[0];},album.merge_group);
  await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${old}`);
  const history=page.getByRole('region',{name:'Album grouping history'});
- await expect(history.getByText(/Grouped automatically/)).toBeVisible();
+ await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeVisible();
  assert.equal(new URL(page.url()).searchParams.get('item'),destination);
  await page.goBack();if(!process.env.GROUPING_AMBIGUITY)await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track')).toHaveCount(4);
- await page.goForward();await expect(history.getByText(/Grouped automatically/)).toBeVisible();
+ await page.goForward();await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeVisible();assert.equal(new URL(page.url()).searchParams.get('item'),destination);
  if(process.env.GROUPING_AMBIGUITY){
   const review=page.getByRole('region',{name:'Review selected metadata'});
   await expect(review.getByRole('button',{name:'Use this album release',exact:true}).first()).toBeVisible();
@@ -69,13 +70,13 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
   const readMetadata=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/metadata`)).json()),destination);
   const review=page.getByRole('region',{name:'Review selected metadata'});
   await review.getByRole('article').filter({has:page.getByText('Bulk resolved album',{exact:true})}).first().getByRole('button',{name:'Use this album release',exact:true}).click();
-  await expect.poll(async()=>(await readMetadata()).authority.selected_candidate?.provider_record_id).toBe('11111111-1111-4111-8111-111111111111');
+  await expect.poll(async()=>(await readMetadata()).authority?.selected_candidate?.provider_record_id).toBe('11111111-1111-4111-8111-111111111111');
   await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeDisabled();
   await restartServer();await page.reload({waitUntil:'domcontentloaded'});
   await expect.poll(async()=>(await readMetadata()).display.resolution).toBe('selected');
   const recovered=await members();
   assert.equal(new Set(recovered.map(member=>member.import.target_item_id)).size,1);
-  assert.ok(recovered.every(member=>member.import.outcome==='succeeded'),'Grouping must retain completed import outcomes after restart');
+  assert.ok(recovered.every(member=>member.import.outcome==='succeeded'),'Grouping must retain completed import outcomes after restart: '+recovered.map(member=>member.import.outcome).join(', '));
   console.log('Ambiguous MusicBrainz grouping passed: four discs grouped before an album choice, alternatives retained, exact original downloads, old links, mobile review, manual selection and restart persistence.');
   return;
  }

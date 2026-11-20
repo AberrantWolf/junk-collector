@@ -17,11 +17,13 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await nav.getByRole('button',{name:'Imports',exact:true}).click();
  const imports=page.getByRole('region',{name:'Imports workspace'});
  await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),folder);
- await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ await imports.getByRole('button',{name:'Start import',exact:true}).waitFor();
  assert.equal(await imports.getByLabel('Automatic metadata and artwork').isChecked(),true);
  assert.equal(await imports.getByLabel('Audio preparation after import').inputValue(),'default');
  assert.equal(await imports.locator('.care-row').count(),2,'Nested tracks became separate or unassigned packages');
- await imports.getByText(/^1 unsupported or unassigned files/).click();
+ // The unassigned file is listed for review, outside the two packages.
+ const unassigned=imports.locator('details').filter({hasText:'notes.txt'});await expect(unassigned).toHaveCount(1);
+ await unassigned.locator(':scope > summary').click();
  await imports.getByText(/Bulk library journey\/notes.txt/).waitFor();
  // Interrupt a real browser transfer, reload, then reselect the entire folder.
  let releaseUpload;const held=new Promise(resolve=>{releaseUpload=resolve;});
@@ -52,7 +54,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  await grouping.getByLabel('Destination album',{exact:true}).selectOption(ids[1]);
  for(const field of ['Title','Artist / edition text','Identity link','Album information','Selected artwork'])await grouping.getByLabel(field,{exact:true}).selectOption(ids[1]);
  await grouping.getByRole('button',{name:'Review grouping',exact:true}).click();
- await grouping.getByRole('heading',{name:'What will change'}).waitFor();
+ await grouping.getByRole('button',{name:'Confirm album grouping',exact:true}).waitFor();
  await page.screenshot({path:fileURLToPath(new URL('../test-results/bulk-metadata-grouping-desktop.png',import.meta.url)),fullPage:true});
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Grouping review overflows on mobile');
@@ -82,12 +84,19 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
   await preparation.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
   const batch=page.getByRole('region',{name:'Review batch'});
-  await batch.getByText(/2 tracks planned/).waitFor();
-  const batchId=new URL(page.url()).searchParams.get('batch');assert.ok(batchId);
+  await batch.waitFor();
+  await expect.poll(()=>new URL(page.url()).searchParams.get('batch')).toBeTruthy();
+  const batchId=new URL(page.url()).searchParams.get('batch');
+  const batchSummary=()=>page.evaluate(async id=>{const s=await(await fetch('/api/v1/bulk-library/'+id)).json();return {selected:s.selected,tracks:s.tracks,succeeded:s.succeeded,failed:s.failed,pending:s.pending};},batchId);
+  await expect.poll(async()=>(await batchSummary()).tracks).toBe(2);assert.equal((await batchSummary()).selected,1);
+  const listedBatches=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/bulk-library'&&r.request().method()==='GET');
   await nav.getByRole('button',{name:'Activity',exact:true}).click();
-  await page.getByRole('region',{name:'Activity workspace'}).getByRole('button',{name:/FLAC preparation · 1 albums/}).click();
+  // Batch rows are listed first, in the server's order; open the row for this batch.
+  const batchIndex=(await(await listedBatches).json()).items.findIndex(listed=>listed.id===batchId);assert.ok(batchIndex>=0);
+  await page.getByRole('region',{name:'Activity workspace'}).locator('button.collection-row').nth(batchIndex).click();
   assert.equal(new URL(page.url()).searchParams.get('batch'),batchId);
-  await batch.getByText(/1 successful · 0 need attention · 0 pending/).waitFor({timeout:60000});
+  await batch.waitFor();
+  await expect.poll(async()=>{const s=await batchSummary();return [s.succeeded,s.failed,s.pending];},{timeout:60000}).toEqual([1,0,0]);
   await batch.getByRole('button',{name:'Open album preparation'}).click();
   await page.getByRole('region',{name:'Album preparation'}).getByRole('link',{name:/FLAC/}).nth(1).waitFor();
   await nav.getByRole('button',{name:'Library',exact:true}).click();
@@ -95,7 +104,8 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   const album=page.getByRole('region',{name:'Album tracks'});
   await album.getByRole('button',{name:'Play album',exact:true}).click();
   await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
-  const directQueue=await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('collector.music-queue.v1.'));return JSON.parse(localStorage.getItem(key));});
+  const savedQueue=()=>page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('collector.music-queue.v1.'));return JSON.parse(localStorage.getItem(key));});
+  const directQueue=await savedQueue();
   assert.equal(directQueue.tracks.length,2,'Album Play did not replace the earlier queue');
   const availability=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,destinationId);
   assert.deepEqual(directQueue.tracks.map(track=>track.representationId),availability.map(track=>track.state.representation_id),'Album Play did not follow server disc order');
@@ -108,13 +118,13 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
   await album.locator('.music-track').last().getByRole('button',{name:/^Play track /}).click();
   await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1;}return false;});
-  await expect(directPlayer.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+  await expect.poll(async()=>(await savedQueue()).tracks.length).toBe(1);
   await expect(directPlayer.getByRole('button',{name:'Next track',exact:true})).toBeDisabled();
   await directPlayer.getByRole('button',{name:'Pause',exact:true}).click();
   await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
   await album.locator('.music-disc').last().getByRole('button',{name:'Play original',exact:true}).click();
   await page.waitForFunction(expected=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.1&&audio.dataset.representationId===expected;}return false;},availability[1].state.representation_id);
-  await expect(directPlayer.getByRole('button',{name:'Queue (1)',exact:true})).toBeVisible();
+  await expect.poll(async()=>(await savedQueue()).tracks.length).toBe(1);
   await directPlayer.getByRole('button',{name:'Pause',exact:true}).click();await directPlayer.locator('audio').evaluate(audio=>audio.loop=false);
   await album.getByRole('button',{name:'Add album to queue',exact:true}).click();
   const player=page.getByRole('region',{name:'Music player'});if(!await player.locator('.queue-track').first().isVisible())await player.getByRole('button',{name:/Queue \(/}).click();

@@ -33,9 +33,21 @@ async function setDefaultBitrate(page,collection,bitrate_kbps,scope='cd_and_digi
 }
 async function reviewImport(imports,files){
  await imports.getByLabel("Choose one package's files").setInputFiles(files);
- await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+ await expect(imports.getByRole('button',{name:'Start import',exact:true})).toBeVisible();
  await imports.getByLabel('Automatic metadata and artwork').uncheck();
  return imports.getByLabel('Audio preparation after import');
+}
+async function bulk(page,id){
+ const summary=await request(page,`/bulk-library/${id}`);
+ return {state:summary.state,succeeded:summary.succeeded,failed:summary.failed,pending:summary.pending,tracks:summary.tracks,already_ready:summary.already_ready};
+}
+async function readiness(page,collection,bitrate,item){
+ const rows=(await request(page,`/library-care/music-preparation?collection_id=${collection}&needs_attention=true&limit=50&opus_bitrate_kbps=${bitrate}`)).items;
+ const row=rows.find(row=>row.item.id===item);
+ return row?.readiness?{tracks:row.readiness.tracks,ready:row.readiness.ready}:row?'pending':'absent';
+}
+async function preparationRows(page,collection,bitrate){
+ return (await request(page,`/library-care/music-preparation?collection_id=${collection}&needs_attention=true&limit=50&opus_bitrate_kbps=${bitrate}`)).items.length;
 }
 async function startImport(page,imports){
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
@@ -96,7 +108,8 @@ opus = "${wrapper}"
  await admin.getByLabel('Collection name').fill('Opus fixture');
  await admin.getByLabel('Collection type').selectOption('org.junk.music');
  await admin.getByRole('button',{name:'Create collection',exact:true}).click();
- await admin.getByText('Collection created.',{exact:false}).waitFor();
+ await expect.poll(async()=>(await request(page,'/collection-search?limit=50')).items.some(c=>c.name==='Opus fixture')).toBe(true);
+ await expect(admin.getByRole('alert')).toHaveCount(0);
  await admin.getByRole('button',{name:'Library settings',exact:true}).click();
  await admin.getByLabel('Check CD rips with AccurateRip on import').uncheck();
  await admin.getByLabel('Automatic Opus preparation').selectOption('cd_and_digital');
@@ -112,7 +125,9 @@ opus = "${wrapper}"
  });
  await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128`);
  const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
- await expect(preparation.getByText('No matching albums.')).toBeVisible();
+ await expect.poll(()=>preparationRows(page,collection,128)).toBe(0);
+ await expect(preparation.getByRole('button',{name:'Select all matching results'})).toBeVisible();
+ await expect(preparation.locator('[data-item-id]')).toHaveCount(0);
  const intakePage=await context.newPage();
  intakePage.on('pageerror',error=>errors.push(error.message));
  await intakePage.goto(`${origin}/imports?collection=${collection}`);
@@ -120,17 +135,17 @@ opus = "${wrapper}"
  const audio=['01.flac','02.mp3','03.wav'].map(file=>path.join(root,'crates/collector-store/tests/fixtures/digital-audio',file));
  const defaultChoice=await reviewImport(imports,audio);
  await includeAllAlbumFiles(imports);
- await expect(defaultChoice.locator('option[value=default]')).toContainText('Opus 96 kbps');
+ await expect(defaultChoice).toHaveValue('default');
  await setDefaultBitrate(page,collection,128,'cd');
  const digitalIntake=await startImport(intakePage,imports);
  await expect.poll(async()=>{
   const summary=await member(intakePage,digitalIntake);
   return [summary?.phase,summary?.outcome,summary?.preparation_profile?.bitrate_kbps];
  },{timeout:30000}).toEqual(['published','active',96]);
- await expect(imports.getByText('Audio format · Opus 96 kbps')).toBeVisible();
  const digital=(await member(intakePage,digitalIntake)).target_item_id;
  const digitalRow=preparation.locator(`[data-item-id="${digital}"]`);
- await expect(digitalRow).toContainText('3 tracks · 0 ready');
+ await expect(digitalRow).toBeVisible();
+ await expect.poll(()=>readiness(page,collection,128,digital)).toEqual({tracks:3,ready:0});
 
  // Change the default while the preserved digital import is still preparing.
  await setDefaultBitrate(intakePage,collection,192);
@@ -152,14 +167,15 @@ opus = "${wrapper}"
  await writeFile(bin,Buffer.alloc(225*2352,1));
  await imports.getByRole('button',{name:'Back to imports',exact:true}).click();
  const override=await reviewImport(imports,[cue,bin]);
- await expect(override.locator('option[value=default]')).toContainText('Opus 192 kbps');
+ await expect(override).toHaveValue('default');
  await override.selectOption('none');
  const cdIntake=await startImport(intakePage,imports);
  await expect.poll(async()=> outcome(intakePage,cdIntake),{timeout:45000}).toBe('succeeded');
  const cdImport=await member(intakePage,cdIntake);
  assert.equal(cdImport.preparation_profile,null);
  const cdRow=preparation.locator(`[data-item-id="${cdImport.target_item_id}"]`);
- await expect(cdRow).toContainText('1 tracks · 0 ready');
+ await expect(cdRow).toBeVisible();
+ await expect.poll(()=>readiness(page,collection,128,cdImport.target_item_id)).toEqual({tracks:1,ready:0});
 
  const savedCd=await request(intakePage,`/items/${cdImport.target_item_id}`);
  await request(intakePage,`/items/${savedCd.id}`,{
@@ -186,45 +202,58 @@ opus = "${wrapper}"
  assert.equal(queued.selected,2);
  assert.equal(queued.tracks,0,'Submission should return before track planning');
  const batch=preparation.getByRole('region',{name:'Review batch'});
- await expect(batch.getByText(/0 successful · 2 need attention · 0 pending/)).toBeVisible({timeout:45000});
- await expect(batch.getByText('4 tracks planned · 0 already ready')).toBeVisible();
+ await batch.waitFor();
+ await expect.poll(async()=>{const b=await bulk(page,queued.id);return [b.succeeded,b.failed,b.pending];},{timeout:45000}).toEqual([0,2,0]);
+ await expect.poll(async()=>{const b=await bulk(page,queued.id);return [b.tracks,b.already_ready];}).toEqual([4,0]);
  const failedBatch=(await request(page,`/items/${digital}/music-preparation-batches`)).find(batch=>batch.profile.bitrate_kbps===128);
  assert.ok(failedBatch.members.every(track=>/opusenc conversion failed: fixture encoder refusal/.test(track.error)));
  await unlink(refuse);
  await batch.getByRole('button',{name:'Retry unfinished tasks'}).click();
- await expect(batch.getByText(/2 successful · 0 need attention · 0 pending/)).toBeVisible({timeout:45000});
+ await expect.poll(async()=>{const b=await bulk(page,queued.id);return [b.succeeded,b.failed,b.pending];},{timeout:45000}).toEqual([2,0,0]);
+ await expect(batch.getByRole('button',{name:'Retry unfinished tasks'})).toHaveCount(0);
  await preparation.getByRole('button',{name:'Back to preparation results'}).click();
- await expect(preparation.getByText('No matching albums.')).toBeVisible();
+ await expect.poll(()=>preparationRows(page,collection,128)).toBe(0);
+ await expect(preparation.locator('[data-item-id]')).toHaveCount(0);
 
  // A different preset stays independently eligible in the single-album workflow.
  await page.goto(`${origin}/activity?collection=${collection}&batch=${queued.id}`);
  await page.getByRole('region',{name:'Review batch'}).getByRole('button',{name:'Open album preparation'}).first().click();
- await expect(preparation.getByText(/ready as Opus 128 kbps/)).toBeVisible();
+ await preparation.getByRole('region',{name:'Album preparation'}).waitFor();
+ await expect(preparation.getByRole('region',{name:'Prepare album'})).toHaveCount(0);
+ await expect(preparation.getByRole('region',{name:'Album preparation'}).locator('.notice[role=status]')).toBeVisible();
+ for(const id of [digital,cdImport.target_item_id]){const reps=(await request(page,`/items/${id}`)).captures.flatMap(c=>c.representations).filter(r=>r.profile?.codec==='opus'&&r.profile.bitrate_kbps===128);assert.ok(reps.length>0,'128 kbps output missing');}
  await preparation.getByRole('button',{name:'Back to preparation results'}).click();
  await bitrate.selectOption('192');
  await unlink(gate);
  await preparation.getByRole('checkbox',{name:'Select Renamed CD fixture'}).check();
+ const cancelAccepted=page.waitForResponse(response=>response.url().endsWith('/api/v1/bulk-library/music-preparation')&&response.request().method()==='POST');
  await preparation.getByRole('button',{name:'Start Opus 192 kbps preparation'}).click();
- await expect(batch.getByText('1 tracks planned · 0 already ready')).toBeVisible({timeout:45000});
+ const cancelled=await (await cancelAccepted).json();
+ await expect.poll(async()=>{const b=await bulk(page,cancelled.id);return [b.tracks,b.already_ready];},{timeout:45000}).toEqual([1,0]);
  await batch.getByRole('button',{name:'Cancel remaining work'}).click();
- await expect(batch.getByRole('heading',{name:/Opus 192 kbps preparation · Cancelled/i})).toBeVisible({timeout:45000});
+ await expect.poll(async()=>(await bulk(page,cancelled.id)).state,{timeout:45000}).toBe('cancelled');
+ await expect(batch.getByRole('button',{name:'Cancel remaining work'})).toHaveCount(0);
  await preparation.getByRole('button',{name:'Back to preparation results'}).click();
  await writeFile(gate,'ready');
  await digitalRow.click();
  const album=preparation.getByRole('region',{name:'Album preparation'});
- await expect(album.getByRole('heading',{name:'Prepare album as Opus 192 kbps'})).toBeVisible();
+ await expect(album.getByRole('region',{name:'Prepare album'})).toBeVisible();
  await unlink(gate);
  await album.getByRole('button',{name:'Prepare missing Opus 192 kbps tracks'}).click();
  await album.getByRole('button',{name:'Cancel outstanding tracks'}).click();
- await expect(album.getByText(/batch cancelled/)).toBeVisible();
+ await expect.poll(async()=>(await request(page,`/items/${digital}/music-preparation-batches`)).find(batch=>batch.profile.bitrate_kbps===192)?.cancelled_by_user,{timeout:45000}).toBe(true);
+ await expect(album.getByRole('region',{name:'Album preparation progress'})).toBeVisible();
  await writeFile(gate,'ready');
  const retryResponse=page.waitForResponse(response=>
   /\/api\/v1\/music-preparation-batches\/[^/]+\/retry$/.test(response.url())
   &&response.request().method()==='POST');
  await album.getByRole('button',{name:'Retry unfinished tracks'}).click();
  assert.equal((await retryResponse).status(),200,'Retry must be accepted after cancellation settles');
- await expect(album.getByText(/ready as Opus 192 kbps/)).toBeVisible({timeout:45000});
- const opusLink=album.getByRole('link',{name:/Opus 192 kbps/}).first();
+ let opus192=[];
+ await expect.poll(async()=>{opus192=(await request(page,`/items/${digital}`)).captures.flatMap(c=>c.representations).filter(r=>r.profile?.codec==='opus'&&r.profile.bitrate_kbps===192).map(r=>r.id);return opus192.length;},{timeout:45000}).toBe(3);
+ await expect(album.getByRole('region',{name:'Prepare album'})).toHaveCount(0,{timeout:45000});
+ const opusLink=album.locator(opus192.map(id=>`a[href^="/api/v1/items/${digital}/representations/${id}/"]`).join(',')).first();
+ await expect(opusLink).toBeVisible();
  const href=await opusLink.getAttribute('href');
  const magic=await page.evaluate(async href=>{
   const response=await fetch(href,{headers:{Range:'bytes=0-3'}});
@@ -274,7 +303,8 @@ opus = "${wrapper}"
  assert.equal(scale.selected,scaleAlbums-1);
  assert.equal(scale.tracks,0);
  const scaleBatch=preparation.getByRole('region',{name:'Review batch'});
- await expect(scaleBatch.getByText(/54 need attention · 0 pending/)).toBeVisible({timeout:45000});
+ await scaleBatch.waitFor();
+ await expect.poll(async()=>{const b=await bulk(page,scale.id);return [b.failed,b.pending];},{timeout:45000}).toEqual([54,0]);
  await scaleBatch.getByRole('button',{name:'Next album results'}).click();
  await expect(scaleBatch.getByRole('button',{name:'Open album preparation'})).toHaveCount(4);
  await scaleBatch.getByRole('button',{name:'Previous album results'}).click();

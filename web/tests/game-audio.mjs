@@ -35,20 +35,20 @@ try{
  for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19881/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',args:fixtureCertificateArgs(await readFile(path.join(scratch,'state/tls/cert.pem'),'utf8')),headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);
- page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ page=await context.newPage();const errors=[];const api=url=>page.evaluate(async u=>(await fetch(u)).json(),url);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
- await admin.getByLabel('Collection name').fill('Game shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await admin.getByLabel('Collection name').fill('Game shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect.poll(async()=>(await api('/api/v1/collection-search?limit=50')).items.some(c=>c.name==='Game shelf')).toBe(true);await expect(admin.getByRole('alert')).toHaveCount(0);await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const data=await(await fetch('/api/v1/collection-search?limit=50')).json();return data.items.find(c=>c.name==='Game shelf').id;});
  await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});
  await imports.getByLabel("Choose one package's files").setInputFiles(files);
- await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
+ await expect(imports.getByRole('button',{name:'Start import',exact:true})).toBeEnabled();await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
  const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:process.env.COLLECTOR_GAME_CUE?600000:60000}).toBe('succeeded');
  await page.goto(`${origin}/?collection=${collection}&item=${item}`);const tracks=page.getByRole('region',{name:'Album tracks'});
- await expect(tracks.locator('.music-track')).toHaveCount(trackCount);await tracks.getByText('2. Track 02',{exact:true}).waitFor();
+ await expect(tracks.locator('.music-track')).toHaveCount(trackCount);await expect(tracks.locator('.music-track[data-track-position="2"] .track-title strong')).toHaveAttribute('title','Track 02');
  await page.getByRole('button',{name:'Edit / attach files',exact:true}).click();const editor=page.getByRole('dialog',{name:'Edit entry'});await editor.getByRole('button',{name:'Music',exact:true}).click();
- await clickAction(editor,'Edit track details',0);await editor.getByLabel('Track title',{exact:true}).fill('Game theme');await editor.getByRole('button',{name:'Save track details',exact:true}).click();await editor.getByText('2. Game theme',{exact:true}).waitFor();
+ await clickAction(editor,'Edit track details',0);await editor.getByLabel('Track title',{exact:true}).fill('Game theme');await editor.getByRole('button',{name:'Save track details',exact:true}).click();await expect(editor.locator('.music-track[data-track-position="2"] .track-title strong')).toHaveAttribute('title','Game theme');
  await editor.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();await expect.poll(async()=>{const rows=await page.evaluate(async id=>{
   const rows=[];let cursor,revision;
   do {const query=new URLSearchParams();if(cursor!==undefined)query.set('cursor',String(cursor));if(revision)query.set('revision',revision);
@@ -57,10 +57,10 @@ try{
    if(page.next_cursor!=null&&cursor!==undefined&&page.next_cursor<=cursor)throw Error('Nonadvancing track cursor');cursor=page.next_cursor??undefined;
   }while(cursor!==undefined);return rows;
  },item);return rows.filter(row=>row.profile?.codec==='flac'&&row.state.status==='available').length;},{timeout:process.env.COLLECTOR_GAME_CUE?600000:60000}).toBe(trackCount);
- await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await tracks.getByText('2. Game theme',{exact:true}).waitFor();
+ await editor.getByRole('button',{name:'Close curator'}).click();await page.reload();await expect(tracks.locator('.music-track[data-track-position="2"] .track-title strong')).toHaveAttribute('title','Game theme');
  await tracks.getByRole('button',{name:'Play album',exact:true}).click();const player=page.getByRole('region',{name:'Music player'});
  await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');return a&&!a.paused&&a.currentTime>.05;});await player.locator('audio').evaluate(a=>a.currentTime=2);await page.waitForFunction(()=>document.querySelector('.music-player audio')?.currentTime>2.05);
- await expect(player.getByRole('button',{name:`Queue (${trackCount})`,exact:true})).toBeVisible();await player.getByRole('button',{name:'Pause',exact:true}).click();
+ await player.locator('.queue-toggle').click();await expect(page.getByRole('region',{name:'Currently playing list'}).locator('ol > li')).toHaveCount(trackCount);await player.locator('.queue-toggle').click();await player.getByRole('button',{name:'Pause',exact:true}).click();
  await clickAction(tracks,'Add album to list');const chooser=page.getByRole('dialog',{name:'Add to list',exact:true});await chooser.getByLabel('New list name').fill('Game playlist');await chooser.getByRole('button',{name:'Append to list',exact:true}).click();await chooser.getByRole('button',{name:'Open list',exact:true}).click();
  const lists=page.getByRole('region',{name:'Collection lists'});await expect(lists.locator('.saved-list-entries li')).toHaveCount(trackCount);await lists.getByRole('button',{name:'Play playlist',exact:true}).click();await page.waitForFunction(()=>{const a=document.querySelector('.music-player audio');return a&&!a.paused&&a.currentTime>.05;});
  const songs=await page.evaluate(async id=>await(await fetch(`/api/v1/collections/${id}/music-search?search=Game%20theme`)).json(),collection);assert.equal(songs.items.length,1);assert.equal(songs.items[0].sources[0].track_position,2);

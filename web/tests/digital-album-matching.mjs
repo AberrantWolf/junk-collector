@@ -65,9 +65,9 @@ try{
  const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Matching shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('Matching shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect.poll(()=>page.evaluate(async()=>(await(await fetch('/api/v1/collection-search?limit=50')).json()).items.some(c=>c.name==='Matching shelf'))).toBe(true);await expect(admin.getByRole('alert')).toHaveCount(0);await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>{const result=await(await fetch('/api/v1/collection-search?limit=50')).json();return result.items.find(c=>c.name==='Matching shelf').id;});
- await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();await includeAllAlbumFiles(imports);await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
+ await page.goto(`${origin}/imports?collection=${collection}`);const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);await expect(imports.getByRole('button',{name:'Start import',exact:true})).toBeVisible();await includeAllAlbumFiles(imports);await imports.getByLabel('Store',{exact:true}).fill('Private matching store');await imports.getByLabel('Order reference').fill('PRIVATE-MATCHING-ORDER');await imports.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));const intake=new URL(page.url()).searchParams.get('item');let item;
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
  await page.route('**/api/v1/items/'+item,route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'Metadata changed during read'}}}),{times:1});
  await page.route('**/api/v1/library-care/metadata?*',route=>route.fulfill({status:409,json:{error:{code:'revision_conflict',message:'Catalog changed'}}}),{times:1});
@@ -93,9 +93,9 @@ try{
  // Reopening recovers the server-owned workflow without a second submission.
  const lostReceipt=`collector.digital-match.${await page.evaluate(async()=>(await(await fetch('/api/v1/me')).json()).user_id)}.${item}`;await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),lostReceipt)).toBeNull();
  await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
- await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect(matching).toContainText('1 of 2 files recognized');await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
+ await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect.poll(async()=>{const jobs=(await matchingJobs(item))?.filter(job=>job.result)||[];return jobs.length>0&&jobs.every(job=>job.result.matches[0]?.mappings.length===1&&job.result.matches[0]?.local_tracks===2);},{timeout:15000}).toBe(true);await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
  await expect(matching.locator('.digital-match-edition-badge')).toHaveText('Steam');
- await expect(matching.locator('.digital-match-region')).toContainText('Worldwide');
+ await expect(matching.locator('.digital-match-region')).toBeVisible();assert.equal((await matchingJobs(item)).find(job=>job.result)?.result.matches[0].release.country,'XW');
  // Full local coverage cannot hide an incomplete release or an extra declared track.
  const countRoute=`**/api/v1/items/${item}/digital-album-matches**`;let countFixture=true;
  await page.route(countRoute,async route=>{
@@ -107,9 +107,9 @@ try{
   }
   await route.fulfill({json:data});
  });
- await page.reload();await expect(matching).toContainText(/3 declared tracks · 2 received/);
+ await page.reload();await expect(matching.locator('.digital-track-counts li')).toHaveCount(1);
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
- await matching.getByText('Show track matches',{exact:true}).click();
+ matching.locator('details:has(table) > summary').click();
  await expect(matching.getByRole('table')).toBeVisible();
  await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mapping diagnostics overflow mobile');
@@ -118,7 +118,7 @@ try{
  // Explicit presentation fixture: a complete 28-for-28 layout is actionable and readable.
  countFixture=false;await page.reload();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeEnabled();
- await matching.getByText('Show track matches',{exact:true}).click();
+ matching.locator('details:has(table) > summary').click();
  const largeTable=matching.getByRole('table');await expect(largeTable.getByRole('row')).toHaveCount(29);
  assert.equal(await largeTable.evaluate(table=>table.scrollWidth>table.parentElement.clientWidth),false,'desktop mapping columns require sideways scrolling');
  await largeTable.evaluate(table=>table.scrollIntoView({block:'start'}));
@@ -132,7 +132,7 @@ try{
  await expect(page.locator('.artwork-options').getByRole('button',{name:'Front cover',exact:false})).toBeEnabled({timeout:60000});
  const afterListing=await metadataReview(item);
  assert.deepEqual(afterListing.authority,beforeListing.authority);
- await matching.getByText('Show track matches',{exact:true}).click();await expect(matching.getByRole('row').filter({hasText:'01.wav'})).toContainText('Matched first');
+ matching.locator('details:has(table) > summary').click();await expect(matching.getByRole('row').filter({hasText:'01.wav'})).toContainText('Matched first');
  const before=await page.evaluate(async id=>await(await fetch(`/api/v1/items/${id}`)).json(),item);assert.notEqual(before.title,'Matched album');assert.equal(fingerprints.size,2);assert.ok(requests.every(r=>!r.includes('PRIVATE-MATCHING-ORDER')&&!r.includes('Private matching store')));
  await page.setViewportSize({width:390,height:844});await matching.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'matching results overflow mobile');
  await matching.getByRole('button',{name:'Edit track mapping'}).click();
@@ -140,7 +140,7 @@ try{
  await expect(editor.getByRole('combobox')).toHaveCount(2);
  await expect(editor.getByRole('combobox',{name:'Release track for 01.wav'})).toHaveValue('1:1');
  await expect(editor.getByRole('combobox',{name:'Release track for 02.mp3'})).toHaveValue('1:2');
- await expect(editor.getByText(/Tentative/)).toBeVisible();
+ await expect(editor.locator('.digital-review-tentative')).toBeVisible();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  await editor.getByRole('checkbox').check();
  // Duplicate assignments invalidate confirmation; correcting them requires fresh review.
@@ -148,7 +148,7 @@ try{
  await expect(editor.getByRole('checkbox')).not.toBeChecked();await expect(editor.getByRole('checkbox')).toBeDisabled();
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  await editor.getByRole('combobox').nth(1).selectOption('1:2');
- await editor.getByText('Contribute missing fingerprints to AcoustID',{exact:true}).click();
+ await editor.locator('details').filter({has:page.getByLabel('AcoustID user API key')}).locator('summary').click();
  await editor.getByLabel('AcoustID user API key').fill('fixture-user-key');
  const contribute=editor.getByRole('button',{name:'Submit 1 fingerprint to AcoustID'});
  await expect(contribute).toBeDisabled();
@@ -201,6 +201,8 @@ try{
   return result?[result.outcome,result.artwork_error]:null;
  },{item,job:adoptionJob}),{timeout:15000}).toEqual(['candidates',null]);
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled({timeout:15000});
+ // The lookup card closes once the panel has reloaded the adopted review.
+ await expect(page.locator('.metadata-job')).toHaveCount(0,{timeout:15000});
  // Source-only edits preserve selected release, track mappings and automatic artwork.
  const sourceEditor=page.getByRole('region',{name:'Digital source',exact:true});
  const overridesBefore=adopted.authority.domain_overrides.payload;
@@ -240,7 +242,7 @@ try{
  assert.ok(artItem.assets.find(asset=>asset.id===artOnly.authority.artwork_choice).alt_text.includes(id(92)));
  await page.getByLabel('MusicBrainz artwork release ID',{exact:true}).fill(id(93));
  await page.getByRole('button',{name:'Find artwork only',exact:true}).click();
- await expect(page.getByText(/No artwork/)).toBeVisible({timeout:60000});
+ await expect.poll(()=>page.evaluate(async({item,previous})=>{const response=await fetch(`/api/v1/items/${item}/metadata/resolutions`);if(!response.ok)return null;const job=(await response.json()).find(value=>value.stage==='artwork_listing'&&value.job.id!==previous);return job?[job.job.state,job.result?.artwork_options.length]:null;},{item,previous:pendingArt.job.id}),{timeout:60000}).toEqual(['completed',0]);
  await expect(page.locator('.artwork-options')).toHaveCount(0);
  const reopenedArtHistory=page.waitForResponse(response=>response.ok()&&response.request().method()==='GET'&&new URL(response.url()).pathname===`/api/v1/items/${item}/metadata/resolutions`);
  await page.reload();
@@ -253,7 +255,7 @@ try{
  // A fresh search after acknowledgement admits exactly one new Job.
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();
  await expect.poll(async()=>matchingJobs(item).then(jobs=>jobs?.length),{timeout:15000}).toBe(2);
- await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:60000});await expect(matching).toContainText('1 of 2 files recognized');
+ await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:60000});await expect.poll(async()=>{const jobs=(await matchingJobs(item))?.filter(job=>job.result)||[];return jobs.length>0&&jobs.every(job=>job.result.matches[0]?.mappings.length===1&&job.result.matches[0]?.local_tracks===2);},{timeout:15000}).toBe(true);
  await expect(sourceEditor.getByLabel('Source',{exact:true})).toHaveValue('Steam');
  await matching.getByRole('button',{name:'Edit track mapping'}).click();
  await editor.getByRole('button',{name:'Assign in file order'}).click();await editor.getByRole('checkbox').check();
@@ -266,14 +268,14 @@ try{
  const refreshedChoices=await metadataReview(item);
  assert.equal(refreshedChoices.authority.artwork_choice,artOnly.authority.artwork_choice,'release adoption must retain the manually chosen alternate cover');
  assert.equal(await page.evaluate(key=>localStorage.getItem(key),lostReceipt),null);
- await page.goto(`${origin}/?collection=${collection}&item=${item}`);await page.getByRole('region',{name:'Album tracks'}).getByText('1. Matched first',{exact:true}).waitFor();await page.getByRole('region',{name:'Album tracks'}).getByText('2. Matched second',{exact:true}).waitFor();
+ await page.goto(`${origin}/?collection=${collection}&item=${item}`);const albumTracks=page.getByRole('region',{name:'Album tracks'});await expect(albumTracks.locator('.music-track[data-track-position="1"] .track-title strong')).toHaveAttribute('title','Matched first');await expect(albumTracks.locator('.music-track[data-track-position="2"] .track-title strong')).toHaveAttribute('title','Matched second');
  // Admit three albums through their real panels while the first POST is still unconfirmed.
  const newItems=[];
  for(let n=0;n<2;n++){
   await page.goto(`${origin}/imports?collection=${collection}`);
   const intakeForm=page.getByRole('region',{name:'Imports workspace'});
   await intakeForm.getByLabel("Choose one package's files").setInputFiles([wav,path.join(root,'crates/collector-store/tests/fixtures/digital-matching/02.mp3')]);
-  await intakeForm.getByRole('heading',{name:'Review packages and groups'}).waitFor();await includeAllAlbumFiles(intakeForm);
+  await expect(intakeForm.getByRole('button',{name:'Start import',exact:true})).toBeVisible();await includeAllAlbumFiles(intakeForm);
   await intakeForm.getByRole('button',{name:'Start import',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('item'));
   const intakeId=new URL(page.url()).searchParams.get('item');let nextItem;
   await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);nextItem=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');

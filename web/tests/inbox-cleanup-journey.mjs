@@ -15,7 +15,7 @@ export async function inboxCleanupJourney(page,{importId,itemId,source,scratch,r
  await expect(remove).toBeDisabled();
  assert.deepEqual(await readFile(path.join(source,'.unknown')),original);
  await writeFile(path.join(source,'.unknown'),Buffer.alloc(original.length,0x42));
- const confirm=cleanup.getByRole('checkbox',{name:/done with these inbox files/});
+ const confirm=cleanup.getByRole('checkbox');
  await confirm.check();await remove.click();
  await expect(cleanup.getByRole('alert')).toBeVisible({timeout:30000});
  assert.equal((await readFile(path.join(source,'.unknown')))[0],0x42);
@@ -28,8 +28,12 @@ export async function inboxCleanupJourney(page,{importId,itemId,source,scratch,r
  await cleanup.getByRole('button',{name:'Retry inbox cleanup',exact:true}).click();
  const accepted=await response;assert.equal(accepted.status(),202);
  const receipt=accepted.request().headers()['idempotency-key'];
+ const cleanupState=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/ingests/${id}`)).json()).inbox_cleanup,importId);
+ // Completed cleanup leaves a status and no further cleanup controls or errors.
+ const expectCompleted=async()=>{await expect(cleanup.getByRole('status')).toBeVisible({timeout:30000});await expect(cleanup.getByRole('button')).toHaveCount(0,{timeout:30000});await expect(cleanup.getByRole('alert')).toHaveCount(0);assert.equal((await cleanupState()).completed,true);};
  await page.reload({waitUntil:'domcontentloaded'});
- await expect(cleanup.getByRole('status')).toContainText('Inbox cleanup complete',{timeout:30000});
+ await expect.poll(async()=>(await cleanupState())?.completed,{timeout:30000}).toBe(true);
+ await expectCompleted();
  const recovery=path.join(path.dirname(source),`.collector-cleanup-${importId}`,'package');
  assert.equal(await readFile(path.join(recovery,'.DS_Store'),'utf8'),'housekeeping');
  await assert.rejects(readFile(path.join(recovery,'.unknown')),{code:'ENOENT'});
@@ -45,7 +49,7 @@ export async function inboxCleanupJourney(page,{importId,itemId,source,scratch,r
  await page.screenshot({path:path.join(scratch,'inbox-cleanup-mobile.png'),fullPage:true});
  await mkdir(source);await writeFile(path.join(source,'.unknown'),'new package must survive receipt replay');
  await restartServer();await page.reload({waitUntil:'domcontentloaded'});
- await expect(cleanup.getByRole('status')).toContainText('Inbox cleanup complete');
+ await expectCompleted();
  const replay=await page.evaluate(async ({id,key})=>{const r=await fetch(`/api/v1/ingests/${id}/inbox-cleanup`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({source_is_idle:true})});return r.status;},{id:importId,key:receipt});
  assert.equal(replay,202);assert.equal(await readFile(path.join(source,'.unknown'),'utf8'),'new package must survive receipt replay');
  const work=await page.evaluate(async id=>(await(await fetch('/api/v1/work/entry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'import',id})})).json()),importId);

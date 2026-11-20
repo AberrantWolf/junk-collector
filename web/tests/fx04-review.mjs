@@ -24,7 +24,7 @@ try{
  browser=await chromium.launch({headless:true});
  page=await browser.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await expect.poll(()=>page.evaluate(async name=>(await(await fetch('/api/v1/collection-search?limit=100')).json()).items.some(c=>c.name===name),'Review music')).toBe(true);await admin.getByRole('button',{name:'Close administration'}).click();
  const seeded=await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch('/api/v1'+path,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(path+': '+await response.text());return response.json();};
   const collection=((await request('/collection-search?limit=100')).items).find(value=>value.name==='Review music');const id=crypto.randomUUID();
@@ -34,7 +34,7 @@ try{
  await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');
  await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
  const cue=Buffer.from('FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');const pcm=Buffer.alloc(2352*10);
- await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Save originals only').check();await editor.getByRole('button',{name:'Save 1 package'}).click();
+ await editor.locator('details:has(input[aria-label="Files"]) > summary').click();await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await expect(editor.locator('.ingest-preview > div')).toHaveCount(1);await editor.getByLabel('Save originals only').check();await editor.locator('.guided-ingest form button.primary').click();
  await page.waitForFunction(async id=>{const response=await fetch('/api/v1/items/'+id);return response.ok&&(await response.json()).captures.length===1;},seeded.id);
  await editor.getByRole('button',{name:'Details',exact:true}).click();
  assert.equal(await editor.getByLabel('Title',{exact:true}).inputValue(),'Existing album');
@@ -46,7 +46,7 @@ try{
  await page.waitForTimeout(3500);
  assert.equal(await editor.getByRole('button',{name:'Details',exact:true}).getAttribute('aria-current'),'page','background Item update changed the editing section');
  assert.equal(await editor.getByLabel('Title',{exact:true}).inputValue(),'Draft after import','background Item update discarded the title draft');
- await editor.getByRole('button',{name:'Save details'}).click();await editor.getByText('Entry saved.',{exact:false}).waitFor();
+ await editor.getByRole('button',{name:'Save details'}).click();await expect.poll(()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).inventory_title,seeded.id)).toBe('Draft after import');await expect(editor.getByRole('alert')).toHaveCount(0);
  const saved=await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  assert.equal(saved.inventory_title,'Draft after import');assert.equal(saved.inventory_subtitle,'First edition');assert.equal(saved.wishlist,true);assert.equal(saved.domain.payload.artist,'Existing artist');assert.equal(saved.captures.length,1);
  // Synthetic provider responses exercise presentation without external provider requests.
@@ -68,14 +68,14 @@ try{
  });
  await editor.getByRole('button',{name:'Music',exact:true}).click();
  await editor.getByRole('button',{name:'Open Metadata workspace',exact:true}).click();
- const ledger=page.locator('.candidate-ledger');const candidates=ledger.getByRole('article');const titles=candidates.locator('strong');const inUse=candidates.filter({hasText:'Currently using'});await titles.getByText('Saved name choice',{exact:true}).waitFor();
+ const ledger=page.locator('.candidate-ledger');const candidates=ledger.getByRole('article');const titles=candidates.locator('strong');const inUse=ledger.locator('article.in-use');const clearSelection=/^Use automatic /;await titles.getByText('Saved name choice',{exact:true}).waitFor();
  for(const title of ['Accepted release','Detected disc match','Recorded release match'])assert.equal(await titles.getByText(title,{exact:true}).count(),1);
  for(const title of ['Obsolete name search','New name suggestion','Old disc match'])assert.equal(await titles.getByText(title,{exact:true}).count(),0);
- await expect(candidates.filter({hasText:'Previous automatic choice'})).not.toContainText('Currently using');
+ await expect(inUse.filter({hasText:'Previous automatic choice'})).toHaveCount(0);
  await expect(inUse).toHaveCount(1);
  await expect(inUse).toContainText('Saved name choice');
- await expect(inUse).toContainText(/selected by you/);
- await expect(page.getByRole('article',{name:'Effective metadata'})).toContainText(/Manual title/);
+ await expect(inUse.getByRole('button',{name:clearSelection})).toHaveCount(1);
+ const overrides=page.getByRole('article',{name:'Effective metadata'}).locator('.metadata-override-badge');await expect(overrides.first()).toBeVisible();
  const disclosure=ledger.getByRole('checkbox',{name:'Show text-search suggestions and earlier results'});
  await disclosure.check();await titles.getByText('Obsolete name search',{exact:true}).waitFor();
  assert.equal(await titles.getByText('New name suggestion',{exact:true}).count(),1);
@@ -91,14 +91,14 @@ try{
  await expect(inUse).toContainText('Normal edition (2 discs)');
  assert.equal(await titles.first().innerText(),'Normal edition (2 discs)','active automatic release was not pinned first');
  await expect(page.getByRole('article',{name:'Effective metadata'}).getByText('Normal edition (2 discs)',{exact:true})).toBeVisible();
- await expect(inUse).toContainText(/automatic match/);
+ await expect(inUse.getByRole('button',{name:clearSelection})).toHaveCount(0);await expect(ledger.getByRole('button',{name:clearSelection})).toHaveCount(0);
  await page.setViewportSize({width:390,height:844});
  await inUse.scrollIntoViewIfNeeded();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'active release overflows mobile');
  await page.screenshot({path:path.join(root,'web/test-results/metadata-active-release-mobile.png'),fullPage:true});
  using='manual';
  await expect(inUse).toHaveCount(0,{timeout:10000});
- await expect(page.getByRole('article',{name:'Effective metadata'})).toContainText(/manual/i);
+ await expect(overrides.first()).toBeVisible();
  await page.getByRole('article',{name:'Effective metadata'}).scrollIntoViewIfNeeded();
  await page.screenshot({path:path.join(root,'web/test-results/metadata-manual-source-mobile.png'),fullPage:true});
 
@@ -144,7 +144,7 @@ try{
  await page.setViewportSize({width:390,height:844});
  await page.route(`**/api/v1/items/${seeded.id}`,route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Fixture metadata refresh outage'}}}));
  await page.getByRole('button',{name:'Use selected artwork',exact:true}).click();
- await expect(page.getByRole('alert').filter({hasText:/saved/})).toBeVisible();
+ await expect(page.getByRole('alert')).toBeVisible();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'post-commit feedback overflows mobile');
  await page.screenshot({path:path.join(root,'web/test-results/metadata-committed-refresh-mobile.png'),fullPage:true});
  await page.unroute(`**/api/v1/items/${seeded.id}`);

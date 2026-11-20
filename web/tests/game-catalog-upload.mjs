@@ -41,9 +41,9 @@ try{
  async function importGame(){
   const previous=(await read(`/items?collection_id=${collection.id}&limit=50`)).items.filter(i=>i.captures?.length).length;
   await page.goto(`${origin}/?collection=${collection.id}`);await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog',{name:'Add or import',exact:true});
-  await editor.locator('summary').filter({hasText:'Choose individual files instead'}).click();
+  await editor.locator('details').filter({has:page.getByLabel('Files',{exact:true})}).locator(':scope > summary').click();
   await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'one.bin',mimeType:'application/octet-stream',buffer:one},{name:'two.bin',mimeType:'application/octet-stream',buffer:two}]);
-  await editor.getByRole('button',{name:'Preview import',exact:true}).click();await editor.getByText(/^1 dump packages? found/).waitFor();assert.equal(await editor.getByLabel('Audio preparation after import').count(),0);
+  await editor.getByRole('button',{name:'Preview import',exact:true}).click();await expect(editor.getByRole('button',{name:'Save 1 package',exact:true})).toBeEnabled();assert.equal(await editor.getByLabel('Audio preparation after import').count(),0);
   await editor.getByRole('button',{name:'Save 1 package',exact:true}).click();
   await expect.poll(async()=>{const items=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return items.filter(i=>i.captures?.length).length;},{timeout:45000}).toBe(previous+1);
   await page.getByRole('button',{name:'Close curator',exact:true}).click();
@@ -112,8 +112,10 @@ try{
  }finally{allowPage();await page.unroute(catalogRoute);}
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1360,height:980});
  await admin.getByRole('button',{name:'Close administration',exact:true}).click();
- await page.goto(`${origin}/library-care/metadata?collection=${collection.id}&item=${item.id}&attention=all`);const review=page.getByRole('region',{name:'Metadata review',exact:true});await review.getByRole('heading',{name:'Current and detected fields'}).waitFor();
- await expect(review.getByLabel('Displayed title',{exact:true})).toHaveValue('Final Fantasy & Tactics (USA)');await expect(review.getByLabel('Title mode',{exact:true})).toHaveValue('automatic');await expect(review.getByRole('heading',{name:'Game matches',exact:true})).toBeVisible();assert.doesNotMatch(await review.innerText(),/album/i);
+ await page.goto(`${origin}/library-care/metadata?collection=${collection.id}&item=${item.id}&attention=all`);const review=page.getByRole('region',{name:'Metadata review',exact:true});await review.getByLabel('Displayed title',{exact:true}).waitFor();
+ await expect(review.getByLabel('Displayed title',{exact:true})).toHaveValue('Final Fantasy & Tactics (USA)');await expect(review.getByLabel('Title mode',{exact:true})).toHaveValue('automatic');await expect(review.getByRole('button',{name:'Identify game',exact:true})).toBeVisible();
+ // A game entry offers game identification, not music release or track controls.
+ assert.equal(await review.getByRole('button',{name:'Use this album release',exact:true}).count(),0);assert.equal(await page.getByRole('region',{name:'Album tracks'}).count(),0);
  await review.getByLabel('Title mode',{exact:true}).selectOption('manual');await review.getByLabel('Displayed title',{exact:true}).fill('My manual edition');await review.getByRole('button',{name:'Save title',exact:true}).click();await expect.poll(async()=>(await read(`/items/${item.id}`)).title).toBe('My manual edition');
  await review.getByRole('button',{name:'Identify game',exact:true}).click();await expect(review.getByRole('button',{name:'Identify game',exact:true})).toBeEnabled({timeout:45000});assert.equal((await read(`/items/${item.id}`)).title,'My manual edition');
  await review.getByRole('button',{name:'Use detected title',exact:true}).click();await expect.poll(async()=>(await read(`/items/${item.id}`)).title).toBe('Final Fantasy & Tactics (USA)');

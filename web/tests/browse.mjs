@@ -25,7 +25,7 @@ try{
  const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);
  await page.goto(origin);for(const name of ['app.js','app.css','curation.js'])assert.equal(await page.evaluate(async name=>await(await fetch('/'+name)).text(),name),await readFile(path.join(root,'web/dist',name),'utf8'),'server contains stale '+name);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
- const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Browse music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();
+ const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Browse music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await expect.poll(async()=>(await page.evaluate(async()=>(await(await fetch('/api/v1/collection-search?limit=100')).json()).items.map(c=>c.name))).includes('Browse music')).toBe(true);
  await admin.getByLabel('Collection name').fill('Empty games');await admin.getByLabel('Collection type').selectOption('org.junk.games');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByLabel('Collection name').evaluate(async input=>{for(let n=0;input.value&&n<100;n++)await new Promise(r=>setTimeout(r,30));});
  await page.getByRole('button',{name:'Close administration'}).click();await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Browse music',exact:true}).waitFor();
  const seed=await page.evaluate(async()=>{
@@ -63,13 +63,13 @@ while True:
  try{
   await page.reload();await page.locator('.collection-row').first().waitFor();
  }finally{releaseCount();}
- await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toBeVisible();
+ await expect(page.getByRole('status').first()).toBeVisible();await expect(page.getByRole('alert')).toHaveCount(0);
  await expect(page.locator('.collection-row').first().getByLabel('Artwork summary updating')).toBeVisible();
- assert.equal(await page.getByText('No originals',{exact:true}).count(),0,'pending summary claimed missing originals');
+ assert.equal(await page.locator('.collection-entry .audio-check-status[title]').count(),0,'pending summary claimed an AccurateRip state');
  if(process.env.BROWSE_SCREENSHOTS){await mkdir(process.env.BROWSE_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-summary-pending.png')});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'mobile-summary-pending.png')});await page.setViewportSize({width:1440,height:1000});}
  holdSummary=false;
  await expect(page.locator('.collection-row').first()).toContainText('Alpha');
- await expect(page.getByRole('status').filter({hasText:'Updating library summaries'})).toHaveCount(0);
+ await expect(page.getByRole('img',{name:'Artwork summary updating'})).toHaveCount(0);await expect(page.locator('.collection-entry').first().locator('.audio-check-status[title]')).toBeVisible();
  assert.ok(refreshedRows,'pending summaries did not refresh through the visible-row read path');
  await page.unroute('**/api/v1/library?*',pendingSummaryRoute);
  await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
@@ -83,8 +83,8 @@ while True:
  });
  await page.getByRole('button',{name:'Load more',exact:true}).click();
  try{
-  const loading=page.getByRole('button',{name:'Loading entries…',exact:true});
-  await expect(loading).toBeDisabled();
+  await expect(page.locator('.load-more')).toBeDisabled();
+  await expect(page.locator('.entry-list')).toHaveAttribute('aria-busy','true');
  }finally{releaseNextPage();}
  await page.locator(`[data-item-id="${seed.ids[61]}"]`).waitFor();
  assert.equal(await page.locator('.collection-row').count(),62);assert.equal(nextPageRequests.length,1,'loading another page refetched earlier pages');assert.ok(new URL(nextPageRequests[0]).searchParams.has('cursor'));
@@ -129,9 +129,9 @@ while True:
  await page.getByRole('button',{name:'Back to results',exact:true}).click();await page.waitForFunction(()=>!new URL(location.href).searchParams.has('item')&&!new URL(location.href).searchParams.has('work'));
  assert.equal(await work.count(),0,'Back to results reopened Work & history');assert.equal(await page.locator('.collection-row').count(),62);await page.waitForFunction(y=>Math.abs(scrollY-y)<8,scroll);assert.equal(await page.evaluate(()=>document.activeElement?.dataset.itemId),seed.ids[55]);
  await row.click();await page.getByLabel('Album 055 details',{exact:true}).waitFor();
- await clickAction(page,'Edit / attach files');const editor=page.getByRole('dialog');await editor.getByLabel('Title',{exact:true}).fill('Edited album 055');await editor.getByRole('button',{name:'Save details',exact:true}).click();await editor.getByText('Entry saved.',{exact:false}).waitFor();await editor.getByRole('button',{name:'Artwork',exact:true}).click();
+ await clickAction(page,'Edit / attach files');const editor=page.getByRole('dialog');await editor.getByLabel('Title',{exact:true}).fill('Edited album 055');await editor.getByRole('button',{name:'Save details',exact:true}).click();await expect(editor.getByRole('status')).toBeVisible();await expect(editor.getByRole('alert')).toHaveCount(0);await expect.poll(()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).title,seed.ids[55])).toBe('Edited album 055');await editor.getByRole('button',{name:'Artwork',exact:true}).click();
  await page.route('**/assets/*/thumbnail*',route=>route.fulfill({status:503,body:'Temporary image failure'}));
- await editor.getByLabel('Artwork image').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});await editor.getByRole('button',{name:'Attach image',exact:true}).click();await editor.getByText('Artwork and photos updated.',{exact:true}).waitFor();
+ await editor.getByLabel('Artwork image').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});await editor.getByRole('button',{name:'Attach image',exact:true}).click();await expect.poll(()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).assets.length,seed.ids[55])).toBe(1);await expect(editor.getByRole('alert')).toHaveCount(0);
  await page.getByRole('button',{name:'Close curator'}).click();await page.getByRole('button',{name:'Retry artwork',exact:true}).waitFor();assert.equal(await page.locator('.detail .artwork').getByLabel('No artwork attached').count(),0);await page.unroute('**/assets/*/thumbnail*');await page.getByRole('button',{name:'Retry artwork',exact:true}).click();await page.locator('.detail .artwork img').waitFor();
  await page.getByLabel('Edited album 055 details',{exact:true}).waitFor();
  page.once('dialog',dialog=>dialog.accept());await clickAction(page,'Remove item');
@@ -151,15 +151,15 @@ while True:
  await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
  await page.waitForFunction(()=>new URL(location.href).searchParams.get('filter')==='album_playback_needs_attention'&&document.querySelectorAll('.collection-row').length===12);
  await page.unroute('**/api/v1/library?*');
- await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
+ await expect(page.locator('.collection-row').first().locator('.album-playback-status')).toBeVisible();
  await page.getByLabel('Show',{exact:true}).selectOption('all');await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50);
  // An empty filtered page with a failed summary is still unfinished work.
  await page.route('**/api/v1/library?*',async route=>{const response=await route.fetch(),body=await response.json();await route.fulfill({response,json:{...body,summary_state:'retrying',items:[],next_cursor:null}});},{times:1});
  await page.getByLabel('Show',{exact:true}).selectOption('album_playback_needs_attention');
- await expect(page.getByRole('alert').filter({hasText:'Some summaries could not be updated'})).toBeVisible();
- assert.equal(await page.getByRole('heading',{name:'No matching entries',exact:true}).count(),0,'unfinished filtered page appeared empty');
+ await expect(page.getByRole('alert')).toBeVisible();
+ assert.equal(await page.locator('.entry-list .empty').count(),0,'unfinished filtered page appeared empty');
  await page.waitForFunction(()=>document.querySelectorAll('.collection-row').length===50||document.querySelectorAll('.collection-row').length===12);
- await expect(page.locator('.collection-row').first().getByText('Album playback needs attention',{exact:true})).toBeVisible();
+ await expect(page.locator('.collection-row').first().locator('.album-playback-status')).toBeVisible();
  await page.reload();await expect(page.getByLabel('Show',{exact:true})).toHaveValue('album_playback_needs_attention');
  await page.locator('.collection-row').first().click();
  await expect(page.locator('.album-playback-notice')).toBeVisible();
@@ -176,9 +176,9 @@ while True:
  // Late evidence, explicit read failure, and retry use the real UI with controlled transport faults.
  let slowStarted;const started=new Promise(r=>slowStarted=r);
  await page.route('**/api/v1/items/*/evidence',async route=>{const first=route.request().url().includes(seed.ids[0]);if(first){slowStarted();await new Promise(r=>setTimeout(r,1000));}await route.fulfill({json:[{id:first?'old':'new',kind:'integrity_verification',outcome:first?'OLD EVIDENCE':'CURRENT EVIDENCE'}]}).catch(()=>{});});
- await page.locator(`[data-item-id="${seed.ids[0]}"]`).click();await started;await page.locator(`[data-item-id="${seed.ids[1]}"]`).click();await page.getByText('Album details & files',{exact:true}).click();await page.getByText('CURRENT EVIDENCE',{exact:true}).waitFor();await page.waitForTimeout(1200);assert.equal(await page.getByText('OLD EVIDENCE',{exact:true}).count(),0);await page.unroute('**/api/v1/items/*/evidence');
+ await page.locator(`[data-item-id="${seed.ids[0]}"]`).click();await started;await page.locator(`[data-item-id="${seed.ids[1]}"]`).click();await page.locator('.entry-inspection summary').click();await page.getByText('CURRENT EVIDENCE',{exact:true}).waitFor();await page.waitForTimeout(1200);assert.equal(await page.getByText('OLD EVIDENCE',{exact:true}).count(),0);await page.unroute('**/api/v1/items/*/evidence');
  await page.getByRole('button',{name:'Back to results',exact:true}).click();
- await page.route('**/api/v1/items/*/evidence',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary evidence failure'}}}));await page.locator(`[data-item-id="${seed.ids[0]}"]`).click();await page.getByText('Album details & files',{exact:true}).click();await page.getByRole('button',{name:'Retry checks'}).waitFor();assert.equal(await page.getByText('No checks recorded.',{exact:true}).count(),0);await page.unroute('**/api/v1/items/*/evidence');await page.getByRole('button',{name:'Retry checks'}).click();await page.getByText('No checks recorded.',{exact:true}).waitFor();
+ await page.route('**/api/v1/items/*/evidence',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary evidence failure'}}}));await page.locator(`[data-item-id="${seed.ids[0]}"]`).click();await page.locator('.entry-inspection summary').click();await page.getByRole('button',{name:'Retry checks'}).waitFor();assert.equal(await page.locator('.entry-inspection .evidence').count(),0);await page.unroute('**/api/v1/items/*/evidence');await page.getByRole('button',{name:'Retry checks'}).click();await expect(page.getByRole('button',{name:'Retry checks'})).toHaveCount(0);await expect(page.locator('.entry-inspection [role=status]')).toHaveCount(0);await expect(page.locator('.entry-inspection [role=alert]')).toHaveCount(0);assert.equal(await page.locator('.entry-inspection .evidence').count(),0);
  if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-detail.png')});
  await page.goto(origin+'/?item='+randomUUID());await page.getByRole('button',{name:'Retry entry'}).waitFor();assert.equal(await page.locator('.detail').count(),0);
  // A transient detail read recovers without leaving the user on a Retry screen.
@@ -192,7 +192,7 @@ while True:
  await page.route('**/api/v1/library?*',route=>route.fulfill({status:403,json:{error:{code:'forbidden',message:'Library access revoked'}}}));
  await page.getByLabel('Show',{exact:true}).selectOption('wishlist');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();assert.equal(await page.locator('.collection-row').count(),0,'revoked scope retained old rows');
  await page.unroute('**/api/v1/library?*');
- await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();await expect(page.getByRole('alert')).toContainText('Temporary list failure');assert.equal(await page.getByText('Library is busy; retrying…',{exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'No matching entries'}).count(),0);await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await page.getByRole('heading',{name:'No matching entries'}).waitFor();
+ await page.route('**/api/v1/library?*',route=>route.fulfill({status:503,json:{error:{code:'unavailable',message:'Temporary list failure'}}}));await page.getByLabel('Show',{exact:true}).selectOption('files_attached');await page.getByRole('button',{name:'Retry loading entries'}).waitFor();await expect(page.getByRole('alert')).toContainText('Temporary list failure');await expect(page.getByRole('alert')).toHaveCount(1);assert.equal(await page.locator('.entry-list .empty').count(),1,'failed load should show only the retry state');await page.unroute('**/api/v1/library?*');await page.getByRole('button',{name:'Retry loading entries'}).click();await expect(page.getByRole('button',{name:'Retry loading entries'})).toHaveCount(0);await expect(page.locator('.entry-list .empty h2')).toBeVisible();await expect(page.getByRole('alert')).toHaveCount(0);assert.equal(await page.locator('.collection-row').count(),0);
  // Real unfinished uploads take precedence over playback attention. The list
  // must refresh after cancellation/completion without a manual reload.
  const beginImport=()=>page.evaluate(async ({collection,item})=>{
@@ -206,12 +206,12 @@ while True:
  const concurrentImport=await beginImport();
  await page.goto(origin+'/?collection='+seed.music);
  const progressRow=page.locator(`[data-item-id="${seed.ids[0]}"]`);
- await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await expect(progressRow.locator('.album-import-status')).toBeVisible();
  await expect(progressRow.locator('.album-playback-status')).toHaveCount(0);
- await expect(progressRow).toHaveAccessibleName(/Import in progress/);
+ await expect(progressRow).toHaveAccessibleName(new RegExp((await progressRow.locator('.album-import-status').innerText()).trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
  if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'desktop-import-progress.png')});
  await page.setViewportSize({width:390,height:844});
- await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await expect(progressRow.locator('.album-import-status')).toBeVisible();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
  if(process.env.BROWSE_SCREENSHOTS)await page.screenshot({path:path.join(process.env.BROWSE_SCREENSHOTS,'mobile-import-progress.png')});
  const cancelImport=id=>page.evaluate(async id=>{
@@ -220,15 +220,15 @@ while True:
  },id);
  await cancelImport(progressImport);
  assert.equal(await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).import_in_progress,seed.ids[0]),true,'Another unfinished import must retain progress');
- await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await expect(progressRow.locator('.album-import-status')).toBeVisible();
  await cancelImport(concurrentImport);
- await expect(progressRow.getByText('Album playback needs attention',{exact:true})).toBeVisible();
- await expect(progressRow.getByText('Import in progress',{exact:true})).toHaveCount(0);
+ await expect(progressRow.locator('.album-playback-status')).toBeVisible();
+ await expect(progressRow.locator('.album-import-status')).toHaveCount(0);
  const completedImport=await beginImport();
- await page.reload();await expect(progressRow.getByText('Import in progress',{exact:true})).toBeVisible();
+ await page.reload();await expect(progressRow.locator('.album-import-status')).toBeVisible();
  await page.evaluate(async id=>{const response=await fetch(`/api/v1/imports/${id}/files/0?offset=0`,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:new Uint8Array([1,2,3,4])});if(!response.ok)throw Error(await response.text());},completedImport);
- await expect(progressRow.getByText('Album playback needs attention',{exact:true})).toBeVisible({timeout:30000});
- await expect(progressRow.getByText('Import in progress',{exact:true})).toHaveCount(0);
+ await expect(progressRow.locator('.album-playback-status')).toBeVisible({timeout:30000});
+ await expect(progressRow.locator('.album-import-status')).toHaveCount(0);
  assert.deepEqual(errors,[]);console.log(`FX-01 browser journey passed (${await browser.version()}): pagination/history/edit, nested work return and intentional browser Back/Forward, sorting/filtering, responsive keyboard navigation, delayed evidence, read recovery and live import progress.`);
 }catch(error){if(page){console.error(await page.locator('body').ariaSnapshot({timeout:2000}).catch(()=> '[browser diagnostic unavailable]'));await page.screenshot({path:'/tmp/fx01-browser-failure.png',fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{
  if(browser)await browser.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});

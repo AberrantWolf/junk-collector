@@ -2,7 +2,7 @@ import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 import {clickAction} from './actions.mjs';
 // FX-05 lifecycle acceptance against a temporary real server and browser profile.
-import {chromium} from './support/browser.mjs';
+import {chromium,expect} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -25,7 +25,7 @@ try{
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true});
  page=await browser.newPage();page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await page.getByRole('button',{name:'Create collection'}).click();const admin=page.getByRole('dialog');await admin.getByLabel('Collection name').fill('Review music');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection'}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await expect.poll(()=>page.evaluate(async name=>(await(await fetch('/api/v1/collection-search?limit=100')).json()).items.some(c=>c.name===name),'Review music')).toBe(true);await admin.getByRole('button',{name:'Close administration'}).click();
  const seeded=await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch('/api/v1'+path,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(path+': '+await response.text());return response.json();};
   const collection=((await request('/collection-search?limit=100')).items).find(value=>value.name==='Review music');const id=crypto.randomUUID();
@@ -38,17 +38,17 @@ try{
  // Long enough to keep playing while reimport and availability polling complete.
  const pcm=Buffer.alloc(44100*4*90);const wav=Buffer.alloc(44+pcm.length);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(2,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(44100*4,28);wav.writeUInt16LE(4,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(pcm.length,40);
  const packageFiles=[{name:'original.wav',mimeType:'audio/wav',buffer:wav}];
- await editor.getByText('Choose individual files instead').click();await editor.getByLabel('Files',{exact:true}).setInputFiles(packageFiles);await editor.getByRole('button',{name:'Preview import'}).click();await editor.getByText('1 dump packages found.',{exact:false}).waitFor();await editor.getByLabel('Save originals only').check();await editor.getByRole('button',{name:'Save 1 package'}).click();
+ await editor.locator('details:has(input[aria-label="Files"]) > summary').click();await editor.getByLabel('Files',{exact:true}).setInputFiles(packageFiles);await editor.getByRole('button',{name:'Preview import'}).click();await expect(editor.locator('.ingest-preview > div')).toHaveCount(1);await editor.getByLabel('Save originals only').check();await editor.locator('.guided-ingest form button.primary').click();
  const readItem=()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
  const waitItem=async predicate=>{for(let attempt=0;attempt<150;attempt++){const value=await readItem();if(predicate(value))return value;await page.waitForTimeout(200);}throw new Error('Item did not reach expected state: '+JSON.stringify(await readItem()));};
  await waitItem(item=>item.captures.length===1);
- await editor.getByText('Upload complete.',{exact:false}).waitFor();
+ await expect(editor.locator('.guided-ingest p.notice[role=status]')).toBeVisible();await expect(editor.locator('.guided-ingest')).toHaveAttribute('data-uploading','false');await expect(editor.getByRole('alert')).toHaveCount(0);
  const first=await readItem();assert.equal(first.captures.length,1);
  await editor.getByRole('button',{name:'Close curator'}).click();
  // Global Add/import does not promise an active detail after attachment. Open
  // the known entry explicitly before testing playback across replacement.
  await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);
- await page.getByText('Album details & files',{exact:true}).click();
+ await page.locator('.entry-inspection summary').click();
  await page.getByRole('button',{name:'Add file to queue',exact:true}).click();
  const player=page.getByRole('region',{name:'Music player'});await player.getByRole('button',{name:'Play',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});

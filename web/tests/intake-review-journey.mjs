@@ -11,20 +11,24 @@ export async function inboxSelectorJourney(page,{scratch}){
   await page.getByRole('combobox',{name:/^Source/}).selectOption('inbox');
   const rows=chooser.locator('.inbox-package-results input');
   await expect(rows).toHaveCount(50);
+  const checked=chooser.locator('.inbox-package-results input:checked');
   const all=chooser.getByRole('checkbox',{name:'Select all shown',exact:true});
-  await all.check();await expect(chooser.getByRole('status')).toContainText('50 selected');
-  await chooser.getByRole('button',{name:'More packages',exact:true}).click();await expect(rows).toHaveCount(52);
+  await all.check();await expect(checked).toHaveCount(50);await expect(page.getByRole('button',{name:'Review packages',exact:true})).toBeEnabled();
+  await chooser.getByRole('button',{name:'More packages',exact:true}).click();await expect(rows).toHaveCount(52);await expect(checked).toHaveCount(50);
   assert.equal(await all.evaluate(node=>node.indeterminate),true,'Newly loaded rows must not be silently selected');
-  await all.focus();await page.keyboard.press('Space');await expect(chooser.getByRole('status')).toContainText('52 selected');
-  await chooser.getByLabel(names[0],{exact:true}).uncheck();
+  await all.focus();await page.keyboard.press('Space');await expect(checked).toHaveCount(52);
+  await chooser.getByLabel(names[0],{exact:true}).uncheck();await expect(checked).toHaveCount(51);
   assert.equal(await all.evaluate(node=>node.indeterminate),true);
-  await all.check();await expect(rows.first()).toBeChecked();
+  await all.check();await expect(rows.first()).toBeChecked();await expect(checked).toHaveCount(52);
+  // Changing the selection of a filtered view retains selections hidden by the filter.
   await chooser.getByLabel('Search inbox packages').fill('Chooser 51');await expect(rows).toHaveCount(1);
-  await all.uncheck();await expect(chooser.getByRole('status')).toContainText('51 selected');
-  await all.check();await expect(chooser.getByRole('status')).toContainText('52 selected');
-  await chooser.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(chooser.getByRole('status')).toContainText('0 selected');
+  await all.uncheck();await expect(rows.first()).not.toBeChecked();
+  await chooser.getByLabel('Search inbox packages').fill('');await expect(rows).toHaveCount(50);await expect(checked).toHaveCount(50);
+  await chooser.getByLabel('Search inbox packages').fill('Chooser 51');await expect(rows).toHaveCount(1);await expect(rows.first()).not.toBeChecked();
+  await all.check();await expect(rows.first()).toBeChecked();
+  await chooser.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(checked).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Review packages',exact:true})).toBeDisabled();
-  await chooser.getByLabel('Search inbox packages').fill('');await expect(rows).toHaveCount(50);
+  await chooser.getByLabel('Search inbox packages').fill('');await expect(rows).toHaveCount(50);await expect(checked).toHaveCount(0);
   for(const [width,height,label] of [[1440,1000,'desktop'],[390,844,'mobile']]){
    await page.setViewportSize({width,height});await chooser.getByLabel(names[1],{exact:true}).check();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Inbox chooser overflows');
@@ -64,28 +68,32 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   assert.equal(await chooser.getByLabel('@eaDir',{exact:true}).count(),0);
   for(const name of packageNames)await chooser.getByLabel(name,{exact:true}).check();
   await imports.getByRole('button',{name:'Review packages',exact:true}).click();
-  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+  await imports.getByRole('button',{name:'Start import',exact:true}).waitFor();
   for(const [index,name] of packageNames.entries()){
    const row=imports.locator('.care-row').filter({has:page.getByText(name,{exact:true})});
-   await row.getByText('Files and analysis',{exact:true}).click();
    const anchor=row.getByRole('combobox',{name:`Main file for ${name}`});
+   await row.locator('details').filter({has:page.getByLabel(`Main file for ${name}`,{exact:true})}).locator(':scope > summary').click();
    assert.equal(await anchor.locator('option').count(),3,'Both CUE and Redumper anchors must remain selectable');
    await row.getByLabel(/Curators only: .unknown/).check();
    await row.getByLabel('Album group',{exact:true}).fill('Shared review group');
    await expect(imports.getByRole('button',{name:'Start import',exact:true})).toBeDisabled();
    if(manual)await row.getByLabel('Manual album title (optional)',{exact:true}).fill('My explicit review title');
    await row.getByLabel('Physical copy label',{exact:true}).fill(manual?`Purchased copy ${index+1}`:'Purchased copy A');
-   const cue=await anchor.locator('option').filter({hasText:'BIN/CUE'}).getAttribute('value');
+   const cue=await anchor.locator('option').filter({hasText:'disc.cue'}).getAttribute('value');
+   const replanned=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/ingests/plan'&&response.request().method()==='POST');
    await anchor.selectOption(cue);
-   await expect(row.getByText(/analysis available/)).toBeVisible();
+   const plan=(await(await replanned).json()).packages[0];
+   assert.equal(plan.analysis_available,true,'Choosing the CUE anchor must make the package analysable');
+   assert.equal(plan.anchors.find(choice=>choice.selected)?.file_index,Number(cue));
+   await expect(anchor).toHaveValue(cue);await expect(anchor).toBeEnabled();
    assert.equal(await row.getByLabel(/Curators only: .unknown/).isChecked(),true,'Replanning lost reviewed file privacy');
    assert.equal(await row.getByLabel('Physical copy label',{exact:true}).inputValue(),manual?`Purchased copy ${index+1}`:'Purchased copy A');
    assert.equal(await row.getByLabel('Manual album title (optional)',{exact:true}).inputValue(),manual?'My explicit review title':'');
-   assert.equal(await row.getByText(/SYNO@EAStream|unused.cue|Curators only: .DS_Store/).count(),0);
+   assert.equal(await row.getByText(/SYNO@EAStream|unused\.cue|\.DS_Store/).count(),0);
   }
   // Draft choices survive a real page reload before submission.
   await page.reload({waitUntil:'domcontentloaded'});
-  await imports.getByRole('heading',{name:'Review packages and groups'}).waitFor();
+  await imports.getByRole('button',{name:'Start import',exact:true}).waitFor();
   await expect(imports.getByLabel('Album group',{exact:true}).first()).toHaveValue('Shared review group');
   await page.screenshot({path:path.join(scratch,`review-${manual?'manual':'automatic'}-desktop.png`),fullPage:true});
   await page.setViewportSize({width:390,height:844});
@@ -119,7 +127,8 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   }
   await restartServer();
   await page.reload({waitUntil:'domcontentloaded'});
-  await imports.getByRole('heading',{name:'Import · 2 of 2 packages saved'}).waitFor();
+  await expect(imports.getByRole('button',{name:'Review import',exact:true})).toHaveCount(2);
+  assert.equal((await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()),intakeId)).package_count,2);
   const recovered=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),itemId);
   assert.equal(recovered.title,album.title);assert.equal(recovered.specimens.length,album.specimens.length);assert.equal(recovered.captures.length,2);
   await imports.getByRole('button',{name:'Back to imports',exact:true}).click();

@@ -61,7 +61,8 @@ try{
  assert.ok(scroll>0,'the metadata results must be scrolled before polling');
  try{
   await expect.poll(()=>metadataReads).toBeGreaterThanOrEqual(2);
-  await expect(metadata.getByRole('status').filter({hasText:'Loading entries'})).toHaveCount(0);
+  // A background poll must not put the loaded list back into a loading state.
+  await expect(metadata.locator('[aria-busy="true"]')).toHaveCount(0);await expect(row).toBeVisible();
  }finally{releasePoll();}
  await expect.poll(()=>metadataReads).toBeGreaterThanOrEqual(3);
  await expect.poll(()=>page.evaluate(()=>window.scrollY)).toBe(scroll);
@@ -96,8 +97,8 @@ try{
  await historyView.getByRole('button',{name:'Back to activity',exact:true}).click();await historyView.getByLabel('Search work',{exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});await historyView.scrollIntoViewIfNeeded();
  await expect(historyView.getByLabel('Search work',{exact:true})).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
- await historyView.getByText('Date and attachment filters',{exact:true}).click();await expect(historyView.getByLabel('From',{exact:true})).toBeVisible();
- await historyView.getByText('Date and attachment filters',{exact:true}).click();
+ const filters=historyView.locator('details').filter({has:page.getByLabel('From',{exact:true})}).locator(':scope > summary');await filters.click();await expect(historyView.getByLabel('From',{exact:true})).toBeVisible();
+ await filters.click();await expect(historyView.getByLabel('From',{exact:true})).toBeHidden();
  await page.setViewportSize({width:1360,height:900});await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.setViewportSize({width:390,height:844});const toggle=page.locator('.menu-toggle');await expect(toggle).toBeVisible();await expect(nav).toBeHidden();await expect(summary).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await toggle.focus();await page.keyboard.press('Enter');await expect(nav).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');assert.equal(await nav.evaluate(node=>node.scrollWidth>node.clientWidth),false);await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();

@@ -1,6 +1,6 @@
 import {closeHttpFixture,fixturePort,stopProcess,waitForServer} from './support/runtime.mjs';
 // Isolated real-server inbox review acceptance with deterministic offline providers.
-import {chromium} from './support/browser.mjs';
+import {chromium,expect} from './support/browser.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -59,7 +59,7 @@ try{
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
- await admin.getByLabel('Collection name').fill('Review shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await page.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Close administration'}).click();
+ await admin.getByLabel('Collection name').fill('Review shelf');await admin.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await admin.getByRole('button',{name:'Close administration'}).click();
  const collection=await page.evaluate(async()=>(await(await fetch('/api/v1/collection-search?limit=50')).json()).items.find(c=>c.name==='Review shelf').id);
  await page.goto(`${origin}/imports?collection=${collection}`);
  if(process.env.AUTO_GROUPING_ONLY){

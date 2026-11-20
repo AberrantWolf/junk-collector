@@ -22,6 +22,8 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${server.address().port}`;
 let browser;
 const summary=(id,name,revision=1,entry_count=0)=>({id,name,revision,collection_id:'c',kind:'items',entry_count,can_edit:true});
+// Destination options by value: '' creates a new list, others are list ids.
+const optionValues=page=>expect.poll(()=>page.getByLabel('Destination list').locator('option').evaluateAll(options=>options.map(option=>option.value)));
 const open=async page=>{await page.goto(origin);await page.getByRole('button',{name:'Open chooser'}).click();await page.getByRole('button',{name:'Append to list',exact:true}).waitFor();};
 try{
  browser=await chromium.launch({headless:true});
@@ -34,7 +36,7 @@ try{
  });
  await open(page);await page.getByLabel('Destination list').selectOption('a');
  await page.getByLabel('Find a list').fill('Beta');
- await expect(page.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Alpha (0)','Beta (0)']);
+ await optionValues(page).toEqual(['','a','b']);
  await expect(page.getByLabel('Destination list')).toHaveValue('a');
  await page.getByRole('button',{name:'Append to list',exact:true}).click();await page.getByRole('status').filter({hasText:'Alpha'}).waitFor();
  assert.deepEqual(writes,['/api/v1/collections/c/lists/a']);
@@ -58,8 +60,8 @@ try{
   await route.fulfill({json:{items:filtered?[summary('b','Beta')]:[summary('a','Alpha')],next_cursor:filtered?null:'next'}});
  });
  await open(racing);await racing.getByRole('button',{name:'More lists'}).click();await started;
- await racing.getByLabel('Find a list').fill('Beta');await expect(racing.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Beta (0)']);
- releaseOld();await finished;await expect(racing.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Beta (0)']);
+ await racing.getByLabel('Find a list').fill('Beta');await optionValues(racing).toEqual(['','b']);
+ releaseOld();await finished;await optionValues(racing).toEqual(['','b']);
  await expect(racing.getByRole('button',{name:'More lists'})).toHaveCount(0);await racing.close();
 
  for(const reopen of [false,true]){
@@ -83,7 +85,8 @@ try{
   await uncertain.getByRole('button',{name:'Append to list',exact:true}).click();await uncertain.getByRole('alert').waitFor();
   if(reopen){await uncertain.getByRole('button',{name:'Close',exact:true}).click();await uncertain.reload();await uncertain.getByRole('button',{name:'Open chooser'}).click();}
   else{await uncertain.getByRole('button',{name:'Reload lists'}).click();}
-  await expect(uncertain.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Alpha (1)']);
+  // The reloaded destination reflects the server's entry count after the uncertain write.
+  await optionValues(uncertain).toEqual(['','a']);await expect(uncertain.getByLabel('Destination list').locator('option[value="a"]')).toHaveText(/Alpha.*\b1\b/);
   await expect(uncertain.getByLabel('Destination list')).toBeDisabled();
   await uncertain.getByRole('button',{name:'Retry addition',exact:true}).click();await uncertain.getByRole('status').filter({hasText:'Alpha'}).waitFor();
   assert.equal(appendCount,1,'uncertain retry added a duplicate occurrence');assert.deepEqual(submissions[0],submissions[1]);
@@ -141,7 +144,7 @@ try{
  await open(changed);await changed.getByLabel('Destination list').selectOption('a');await changed.getByLabel('Find a list').fill('Beta');await expect(changed.getByLabel('Destination list').locator('option')).toHaveCount(3);
  await changed.getByRole('button',{name:'Append to list',exact:true}).click();await changed.getByRole('alert').waitFor();await changed.getByRole('button',{name:'Reload lists'}).click();await exactReady;
  await changed.getByLabel('Destination list').selectOption('');await changed.getByLabel('New list name').fill('Different destination');releaseExact();
- await expect(changed.getByLabel('Destination list').locator('option')).toHaveText(['Create a new list','Beta (0)']);await expect(changed.getByLabel('Destination list')).toHaveValue('');await expect(changed.getByLabel('New list name')).toHaveValue('Different destination');await changed.close();
+ await optionValues(changed).toEqual(['','b']);await expect(changed.getByLabel('Destination list')).toHaveValue('');await expect(changed.getByLabel('New list name')).toHaveValue('Different destination');await changed.close();
 
  console.log('Collection list chooser passed: visible destination, obsolete pagination, shared modal focus/scroll/dismissal, uncertain receipt replay after reload/reopen, intentional repeats and filtered conflict recovery.');
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

@@ -19,7 +19,7 @@ try{
  await start();browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1200,height:900}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();const admin=page.getByRole('dialog',{name:'Administration'});
- await admin.getByLabel('Collection name').fill('Retained collection');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await page.getByRole('button',{name:'Close administration'}).click();
+ await admin.getByLabel('Collection name').fill('Retained collection');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await page.getByRole('button',{name:'Close administration'}).click();
  const id=await page.evaluate(async()=>{
   const collection=(await(await fetch('/api/v1/collection-search?limit=50')).json()).items.find(c=>c.name==='Retained collection');const id=crypto.randomUUID();
   const response=await fetch('/api/v1/items/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({expected_revision:0,edit:{collection_id:collection.id,title:'Retained manual album',subtitle:'Storage recovery fixture',identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{artist:'Retained artist'}},identity:'unidentified',translations:[],identifiers:[],wishlist:true}})});
@@ -29,7 +29,8 @@ try{
  // Only this fixture's newly initialized archive is detached.
  await stat(path.join(archive,'.archive-identity'));await rename(archive,detached);
  const failed=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/me');await page.reload();const response=await failed;assert.equal(response.status(),503);assert.equal((await response.json()).error.code,'unavailable');
- const alert=page.getByRole('alert');await expect(alert).toBeVisible();assert.equal(await page.getByRole('heading',{name:/No collections/}).count(),0);
+ const alert=page.getByRole('alert');await expect(alert).toBeVisible();// The outage is not presented as an empty library.
+ assert.equal(await page.locator('.empty').count(),0);assert.equal(await page.locator('[data-item-id]').count(),0);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'storage error overflows mobile');
  await rename(detached,archive);
  assert.equal(await page.evaluate(async()=> (await fetch('/api/v1/me')).status),503,'reconnect silently cleared the process latch');

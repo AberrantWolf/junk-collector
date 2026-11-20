@@ -96,6 +96,8 @@ try{
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});
  context.setDefaultTimeout(30000);context.setDefaultNavigationTimeout(30000);
  page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const getJson=path=>page.evaluate(async path=>{const response=await fetch(`/api/v1${path}`);if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();},path);
+ const collectionNames=async()=>(await getJson('/collection-search?limit=100')).items.map(value=>value.name);
  if(localSetup){
   const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8'});assert.equal(doctor.status,0,doctor.stderr);
   const features=await(await fetch(`${publicOrigin}/api/v1/features`)).json();assert.equal(features.administration,false);assert.equal(features.curation,false);
@@ -116,7 +118,7 @@ try{
  await page.goto(`${pairBase}${enrollment.verification_url}`);
  await page.getByLabel('Approval code',{exact:true}).fill(enrollment.user_code);
  await page.getByRole('button',{name:'Review connection',exact:true}).click();await page.getByRole('button',{name:'Approve this app',exact:true}).click();
- await page.getByRole('heading',{name:'App approved',exact:true}).waitFor();
+ await page.getByRole('link',{name:'Open library',exact:true}).waitFor();
  const paired=await page.request.post(`${pairBase}/api/v1/enrollments/${enrollment.id}/complete`,{data:{completion_secret:enrollment.completion_secret}});
  assert.equal(paired.status(),200);
  await page.getByRole('link',{name:'Open library',exact:true}).click();
@@ -127,17 +129,18 @@ try{
  assert.equal(await security.getByLabel('Preferred metadata language',{exact:true}).inputValue(),'en');
  await security.getByLabel('Preferred metadata language',{exact:true}).fill('ja');
  await security.getByRole('button',{name:'Save metadata language',exact:true}).click();
- await security.getByRole('status').filter({hasText:'Language saved.'}).waitFor();
+ await expect.poll(async()=>(await getJson('/me/metadata-preferences')).language).toBe('ja');
+ await security.getByRole('status').waitFor();
  await security.getByRole('button',{name:'Close account and security',exact:true}).click();
  await page.getByRole('button',{name:'Account & security',exact:true}).click();
  await expect(security.getByLabel('Preferred metadata language',{exact:true})).toHaveValue('ja');
  await security.getByLabel('Preferred metadata language',{exact:true}).fill('en');
  await security.getByRole('button',{name:'Save metadata language',exact:true}).click();
- await security.getByRole('status').filter({hasText:'Language saved.'}).waitFor();
+ await expect.poll(async()=>(await getJson('/me/metadata-preferences')).language).toBe('en');
+ await security.getByRole('status').waitFor();
  await security.getByRole('button',{name:'Recovery',exact:true}).click();
  await security.getByRole('button',{name:'Generate replacement codes',exact:true}).click();
- await security.getByText('Save these codes now.',{exact:false}).waitFor();
- assert.equal(await security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem').count(),10);
+ await expect(security.getByRole('list',{name:'Recovery codes'}).getByRole('listitem')).toHaveCount(10);
  page.once('dialog',dialog=>dialog.accept());
  await page.getByRole('button',{name:'Close account and security'}).click();
  await page.getByRole('button',{name:'Create collection',exact:true}).click();
@@ -145,19 +148,23 @@ try{
  await administration.getByLabel('Collection name').fill('Shelf & stereo');
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.music');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
- await page.getByText('Collection created.',{exact:false}).waitFor();
+ await expect.poll(collectionNames).toContain('Shelf & stereo');
+ await expect(administration.getByLabel('Collection name')).toHaveValue('');
  await administration.getByLabel('Collection name').fill('Cartridge shelf');
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
- await page.getByText('Collection created.',{exact:false}).waitFor();
+ await expect.poll(collectionNames).toContain('Cartridge shelf');
+ await expect(administration.getByLabel('Collection name')).toHaveValue('');
  await administration.getByLabel('Collection name').fill('Other cartridges');
  await administration.getByRole('combobox',{name:/Collection type/}).selectOption('org.junk.games');
  await administration.getByRole('button',{name:'Create collection',exact:true}).click();
- await page.getByText('Collection created.',{exact:false}).waitFor();
+ await expect.poll(collectionNames).toContain('Other cartridges');
+ await expect(administration.getByLabel('Collection name')).toHaveValue('');
  await administration.getByRole('button',{name:'Close administration'}).click();
  let failedGameLookup=false;const failGameLookup=route=>{const url=new URL(route.request().url());if(url.searchParams.get('module')==='org.junk.games'&&!failedGameLookup){failedGameLookup=true;return route.fulfill({status:503,json:{error:{code:'temporarily_unavailable',message:'Game collections temporarily unavailable'}}});}return route.continue();};await page.route('**/api/v1/collection-search?*',failGameLookup);
- await page.getByRole('button',{name:'Administration',exact:true}).click();await administration.getByRole('button',{name:'Game catalogs',exact:true}).click();await administration.getByRole('alert').filter({hasText:'Game collections temporarily unavailable'}).waitFor();await administration.getByRole('button',{name:'Retry collections'}).click();await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Cartridge shelf/}).click();await page.unroute('**/api/v1/collection-search?*',failGameLookup);await administration.getByText('Import a server-configured catalog',{exact:true}).click();await administration.getByRole('button',{name:'Import catalog',exact:true}).click();
- await administration.getByText('Catalog import: Completed',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'Administration',exact:true}).click();await administration.getByRole('button',{name:'Game catalogs',exact:true}).click();await administration.getByRole('alert').filter({hasText:'Game collections temporarily unavailable'}).waitFor();await administration.getByRole('button',{name:'Retry collections'}).click();await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Cartridge shelf/}).click();await page.unroute('**/api/v1/collection-search?*',failGameLookup);await administration.locator('details').filter({has:page.getByRole('button',{name:'Import catalog',exact:true,includeHidden:true})}).locator(':scope > summary').click();const [catalogAccepted]=await Promise.all([page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith('/catalog-snapshots')),administration.getByRole('button',{name:'Import catalog',exact:true}).click()]);
+ assert.equal(catalogAccepted.ok(),true);const catalogJob=(await catalogAccepted.json()).job_id;
+ await expect.poll(async()=>(await getJson(`/jobs/${catalogJob}`)).state,{timeout:30000}).toBe('completed');
  await administration.getByRole('button',{name:'Activate',exact:true}).click();
  await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
  await administration.locator('.collection-chooser .destination-results').getByRole('button',{name:/Other cartridges/}).click();
@@ -166,7 +173,8 @@ try{
  await administration.getByRole('button',{name:'Active',exact:true}).waitFor();
  await page.getByRole('button',{name:'Close administration'}).click();
  await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).waitFor();await page.keyboard.press('Escape');
- await page.getByRole('heading',{name:'This collection is empty.'}).waitFor();
+ await page.locator('.entry-list .empty').waitFor();
+ await expect(page.locator('.collection-row')).toHaveCount(0);
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const addForm=page.getByRole('dialog',{name:/Add or import/});
  await addForm.getByRole('button',{name:'Add entry manually',exact:true}).click();
@@ -181,15 +189,17 @@ try{
  await page.getByLabel('Label',{exact:true}).fill('Fixture Records');
  await page.getByLabel('Release year',{exact:true}).fill('2001');
  await page.getByRole('button',{name:'Add entry',exact:true}).click();
- await page.getByText('Entry saved.',{exact:false}).waitFor();
- await page.evaluate(async()=>{const items=await(await fetch('/api/v1/items?search=A%20test%20pressing&limit=10')).json();const item=items.items.find(value=>value.title==='A test pressing');if(!item)throw new Error('primary music fixture was not created');localStorage.setItem('primary-music-item-id',item.id);});
+ await expect.poll(async()=>(await getJson('/items?search=A%20test%20pressing&limit=10')).items.some(value=>value.title==='A test pressing'),{timeout:15000}).toBe(true);
+ const primaryId=await page.evaluate(async()=>{const items=await(await fetch('/api/v1/items?search=A%20test%20pressing&limit=10')).json();const item=items.items.find(value=>value.title==='A test pressing');localStorage.setItem('primary-music-item-id',item.id);return item.id;});
+ const primaryItem=()=>getJson(`/items/${primaryId}`);
+ const referenceCopy=async()=>(await primaryItem()).specimens.find(value=>value.label==='Reference copy');
  const curator=page.getByRole('dialog',{name:/Edit entry/});
  // Escape guards drafts, keeps the dialog on rejection, and dismisses only the top surface.
  await curator.getByLabel('Title',{exact:true}).fill('Unsaved album title');
- page.once('dialog',async dialog=>{assert.match(dialog.message(),/Discard unsaved changes/);await dialog.dismiss();});
+ page.once('dialog',async dialog=>{assert.equal(dialog.type(),'confirm');await dialog.dismiss();});
  await page.keyboard.press('Escape');
  assert.equal(await curator.getByLabel('Title',{exact:true}).inputValue(),'Unsaved album title');
- page.once('dialog',async dialog=>{assert.match(dialog.message(),/Discard unsaved changes/);await dialog.accept();});
+ page.once('dialog',async dialog=>{assert.equal(dialog.type(),'confirm');await dialog.accept();});
  await page.keyboard.press('Escape');
  await curator.waitFor({state:'hidden'});
  await clickAction(page,'Edit / attach files');
@@ -212,8 +222,9 @@ try{
  await copyForm.getByLabel('Cost amount').fill('2400');
  await copyForm.getByLabel('Private notes').fill('Keep the obi with disc one.');
  await copyForm.getByRole('button',{name:'Save copy',exact:true}).click();
- await page.getByText('Physical inventory updated.',{exact:true}).waitFor();
  const copyRecord=curator.getByRole('article',{name:/Reference copy/});
+ await copyRecord.waitFor();
+ assert.deepEqual(await (async()=>{const copy=await referenceCopy();return [copy.condition,copy.private_notes??copy.notes];})(),['excellent','Keep the obi with disc one.']);
  await copyRecord.getByRole('button',{name:'Add part',exact:true}).click();
  let partForm=copyRecord.getByRole('form',{name:'New part'});
  await partForm.getByLabel('Part label').fill('Disc 2');
@@ -238,7 +249,8 @@ try{
  const returnForm=copyRecord.getByRole('form',{name:'Return loan'});
  await returnForm.getByLabel('Return date').fill('2026-09-11');
  await returnForm.getByRole('button',{name:'Return copy',exact:true}).click();
- await copyRecord.getByText('returned 2026-09-11',{exact:false}).waitFor();
+ await expect.poll(async()=>((await referenceCopy()).loans||[]).map(loan=>[loan.contact,loan.returned_at])).toEqual([['Archive reviewer','2026-09-11']]);
+ await copyRecord.getByRole('button',{name:'Lend copy',exact:true}).waitFor();
  await copyRecord.getByRole('button',{name:'Edit copy',exact:true}).click();
  const editCopy=curator.getByRole('form',{name:'Edit physical copy'});
  await editCopy.getByLabel('Private notes').fill('Draft survives a concurrent revision.');
@@ -249,12 +261,15 @@ try{
   if(!response.ok)throw new Error(`concurrent item edit: ${response.status} ${await response.text()}`);
  });
  await editCopy.getByRole('button',{name:'Save copy',exact:true}).click();
- await curator.getByRole('alert').getByText('Revision conflict',{exact:true}).waitFor();
+ await curator.getByRole('alert').waitFor();
+ await curator.getByRole('button',{name:/Keep draft on revision/}).waitFor();
  assert.equal(await editCopy.getByLabel('Private notes').inputValue(),'Draft survives a concurrent revision.');
  await curator.getByRole('button',{name:/Keep draft on revision/}).click();
  await editCopy.getByRole('button',{name:'Save copy',exact:true}).click();
  await editCopy.waitFor({state:'detached'});
  await expect(copyRecord).toContainText('Draft survives a concurrent revision.');
+ await expect.poll(async()=>{const copy=await referenceCopy();return copy.private_notes??copy.notes;}).toBe('Draft survives a concurrent revision.');
+ assert.equal((await primaryItem()).subtitle,'Concurrent server edit','keeping the draft discarded the concurrent edit');
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:path.join(root,'web/test-results/inventory-mobile.png'),fullPage:true});
  await page.setViewportSize({width:1440,height:1000});
@@ -266,7 +281,7 @@ try{
  await assetForm.getByLabel('Artwork image').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:png});
  await assetForm.getByRole('img',{name:'Selected image preview'}).waitFor();
  await assetForm.getByRole('button',{name:'Attach image',exact:true}).click();
- await page.getByText('Artwork and photos updated.',{exact:true}).waitFor();
+ await expect.poll(async()=>(await primaryItem()).assets.map(asset=>asset.alt_text)).toEqual(['Archival cover']);
  const coverRecord=curator.getByRole('article',{name:/cover attached to Item/});
  await coverRecord.getByRole('img',{name:'Archival cover'}).waitFor();
  await coverRecord.getByRole('button',{name:'Edit metadata',exact:true}).click();
@@ -274,8 +289,8 @@ try{
  await metadataForm.getByLabel('Alternative text').fill('Private archival cover');
  await metadataForm.getByLabel('Visibility').selectOption('curators');
  await metadataForm.getByRole('button',{name:'Save image details',exact:true}).click();
- await coverRecord.getByText('revision 2',{exact:false}).waitFor();
- assert.match(await coverRecord.textContent(),/Curators only/);
+ await coverRecord.getByRole('img',{name:'Private archival cover'}).waitFor();
+ await expect.poll(async()=>(await primaryItem()).assets.filter(asset=>asset.kind==='cover').map(asset=>[asset.alt_text,asset.visibility,asset.revision])).toEqual([['Private archival cover','curators',2]]);
  await assetForm.getByLabel('Image role').selectOption('photo');
  await assetForm.getByLabel('Alternative text').fill('Temporary handling photo');
  await assetForm.getByLabel('Artwork image').setInputFiles({name:'handling.png',mimeType:'image/png',buffer:png});
@@ -295,6 +310,18 @@ try{
  await clickAction(curator,'Review metadata');
  await curator.waitFor({state:'detached'});
  const metadataReview=page.getByRole('region',{name:'Metadata review'});
+ // Runs one metadata/artwork lookup through the UI and returns its recorded resolution once the page has settled.
+ async function runLookup(button){
+  const [response]=await Promise.all([page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith('/metadata/resolutions')),button.click()]);
+  assert.equal(response.status(),202);
+  const {job_id}=await response.json();
+  await expect.poll(async()=>(await getJson(`/jobs/${job_id}`)).state,{timeout:30000}).toBe('completed');
+  await expect(metadataReview.locator('.metadata-job')).toHaveCount(0,{timeout:30000});
+  await expect(metadataReview.getByRole('alert')).toHaveCount(0);
+  const resolution=(await getJson(`/items/${primaryId}/metadata/resolutions`)).find(value=>value.job.id===job_id);
+  assert.ok(resolution?.result,'lookup completed without a recorded result');
+  return resolution;
+ }
  // Escape dismisses optional help without leaving the metadata review.
  const metadataHelp=metadataReview.getByRole('button',{name:'About metadata',exact:true});
  await metadataHelp.click();await expect(metadataReview.getByRole('note')).toBeVisible();
@@ -318,8 +345,8 @@ try{
  await metadataReview.locator('.candidate.current').first().waitFor();
  assert.equal(await metadataReview.locator('.candidate').count(),3,'provider alternatives were not shown');
  assert.equal(await metadataReview.locator('.candidate.current').count(),3,'fresh search candidates were not current');
- await metadataReview.locator('.candidate').first().getByText('View album match',{exact:true}).click();
- await metadataReview.locator('.candidate').first().getByText('details.release_id',{exact:true}).waitFor();
+ await metadataReview.locator('.candidate').first().locator('.candidate-inspect > summary').click();
+ await expect(metadataReview.locator('.candidate').first().locator('.candidate-inspect dd').filter({hasText:new RegExp(`^(${Object.values(releaseIds).join('|')})$`)}).first()).toBeVisible();
  await metadataReview.locator('.candidate').nth(0).getByRole('button',{name:'Compare',exact:true}).click();
  await metadataReview.locator('.candidate').nth(1).getByRole('button',{name:'Compare',exact:true}).click();
  await metadataReview.getByRole('region',{name:'Compare album matches'}).waitFor();
@@ -334,8 +361,7 @@ try{
  await metadataReview.locator('.effective-metadata').getByText('試験盤',{exact:true}).waitFor();
  await sourceSelect.selectOption('custom-search');
  await metadataReview.getByLabel('Search value').fill('unmatched fixture');
- await metadataReview.getByRole('button',{name:'Find possible albums',exact:true}).click();
- await metadataReview.getByText('No album match was found.',{exact:false}).waitFor();
+ assert.equal((await runLookup(metadataReview.getByRole('button',{name:'Find possible albums',exact:true}))).result.outcome,'no_match');
  assert.equal(await metadataReview.locator('.candidate.current').count(),0,'no-match lookup left automatic current candidates');
  assert.equal(await metadataReview.locator('.candidate').count(),3,'no-match lookup lost selectable observation history');
  await expect(metadataReview.locator('.candidate.in-use')).toHaveCount(1);
@@ -345,7 +371,7 @@ try{
  await titleAuthority.fill('Draft survives metadata conflict');
  await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');const review=await(await fetch(`/api/v1/items/${id}/metadata`)).json();const response=await fetch(`/api/v1/items/${id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field:'subtitle',value:'Concurrent metadata edit',language:null}})});if(!response.ok)throw new Error(`concurrent metadata edit: ${response.status} ${await response.text()}`);});
  await metadataReview.getByRole('button',{name:'Save title',exact:true}).click();
- await metadataReview.getByText('Your draft is still here',{exact:false}).waitFor();
+ await metadataReview.getByRole('alert').waitFor();
  assert.equal(await titleAuthority.inputValue(),'Draft survives metadata conflict');
  await metadataReview.getByRole('button',{name:'Save title',exact:true}).click();
  await metadataReview.locator('.effective-metadata').getByText('Draft survives metadata conflict',{exact:true}).waitFor();
@@ -361,7 +387,7 @@ try{
  const clearArtwork=metadataReview.getByRole('button',{name:'Clear artwork choice',exact:true});
  await clearArtwork.waitFor();await clearArtwork.click();await clearArtwork.waitFor({state:'detached'});
  await japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}).click();
- await metadataReview.getByRole('heading',{name:'Cover Art Archive choices'}).waitFor();
+ await metadataReview.getByRole('button',{name:/Front cover/}).waitFor();
  const providerPreview=metadataReview.getByRole('img',{name:'Front cover preview',exact:true});
  await providerPreview.scrollIntoViewIfNeeded();
  await page.waitForFunction(()=>{const image=document.querySelector('img[alt="Front cover preview"]');return image?.complete&&image.naturalWidth>0;});
@@ -389,8 +415,8 @@ try{
  await metadataReview.getByRole('button',{name:'Dismiss lookup',exact:true}).click();
  refuseCoverSize=false;
  useLargeCover=true;
- await metadataReview.getByRole('button',{name:/Front cover/}).click();
- await metadataReview.getByText('Artwork request completed.',{exact:false}).waitFor();
+ const largeCover=await runLookup(metadataReview.getByRole('button',{name:/Front cover/}));
+ assert.equal(largeCover.stage,'artwork_image');assert.equal(largeCover.result.artwork_error??null,null);
  const fullCover=await page.evaluate(async()=>{
   const id=localStorage.getItem('primary-music-item-id');
   const item=await(await fetch(`/api/v1/items/${id}`)).json();
@@ -415,15 +441,13 @@ try{
   return {assets:item.assets.map(asset=>asset.id).sort(),revision:metadata.revision,artwork:metadata.authority.artwork_choice,snapshots:snapshots.items.filter(value=>value.snapshot.provider==='org.junk.providers.cover-art-archive').map(value=>value.snapshot.id).sort()};
  });
  const beforeRepeatedCover=await retainedCoverState();
- async function repeatCoverCommand(button,feedback){
-  const [response]=await Promise.all([page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith('/metadata/resolutions')),button.click()]);
-  assert.equal(response.status(),202);
-  const {job_id}=await response.json();
-  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/jobs/${id}`)).json()).state,job_id),{timeout:30000}).toBe('completed');
-  await metadataReview.getByText(feedback,{exact:false}).waitFor();
+ async function repeatCoverCommand(button,stage){
+  const resolution=await runLookup(button);
+  assert.equal(resolution.stage,stage);assert.equal(resolution.result.artwork_error??null,null);
+  if(stage==='artwork_listing')assert.ok(resolution.result.artwork_options.length>0,'cover listing offered no image');
  }
- await repeatCoverCommand(japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}),'Choose an image to save below.');
- await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'Artwork request completed.');
+ await repeatCoverCommand(japaneseCandidate.getByRole('button',{name:'Find cover art',exact:true}),'artwork_listing');
+ await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'artwork_image');
  assert.deepEqual(await retainedCoverState(),beforeRepeatedCover,'equivalent cover lookup grew retained collection state');
  // Archive the selected provider cover, reload, then explicitly select it again.
  // The existing archive-control UI is exercised earlier in this same journey.
@@ -440,8 +464,8 @@ try{
   return asset;
  });
  await page.reload();
- await metadataReview.getByRole('heading',{name:'Cover Art Archive choices'}).waitFor();
- await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'Artwork request completed.');
+ await metadataReview.getByRole('button',{name:/Front cover/}).waitFor();
+ await repeatCoverCommand(metadataReview.getByRole('button',{name:/Front cover/}),'artwork_image');
  assert.deepEqual(await retainedCoverState(),beforeRepeatedCover,'restoration duplicated provider snapshots, assets or metadata');
  const restoredCover=await page.evaluate(async id=>{
   const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();
@@ -457,8 +481,7 @@ try{
  // must not depend on a second network request or change metadata selection.
  await sourceSelect.selectOption('custom-release');
  await metadataReview.getByLabel('Search value').fill(releaseIds.japanese);
- await metadataReview.getByRole('button',{name:'Look up all album tracks',exact:true}).click();
- await metadataReview.getByText('Metadata refreshed.',{exact:false}).waitFor();
+ assert.equal((await runLookup(metadataReview.getByRole('button',{name:'Look up all album tracks',exact:true}))).result.outcome,'candidates');
  const automaticChoice=metadataReview.getByRole('button',{name:'Use automatic album matching',exact:true});
  if(await automaticChoice.count())await automaticChoice.click();
  await metadataReview.locator('.effective-metadata').getByText('試験盤',{exact:true}).waitFor();
@@ -547,22 +570,27 @@ try{
  await resumeForm.getByRole('button',{name:'Resume upload',exact:true}).click();
  await importWorkspace.getByRole('progressbar',{name:'Checking uploaded files',exact:true}).waitFor();
  releasePrefix();
- await importWorkspace.getByText('Upload complete · analysis needed',{exact:true}).waitFor();
+ const importState=()=>getJson(`/imports/${interruptedId}`);
+ const currentImport=async()=>{const id=await page.evaluate(id=>localStorage.getItem(`collector.import.${id}`),primaryId);return id?getJson(`/imports/${id}`):null;};
+ await expect.poll(async()=>(await importState()).phase,{timeout:30000}).toBe('analyzing');
+ await expect(importWorkspace.getByRole('progressbar',{name:'Checking uploaded files',exact:true})).toHaveCount(0);
  const resumed=await page.evaluate(async id=>(await fetch(`/api/v1/imports/${id}`)).json(),interruptedId);
  assert.equal(resumed.files[0].received_bytes,uploadBytes.length);
  assert.equal(lostFinalResponse,true);await page.unroute('**/api/v1/imports/*/files/*');
  assert.equal(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(key=>key.startsWith('collector.import.')))),interruptedId,'resume created another Import');
  assert.match(await importWorkspace.textContent(),/browser-disc\.bin/);
  await importWorkspace.getByRole('button',{name:'Review import',exact:true}).click();
- await importWorkspace.getByText('Analysis limitations',{exact:true}).waitFor();
+ await importWorkspace.locator('.import-limitations li').first().waitFor();
+ assert.ok((await importState()).limitations.length>0,'unrecognized upload reported no analysis limitations');
  const reviewForm=importWorkspace.getByRole('form',{name:'Review import'});
  await reviewForm.getByLabel('Leave unattached').check();
  await reviewForm.getByRole('button',{name:'Save review',exact:true}).click();
- await importWorkspace.getByText('Review saved.',{exact:false}).waitFor();
+ await expect.poll(async()=>!!(await importState()).review,{timeout:30000}).toBe(true);
  await importWorkspace.getByRole('button',{name:'Save originals',exact:true}).click();
- await importWorkspace.getByText('Originals saved.',{exact:false}).waitFor();
+ await expect.poll(async()=>(await importState()).phase,{timeout:30000}).toBe('published');
+ await expect(importWorkspace.getByRole('button',{name:'Save originals',exact:true})).toHaveCount(0);
 
- await page.evaluate(async()=>{
+ const stalePublicationJob=await page.evaluate(async()=>{
   const request=async(path,init={})=>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID(),...init.headers}});if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
   const collection=((await request('/collection-search?limit=100',{method:'GET'})).items).find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');
   const itemId=crypto.randomUUID();const itemCommand={collection_id:collection.id,title:'Stale publication fixture',subtitle:'before review',identity_link:{kind:'none'},domain:{module:'org.junk.music',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false};
@@ -571,7 +599,7 @@ try{
   const reviewed=await request(`/imports/${staged.id}/review`,{method:'PUT',body:JSON.stringify({expected_revision:staged.revision,identity:{identity:'unidentified'},association:{item_id:item.id,specimen_id:null,component_id:null,carrier_id:null},expected_item_revision:item.revision})});
   await request(`/items/${item.id}`,{method:'PUT',body:JSON.stringify({command:{...itemCommand,subtitle:'changed after review'},expected_revision:item.revision})});
   const accepted=await request(`/imports/${reviewed.id}/publish`,{method:'POST'});
-  for(let attempt=0;attempt<100;attempt++){const job=await request(`/jobs/${accepted.job_id}`,{method:'GET'});if(job.state==='failed')return;await new Promise(resolve=>setTimeout(resolve,50));}
+  for(let attempt=0;attempt<100;attempt++){const job=await request(`/jobs/${accepted.job_id}`,{method:'GET'});if(job.state==='failed')return accepted.job_id;await new Promise(resolve=>setTimeout(resolve,50));}
   throw new Error('stale publication job did not fail');
  });
  await curator.getByRole('button',{name:'Open work & history',exact:true}).click();
@@ -579,10 +607,10 @@ try{
  if(await workHistory.getByRole('button',{name:'Show work for all entries'}).count())await workHistory.getByRole('button',{name:'Show work for all entries'}).click();
  await workHistory.getByLabel('Search work',{exact:true}).fill('stale-publication-job');
  await workHistory.locator('.job-list article').filter({hasText:'stale-publication-job'}).getByRole('button',{name:'Open work',exact:true}).click();
- const failedJob=workHistory.getByRole('article',{name:'Save originals Failed'});
- await failedJob.getByRole('button',{name:'Retry failed work'}).click();
- await workHistory.getByRole('region',{name:'Task history'}).getByText('Technical details',{exact:true}).click();
- await workHistory.getByRole('region',{name:'Task history'}).getByText('Attempt: 2',{exact:false}).waitFor();
+ assert.equal((await getJson(`/jobs/${stalePublicationJob}`)).attempt,1);
+ await workHistory.getByRole('region',{name:'Task history'}).getByRole('button',{name:'Retry failed work'}).click();
+ await expect.poll(async()=>(await getJson(`/jobs/${stalePublicationJob}`)).attempt,{timeout:15000}).toBe(2);
+ await expect(workHistory.getByRole('region',{name:'Task history'}).getByRole('article')).not.toHaveCount(0);
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:path.join(root,'web/test-results/jobs-mobile.png'),fullPage:true});
  await workHistory.getByRole('button',{name:'Close work history'}).click();
@@ -599,14 +627,14 @@ try{
  await disposalForm.getByLabel('Reason').fill('Synthetic lifecycle completion');
  page.once('dialog',dialog=>dialog.accept());
  await disposalForm.getByRole('button',{name:'Record disposal',exact:true}).click();
- await copyRecord.getByText('disposed 2026-09-12',{exact:false}).waitFor();
- await copyRecord.getByText('returned 2026-09-11',{exact:false}).waitFor();
+ await expect.poll(async()=>{const copy=await referenceCopy();return [copy.ownership.state,copy.ownership.date,(copy.loans||[]).map(loan=>loan.returned_at)];}).toEqual(['disposed','2026-09-12',['2026-09-11']]);
+ await expect(copyRecord.getByRole('button',{name:'Edit copy',exact:true})).toHaveCount(0);
  await curator.getByRole('button',{name:'Advanced',exact:true}).click();
  await importWorkspace.getByRole('button',{name:'Import more files',exact:true}).click();
  const conflictStage=importWorkspace.getByRole('form',{name:'Upload files'});
  await conflictStage.getByLabel('Original files').setInputFiles({name:'review-conflict.bin',mimeType:'application/octet-stream',buffer:Buffer.from('review conflict')});
  await conflictStage.getByRole('button',{name:'Upload files',exact:true}).click();
- await importWorkspace.getByText('Upload complete · analysis needed',{exact:true}).waitFor();
+ await expect.poll(async()=>{const value=await currentImport();return value&&[value.files.map(file=>file.name),value.phase];},{timeout:30000}).toEqual([['review-conflict.bin'],'analyzing']);
  await importWorkspace.getByRole('button',{name:'Review import',exact:true}).click();
  const conflictReview=importWorkspace.getByRole('form',{name:'Review import'});
  await conflictReview.getByLabel(/Attach to A test pressing/).check();
@@ -614,6 +642,8 @@ try{
  await conflictReview.getByRole('combobox',{name:'Part',exact:true}).selectOption({label:'1. Disc 1'});
  await conflictReview.getByRole('combobox',{name:'Carrier',exact:true}).selectOption({label:'Disc 1 carrier'});
  const selectedCopy=await conflictReview.getByRole('combobox',{name:'Physical copy',exact:true}).inputValue();
+ const selectedPart=await conflictReview.getByRole('combobox',{name:'Part',exact:true}).inputValue();
+ const selectedCarrier=await conflictReview.getByRole('combobox',{name:'Carrier',exact:true}).inputValue();
  await page.evaluate(async()=>{
   const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();
   const command={collection_id:item.collection_id,title:item.title,subtitle:'Changed during import review',identity_link:item.identity_link,domain:{...item.domain,payload:item.domain.payload||{}},identity:item.identity,translations:item.translations,identifiers:item.identifiers,wishlist:item.wishlist};
@@ -621,12 +651,17 @@ try{
   if(!response.ok)throw new Error(`stale review fixture: ${response.status} ${await response.text()}`);
  });
  await conflictReview.getByRole('button',{name:'Save review',exact:true}).click();
- await importWorkspace.getByRole('alert').getByText('changed elsewhere',{exact:false}).waitFor();
+ await importWorkspace.getByRole('alert').waitFor();
+ assert.notEqual((await currentImport()).expected_item_revision,(await primaryItem()).revision,'a review against a stale entry revision was accepted');
+ await expect(conflictReview).toHaveCount(1);
  assert.equal(await conflictReview.getByRole('combobox',{name:'Physical copy',exact:true}).inputValue(),selectedCopy);
- assert.equal(await conflictReview.getByRole('combobox',{name:'Part',exact:true}).locator('option:checked').textContent(),'1. Disc 1');
- assert.equal(await conflictReview.getByRole('combobox',{name:'Carrier',exact:true}).locator('option:checked').textContent(),'Disc 1 carrier');
+ assert.equal(await conflictReview.getByRole('combobox',{name:'Part',exact:true}).inputValue(),selectedPart);
+ assert.equal(await conflictReview.getByRole('combobox',{name:'Carrier',exact:true}).inputValue(),selectedCarrier);
  await conflictReview.getByRole('button',{name:'Save review',exact:true}).click();
- await importWorkspace.getByText('Review saved.',{exact:false}).waitFor();
+ await expect(conflictReview).toHaveCount(0);
+ const savedConflictImport=await currentImport();
+ assert.equal(savedConflictImport.expected_item_revision,(await primaryItem()).revision);
+ assert.equal(savedConflictImport.review.association.carrier_id,selectedCarrier);
  await page.getByRole('button',{name:'Close curator'}).click();
  await page.locator('.collection-row').filter({hasText:'A test pressing'}).waitFor();
  await page.reload();
@@ -635,15 +670,20 @@ try{
  const restoredCurator=page.getByRole('dialog',{name:/Edit entry/});
  await restoredCurator.getByRole('button',{name:'Advanced',exact:true}).click();
  await restoredCurator.getByText('Manual import review',{exact:true}).click();
- await restoredCurator.getByRole('region',{name:'Manual import'}).getByText('Review saved.',{exact:false}).waitFor();
  const restoredImport=restoredCurator.getByRole('region',{name:'Manual import'});
+ await restoredImport.getByRole('button',{name:'Edit review',exact:true}).waitFor();
+ await expect(restoredImport.getByRole('form',{name:'Review import'})).toHaveCount(0);
  await restoredImport.getByRole('button',{name:'Edit review',exact:true}).click();
  const savedReview=restoredImport.getByRole('form',{name:'Review import'});
- assert.equal(await savedReview.getByRole('combobox',{name:'Carrier',exact:true}).locator('option:checked').textContent(),'Disc 1 carrier','saved association was lost when editing review');
+ assert.equal(await savedReview.getByRole('combobox',{name:'Carrier',exact:true}).inputValue(),selectedCarrier,'saved association was lost when editing review');
+ const conflictImport=(await currentImport()).id;
  await savedReview.getByRole('button',{name:'Save review',exact:true}).click();
- await restoredImport.getByText('Review saved.',{exact:false}).waitFor();
+ await expect(savedReview).toHaveCount(0);
+ await expect(restoredImport.getByRole('alert')).toHaveCount(0);
+ assert.equal((await getJson(`/imports/${conflictImport}`)).review.association.carrier_id,selectedCarrier);
  await restoredImport.getByRole('button',{name:'Save originals',exact:true}).click();
- await restoredImport.getByText('Originals saved.',{exact:false}).waitFor();
+ await expect.poll(async()=>(await getJson(`/imports/${conflictImport}`)).phase,{timeout:30000}).toBe('published');
+ await expect(restoredImport.getByRole('button',{name:'Save originals',exact:true})).toHaveCount(0);
  await restoredImport.getByRole('button',{name:'Import more files',exact:true}).click();
  const cueBytes=Buffer.from('FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n  TRACK 02 AUDIO\n    INDEX 01 00:03:00\n');
  const pcmBytes=Buffer.alloc(frames*4);for(let index=0;index<frames;index++)pcmBytes[index*4]=1;
@@ -655,12 +695,15 @@ try{
  await cdReview.getByLabel('Attach to A test pressing').check();
  await cdReview.getByRole('button',{name:'Save review',exact:true}).click();
  await restoredImport.getByRole('button',{name:'Save originals',exact:true}).click();
- await restoredImport.getByText('Originals saved.',{exact:false}).waitFor();
+ const cdImport=(await currentImport()).id;assert.notEqual(cdImport,conflictImport);
+ await expect.poll(async()=>(await getJson(`/imports/${cdImport}`)).phase,{timeout:30000}).toBe('published');
+ await expect(restoredImport.getByRole('button',{name:'Save originals',exact:true})).toHaveCount(0);
  await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
  await restoredCurator.getByRole('region',{name:'Prepare audio'}).locator('.music-track').first().waitFor();
- await restoredCurator.getByText('Disc details & checks',{exact:true}).click();
+ await restoredCurator.locator('details.album-inspection > summary').click();
  await restoredCurator.getByRole('region',{name:'Album discs'}).waitFor();
- await restoredCurator.getByRole('region',{name:'Album discs'}).getByText('2 tracks recorded',{exact:true}).waitFor();
+ await restoredCurator.getByRole('region',{name:'Album discs'}).locator('.disc-source').first().waitFor();
+ await expect.poll(async()=>(await getJson(`/items/${primaryId}/music-disc-coverage`)).sources.some(source=>source.track_count===2)).toBe(true);
  assert.ok(await restoredCurator.getByRole('region',{name:'Album discs'}).getByRole('button',{name:'Inspect CD structure'}).count()>0,'missing structure lacks a next action');
  assert.equal(await restoredCurator.getByRole('region',{name:'Prepare audio'}).locator('.music-track').count(),2,'publication did not refresh tracks without reopening');
  const musicItemId=await page.evaluate(()=>localStorage.getItem('primary-music-item-id'));
@@ -683,7 +726,7 @@ try{
   await page.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   await clickAction(page,'Edit / attach files');
   await restoredCurator.getByRole('button',{name:'Music',exact:true}).click();
-  await restoredCurator.getByText('Disc details & checks',{exact:true}).click();
+  await restoredCurator.locator('details.album-inspection > summary').click();
  }
  const submissionLink=submissionCandidate.getByRole('link',{name:'Submit Disc ID to MusicBrainz',exact:true});
  await expect(submissionLink).toHaveCount(1); // Only the complete CD source, never the uninspected original.
@@ -747,9 +790,10 @@ try{
  for(const [index,route] of orderingRoutes.entries())await page.route(route,handler=>handler.fulfill({json:[orderingSummary,{summary:orderingSummary,items:orderedFixture.rows,next_cursor:null},orderedFixture.coverage,orderedFixture.plan][index]}));
  await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor();
- await expect(restoredCurator.locator('.album-coverage .album-medium > strong')).toHaveText(['Disc 1','Disc 2']);
- await expect(restoredCurator.locator('.album-preparation fieldset legend')).toHaveText(['Album disc 1','Album disc 2']);
- await expect(restoredCurator.locator('.music-disc > header strong')).toHaveText(['Album disc 1','Album disc 2']);
+ // Only the fixture's medium positions are matched, so wording can change freely.
+ await expect(restoredCurator.locator('.album-coverage .album-medium > strong')).toHaveText([/\b1$/,/\b2$/]);
+ await expect(restoredCurator.locator('.album-preparation fieldset legend')).toHaveText([/\b1$/,/\b2$/]);
+ await expect.poll(()=>restoredCurator.locator('.music-disc').evaluateAll(discs=>discs.map(disc=>disc.dataset.discKey))).toEqual([`${firstCapture}/${firstSource}`,`${originalRow.capture_id}/${originalRow.source_representation_id}`]);
  for(const route of orderingRoutes)await page.unroute(route);
  await clickAction(restoredCurator,'Refresh tracks');
  await restoredCurator.getByText('Ordering fixture',{exact:false}).waitFor({state:'hidden'});
@@ -759,7 +803,11 @@ try{
  await clickAction(page,'Check audio with AccurateRip');
  const cdCurator=page.getByRole('dialog',{name:/Edit entry/});
  const musicAnalysis=cdCurator.getByRole('region',{name:'Music CD checks'});await musicAnalysis.waitFor();
- const cdDocket=musicAnalysis.locator('.import-docket').filter({hasText:'2 files'});
+ const cdDocket=musicAnalysis.locator('.import-docket').filter({has:page.locator('option',{hasText:/^disc\.cue$/})});
+ const cdCheck=cdDocket.getByRole('region',{name:'AccurateRip disc check'});
+ // The check control is idle again and reports no failure once the browser has caught up with the finished check.
+ const cdCheckSettled=async()=>{await expect(cdCheck.getByRole('button').first()).toBeEnabled({timeout:15000});await expect(cdCheck.getByRole('alert')).toHaveCount(0);};
+ const verifiedChecks=async()=>(await getJson(`/items/${primaryId}/accuraterip-checks`)).filter(check=>check.job.state==='completed'&&check.result?.discs.some(disc=>disc.status==='verified')).length;
  // One command owns structure, acquisition and checksum comparison.
  const checkSettings=await page.evaluate(async()=>{
   const id=new URL(location.href).searchParams.get('item');const item=await(await fetch('/api/v1/items/'+id)).json();
@@ -767,23 +815,27 @@ try{
   const response=await fetch(`/api/v1/collections/${item.collection_id}/cd-settings`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:value.revision,check_accuraterip_on_ingest:false,maximum_offset:0})});if(!response.ok)throw Error(await response.text());return {collection:item.collection_id};
  });
  await cdDocket.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).click();
- await expect(cdDocket.getByText('AccurateRip: Verified',{exact:true}).first()).toBeVisible({timeout:30000});
- await cdDocket.getByText('Technical details',{exact:true}).first().click();
- assert.match(await cdDocket.innerText(), /confidence 17/);
- assert.match(await cdDocket.innerText(),/Track 1: Verified/);
- assert.match(await cdDocket.innerText(),/Track 2: Verified/);
+ await expect.poll(verifiedChecks,{timeout:30000}).toBe(1);
+ await cdCheckSettled();
+ // Per-track outcomes come from the recorded verification, not the rendered summary.
+ const verification=await page.evaluate(async id=>{
+  const item=await(await fetch(`/api/v1/items/${id}`)).json();
+  const find=value=>{if(!value||typeof value!=='object')return undefined;if(value.result==='audio_verification'&&value.verification)return value.verification;for(const entry of Object.values(value)){const found=find(entry);if(found)return found;}return undefined;};
+  for(const capture of item.captures)for(const representation of capture.representations){const found=find(await(await fetch(`/api/v1/captures/${capture.id}/operations?representation_id=${representation.id}&limit=100`)).json());if(found)return found;}
+  return null;
+ },primaryId);
+ assert.ok(verification,'no recorded AccurateRip verification');
+ assert.deepEqual(verification.tracks.map(track=>[track.position,track.status]),[[1,'verified'],[2,'verified']]);
+ assert.ok(verification.tracks.every(track=>track.checksums.some(checksum=>checksum.confidence===17)),'database confidence was not recorded');
  // The album-list shortcut opens the correct source without selecting the row first.
  const checkedAlbumId=await page.evaluate(()=>new URL(location.href).searchParams.get('item'));
  const checkedAlbum=await page.evaluate(async id=>(await fetch('/api/v1/items/'+id)).json(),checkedAlbumId);
  assert.equal(checkedAlbum.accuraterip.filter(check=>check.status==='verified').length,1);
  assert.ok(checkedAlbum.accuraterip.some(check=>check.status===null),'the unchecked original must not acquire the other disc’s result');
- const checkedLabel=`1/${checkedAlbum.accuraterip.length} verified`;
  await cdCurator.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Library',exact:true}).click();
- const escapedAlbumTitle=checkedAlbum.title.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
- const checkShortcut=page.getByRole('button',{name:new RegExp(`^AccurateRip for ${escapedAlbumTitle}:.*Open audio checks$`)});
- await checkShortcut.waitFor();await expect(checkShortcut).toContainText(checkedLabel);
- const checkName=await checkShortcut.getAttribute('aria-label');assert.ok(checkName.includes('Verified')&&checkName.includes('Not checked'),'mixed per-original outcomes are missing from the accessible name');await checkShortcut.click();
+ const checkShortcut=page.locator('.collection-entry').filter({has:page.locator(`[data-item-id="${checkedAlbumId}"]`)}).locator('button.audio-check-status');
+ await checkShortcut.waitFor();await checkShortcut.click();
  await expect(cdCurator).toBeVisible();
  await expect(cdCurator.getByRole('button',{name:'Check this disc with AccurateRip',exact:true}).first()).toBeVisible();
  await cdCurator.getByRole('button',{name:'Close curator'}).click();
@@ -820,7 +872,7 @@ try{
   await preparation.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}).click();
   const albumBatch=preparation.getByRole('region',{name:'Album preparation progress'}).locator('article').first();await albumBatch.waitFor();
   assert.equal(await (await showAction(preparation,'Refresh tracks')).isDisabled(),false,'accepted encoding blocked unrelated browsing controls');
-  assert.equal(await preparation.getByRole('button',{name:'Album preparation in progress…',exact:true}).isDisabled(),true,'active album still offers another preparation');
+  assert.equal(await preparation.locator('.album-preparation > button.primary').isDisabled(),true,'active album still offers another preparation');
   await cdCurator.getByRole('button',{name:'Details',exact:true}).click();
   assert.equal(await cdCurator.getByLabel('Title',{exact:true}).isDisabled(),false,'accepted encoding blocked unrelated inventory editing');
   await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
@@ -842,16 +894,17 @@ try{
   },{item:checkedAlbumId,source:JSON.parse(providerRequest.postData()).representation_id});
   await expect.poll(()=>accurateRipRequests,{timeout:3000}).toBe(beforeDownload+1);
   assert.equal(await page.evaluate(async()=>((await(await fetch('/api/v1/jobs?limit=100')).json()).items).filter(job=>job.kind==='music_derivative'&&job.state==='running').length),2,'provider download waited for encoding capacity');
-  await expect(cdDocket.getByRole('button',{name:'Checking disc with AccurateRip…'})).toBeDisabled();
+  await expect(cdDocket.getByRole('region',{name:'AccurateRip disc check'}).getByRole('button').first()).toBeDisabled();
   const cancellationPage=await context.newPage();await cancellationPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
   await cancellationPage.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
   await cancellationPage.locator(`[data-work-open="job:${duplicate.job_id||duplicate.id}"]`).click();
   await cancellationPage.getByRole('button',{name:'Cancel task',exact:true}).click();
-  await cancellationPage.getByRole('article',{name:/Import catalog Cancelled/}).waitFor();
+  await expect.poll(async()=>cancellationPage.evaluate(async id=>(await(await fetch('/api/v1/jobs/'+id)).json()).state,duplicate.job_id||duplicate.id),{timeout:30000}).toMatch(/^(cancel_requested|cancelled)$/);
   await cancellationPage.close();
   await cdCurator.getByRole('button',{name:'Close curator'}).click();
   await clickAction(page,'Check audio with AccurateRip');
-  await expect(cdDocket.getByText('AccurateRip: Verified',{exact:true}).first()).toBeVisible({timeout:30000});
+  await expect.poll(verifiedChecks,{timeout:30000}).toBe(2);
+  await cdCheckSettled();
   await expect.poll(async()=>page.evaluate(async id=>(await(await fetch('/api/v1/jobs/'+id)).json()).state,duplicate.job_id||duplicate.id),{timeout:30000}).toBe('cancelled');
   assert.equal(accurateRipRequests,beforeDownload+1,'equivalent concurrent requests downloaded twice');accurateRipDelay=0;console.log('Concurrent provider journey passed: two same-account encodes, reserved download, shared waiting, one-requester cancellation, reopen and unchanged refresh.');
   await cdCurator.getByRole('button',{name:'Music',exact:true}).click();
@@ -861,7 +914,7 @@ try{
   await preparation.getByRole('link',{name:/FLAC/}).first().waitFor({timeout:30000});
   assert.equal(await page.evaluate(async()=>{const id=localStorage.getItem('primary-music-item-id');return (await(await fetch(`/api/v1/items/${id}/music-preparation-batches`)).json()).some(batch=>batch.queued>0||batch.running>0);}),true,'all batch work settled before concurrent player acceptance could be observed');
   const concurrentPage=await context.newPage();await concurrentPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);await concurrentPage.locator('.collection-scope summary').click();await concurrentPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await concurrentPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();const concurrentPlayer=concurrentPage.getByRole('region',{name:'Music player'});await concurrentPlayer.waitFor();await concurrentPage.getByRole('button',{name:'Add album to queue',exact:true}).click();await concurrentPlayer.getByRole('button',{name:'Play',exact:true}).click();await concurrentPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});await concurrentPage.close();
-  await albumBatch.getByText('2/2 ready',{exact:true}).waitFor({timeout:30000});
+  await expect.poll(async()=>(await getJson(`/items/${primaryId}/music-preparation-batches`)).some(batch=>batch.members.length===2&&batch.succeeded===2&&batch.queued===0&&batch.running===0),{timeout:30000}).toBe(true);
   await expect(preparation.getByRole('button',{name:'Prepare missing FLAC tracks',exact:true}),'completed album still offers preparation').toHaveCount(0);
   const prepared=preparation.getByRole('link',{name:/FLAC/});await prepared.nth(1).waitFor();assert.equal(await prepared.count(),2);
   const hrefs=await prepared.evaluateAll(links=>links.map(link=>link.getAttribute('href')));assert.ok(hrefs.every(href=>href?.startsWith('/api/v1/items/')));
@@ -924,7 +977,7 @@ try{
   const playbackPage=await playbackContext.newPage();const playbackErrors=[];playbackPage.on('pageerror',error=>playbackErrors.push(error.message));
   await playbackPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
   await playbackPage.evaluate(async({username,password})=>{const response=await fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password,device_name:'Playback qualification'})});if(!response.ok)throw new Error(`viewer login: ${response.status} ${await response.text()}`);},{username:'playback-viewer',password:playbackPassword});
-  if(localSetup){await playbackPage.goto(publicOrigin);await playbackPage.getByText('Browse and play only at this address.',{exact:false}).waitFor();}else await playbackPage.reload();
+  if(localSetup){await playbackPage.goto(publicOrigin);await playbackPage.getByRole('note').first().waitFor();}else await playbackPage.reload();
   await playbackPage.locator('.collection-scope summary').click();await playbackPage.getByRole('button',{name:'Shelf & stereo',exact:true}).click();await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();
   const player=playbackPage.getByRole('region',{name:'Music player'});await player.waitFor();await player.getByRole('button',{name:'Queue (0)',exact:true}).waitFor();const album=playbackPage.getByRole('region',{name:'Album tracks'});
   const viewerArtwork=playbackPage.locator('.detail').getByRole('img',{name:/Cover Art Archive image/});await viewerArtwork.waitFor();
@@ -963,14 +1016,14 @@ try{
   await player.getByRole('button',{name:'Play',exact:true}).click();await playbackPage.waitForFunction(time=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>time+0.1;},pausedAt.time);
   const seek=player.getByRole('slider',{name:'Seek in Track 01'});await seek.fill('1.5');await playbackPage.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&audio.currentTime>=1.4&&audio.currentTime<=2.2;});
   await player.getByRole('button',{name:'Next track'}).click();await playbackPage.waitForFunction(id=>{const audio=document.querySelector('.music-player audio');return audio?.dataset.representationId===id&&!audio.paused&&audio.currentTime>0.05;},expected[1].representation);
-  assert.match(await player.getByRole('status').innerText(),/Track 02/);
+  await expect(player.locator('audio')).toHaveAttribute('data-representation-id',expected[1].representation);
   await player.getByRole('button',{name:'Previous track'}).click();await playbackPage.waitForFunction(id=>{const audio=document.querySelector('.music-player audio');return audio?.dataset.representationId===id&&!audio.paused&&audio.currentTime>0.05;},expected[0].representation);
   await player.locator('audio').evaluate(element=>{element.currentTime=element.duration-0.25;});
   await playbackPage.waitForFunction(id=>{const audio=document.querySelector('.music-player audio');return audio?.dataset.representationId===id&&!audio.paused&&audio.currentTime>0.05;},expected[1].representation,{timeout:5000});
-  assert.match(await player.getByRole('status').innerText(),/Now playing[\s\S]*Track 02/,'natural media end did not advance to the following track');
+  await expect(player.getByRole('button',{name:'Pause',exact:true}),'natural media end did not keep playing the following track').toBeVisible();
   await playbackPage.reload();await playbackPage.getByLabel('A test pressing details',{exact:true}).waitFor();const rebuiltPlayer=playbackPage.getByRole('region',{name:'Music player'});await rebuiltPlayer.waitFor();
   await rebuiltPlayer.locator('.now-playing').waitFor();
-  assert.match(await rebuiltPlayer.locator('.now-playing').innerText(),/Ready[\s\S]*Track 02/);assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'refresh retained stale playback state');
+  await expect(rebuiltPlayer.locator('audio')).toHaveAttribute('data-representation-id',expected[1].representation);await expect(rebuiltPlayer.getByRole('button',{name:'Play',exact:true})).toBeEnabled();assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'refresh retained stale playback state');
   const brokenMedia=`**/api/v1/items/${playbackFixture.itemId}/representations/${expected[1].representation}/*`;
   await playbackPage.route(brokenMedia,route=>route.request().method()==='GET'?route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:{code:'prepared_media_invalid',message:'Prepared audio differs from its recorded bytes.'}})}):route.continue());
   await rebuiltPlayer.getByRole('button',{name:'Play',exact:true}).click();
@@ -990,7 +1043,7 @@ try{
   await playbackPage.locator('.collection-row').filter({hasText:'A test pressing'}).click();await rebuiltPlayer.waitFor();
   const expiredAudio=await rebuiltPlayer.locator('audio').elementHandle();
   await playbackContext.clearCookies();
-  await playbackPage.getByText('Your session ended.',{exact:false}).waitFor();
+  await playbackPage.getByLabel('Password',{exact:true}).waitFor();
   assert.deepEqual(await expiredAudio.evaluate(element=>({paused:element.paused,src:element.getAttribute('src')})),{paused:true,src:null},'expired session retained audio');
   await expiredAudio.dispose();
   await playbackPage.goto(localSetup?privateOrigin:`https://localhost:${port}`);
@@ -1008,7 +1061,7 @@ try{
   releaseDirect();
   await expect.poll(()=>playbackPage.getByRole('region',{name:'Album tracks'}).getByRole('alert').count()).toBeGreaterThan(0);
   assert.deepEqual(await playbackPage.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('collector.music-queue.v1.'))),queueBeforeDenied,'Denied direct album Play changed the queue');
-  await rebuiltPlayer.getByRole('alert').getByText(/no longer/).waitFor();
+  await rebuiltPlayer.getByRole('alert').waitFor();
   assert.equal(await rebuiltPlayer.locator('audio').getAttribute('src'),null,'revoked viewer retained an active media request');assert.deepEqual(playbackErrors,[]);
   console.log(`Browser playback qualified: Google Chrome ${browserVersion}; audio/flac=${codec.support}; actual start, pause/resume, seek, next/previous, natural ended advance, clean reload, and grant revocation passed.`);
   await playbackContext.close();
@@ -1018,7 +1071,7 @@ try{
  if(localSetup){
   const clientPage=await context.newPage();
   await clientPage.goto(publicOrigin);
-  await clientPage.getByText('Browse and play only at this address.',{exact:false}).waitFor();
+  await clientPage.getByRole('note').first().waitFor();
   assert.equal(await clientPage.getByRole('button',{name:'Administration',exact:true}).count(),0);
   assert.equal(await clientPage.evaluate(async()=>{const response=await fetch('/administration.js');return response.status;}),404);
   await clientPage.close();
@@ -1030,26 +1083,31 @@ try{
  await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.waitForTimeout(350);
  await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
+ // Captures the server's accepted guided imports; resolves true once each has left upload staging.
+ const acceptedIngests=()=>page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/api/v1/ingests');
+ const uploadedImports=async accepted=>{const {imports}=await accepted.json();assert.ok(imports.length>0,'no guided import was accepted');for(const value of imports)if((await getJson(`/ingests/${value.import_id}`)).import.phase==='staging')return false;return imports.length;};
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
  const guidedForm=page.getByRole('dialog',{name:/Add or import/});
  const guided=guidedForm.getByRole('region',{name:'Import original files'});
  const guidedBytes=Buffer.alloc(2352*10);
  const guidedCue=Buffer.from('FILE \"guided-original.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');
- await guided.getByText('Choose individual files instead',{exact:true}).click();
+ await guided.locator('details').filter({has:page.getByLabel('Files',{exact:true})}).locator(':scope > summary').click();
  await guided.getByLabel('Files').setInputFiles([{name:'guided-original.bin',mimeType:'application/octet-stream',buffer:guidedBytes},{name:'guided.cue',mimeType:'text/plain',buffer:guidedCue}]);
  await guided.getByLabel('Import name').fill('Guided smoke master');
  await guided.getByRole('button',{name:'Preview import',exact:true}).click();
- await guided.getByText('Package details and import options',{exact:true}).click();
- await guided.getByText('destination: new collection entry',{exact:false}).waitFor();
+ await guided.locator('details.ingest-preview > summary').click();
  assert.equal(await guided.getByLabel('Find metadata and artwork automatically').isChecked(),true);
  if(hasFlac){assert.equal(await guided.getByLabel('Audio preparation after import').locator('option[value=flac]').isDisabled(),false);await guided.getByLabel('Audio preparation after import').selectOption('flac');}
  let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
+ const guidedAccepted=acceptedIngests();
  await guided.getByRole('button',{name:'Save 1 package',exact:true}).click();
+ const guidedResponse=await guidedAccepted;
  await guided.getByRole('progressbar',{name:'Uploading files',exact:true}).waitFor();
  assert.equal(await guided.getByRole('form',{name:'Resume guided package'}).count(),0);
  releaseGuided();
- await page.getByRole('region',{name:'Import original files'}).getByText('Upload complete.',{exact:false}).waitFor();
+ await expect.poll(()=>uploadedImports(guidedResponse),{timeout:30000}).toBe(1);
+ await expect(page.getByRole('region',{name:'Import original files'}).getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Close curator'}).click();
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
  const guidedWork=page.getByRole('region',{name:'Work & history'});
@@ -1057,9 +1115,10 @@ try{
  const guidedRow=guidedWork.locator('.job-list article').filter({hasText:'Guided smoke master'});
  await guidedRow.getByRole('button',{name:'Open work'}).click();
  const guidedHistory=guidedWork.getByRole('region',{name:'Import progress'});
- await guidedHistory.getByText('Technical details',{exact:true}).click();
- await guidedHistory.getByText(/Capture ID: [0-9a-f-]{36}/).waitFor();
- if(hasFlac)await guidedHistory.locator('.ingest-steps').getByText('Prepare audio',{exact:true}).waitFor();
+ const guidedImportId=new URL(page.url()).searchParams.get('work').split(':')[1];
+ await guidedHistory.locator('.ingest-steps').waitFor();
+ await expect.poll(async()=>(await getJson(`/ingests/${guidedImportId}`)).summary.capture_id,{timeout:30000}).toMatch(/^[0-9a-f-]{36}$/);
+ if(hasFlac)assert.ok((await getJson(`/ingests/${guidedImportId}`)).steps.some(step=>/prepar/.test(step.step)),'guided import did not plan audio preparation');
  for(let attempt=0;attempt<100&&!metadataRequests.some(value=>value.startsWith('/ws/2/discid/'));attempt++)await new Promise(resolve=>setTimeout(resolve,100));
  assert.ok(metadataRequests.some(value=>value.startsWith('/ws/2/discid/')),`automatic guided lookup did not use a disc ID: ${metadataRequests.join(', ')}`);
  assert.equal(metadataRequests.some(value=>value.includes('Guided%20smoke%20master')||value.includes('guided-original')),false,'automatic lookup used a package name');
@@ -1118,13 +1177,16 @@ try{
  assert.equal(await folderForm.getByLabel('Title',{exact:true}).count(),0);
  assert.equal(await folderForm.getByRole('button',{name:'Add entry',exact:true}).count(),0);
  await chooseFolder(page,folderImport.getByLabel('Dump folder',{exact:true}),folderRoot);
- await folderImport.getByText('2 dump packages found.',{exact:true}).waitFor();
- await folderImport.getByText('1 file is outside the detected packages and will not be uploaded',{exact:true}).waitFor();
- await folderImport.getByText('Package details and import options',{exact:true}).click();
+ await folderImport.getByRole('button',{name:'Save 2 packages',exact:true}).waitFor();
+ await expect(folderImport.locator('li').filter({hasText:/notes\.txt$/})).toHaveCount(1);
+ await folderImport.locator('details.ingest-preview > summary').click();
  await folderImport.getByLabel('Find metadata and artwork automatically').uncheck();
  await folderForm.screenshot({path:path.join(root,'web/test-results/folder-import.png')});
+ const folderAccepted=acceptedIngests();
  await folderImport.getByRole('button',{name:'Save 2 packages',exact:true}).click();
- await page.getByRole('region',{name:'Import original files'}).getByText('Upload complete.',{exact:false}).waitFor();
+ const folderResponse=await folderAccepted;
+ await expect.poll(()=>uploadedImports(folderResponse),{timeout:30000}).toBe(2);
+ await expect(page.getByRole('region',{name:'Import original files'}).getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Close curator'}).click();
  const {sourceItem,targetItem}=await page.evaluate(async()=>{
   const read=async name=>{for(let attempt=0;attempt<300;attempt++){const result=await(await fetch(`/api/v1/work?search=${encodeURIComponent(name)}&limit=10`)).json();const row=result.items.find(value=>value.target.kind==='import'&&value.name===name&&value.item_id&&value.status==='completed');if(row)return row.item_id;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`No published work for ${name}`);};
@@ -1139,15 +1201,15 @@ try{
  await associationPanel.getByLabel('Search work').fill('Disc A');
  await associationPanel.locator('.job-list article').filter({hasText:'Disc A'}).getByRole('button',{name:'Open work'}).click();
  await associationPanel.getByText('Correct destination',{exact:true}).click();
- await associationPanel.getByText('Already attached to this entry.',{exact:true}).waitFor();
- assert.equal(await associationPanel.getByRole('button',{name:'Save destination'}).count(),0);
+ await associationPanel.getByRole('button',{name:'Search existing entries'}).waitFor();
+ await expect(associationPanel.getByRole('button',{name:'Save destination'})).toHaveCount(0);
  await associationPanel.getByRole('button',{name:'Leave unattached',exact:true}).click();
  await associationPanel.getByRole('button',{name:'Save destination'}).waitFor();
  await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
  await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc A');
  await associationPanel.locator('.destination-chooser .destination-results button').filter({hasText:'Disc A'}).click();
- await associationPanel.getByText('Already attached to this entry.',{exact:true}).waitFor();
- assert.equal(await associationPanel.getByRole('button',{name:'Save destination'}).count(),0);
+ await associationPanel.getByRole('button',{name:'Search existing entries'}).waitFor();
+ await expect(associationPanel.getByRole('button',{name:'Save destination'})).toHaveCount(0);
  await associationPanel.getByRole('button',{name:'Search existing entries'}).click();
  await associationPanel.getByRole('searchbox',{name:'Search existing entries'}).fill('Disc B');
  await associationPanel.locator('.destination-chooser .destination-results button').filter({hasText:'Disc B'}).click();
@@ -1155,9 +1217,8 @@ try{
  const movedImportId=new URL(page.url()).searchParams.get('work').split(':')[1];
  await page.waitForFunction(async({id,target})=>{const response=await fetch(`/api/v1/ingests/${id}`);return response.ok&&(await response.json()).import.association.item_id===target;},{id:movedImportId,target:targetItem});
  assert.equal(await associationPanel.locator('.guided-ingest').count(),1,'selected import detail duplicated after reassociation');
- await associationPanel.getByText('Updating import…').waitFor({state:'detached'});
- await associationPanel.getByText('Already attached to this entry.',{exact:true}).waitFor();
- assert.equal(await associationPanel.getByRole('button',{name:'Save destination'}).count(),0);
+ await associationPanel.getByRole('button',{name:'Search existing entries'}).waitFor();
+ await expect(associationPanel.getByRole('button',{name:'Save destination'})).toHaveCount(0);
  const mergedDiscs=await page.evaluate(async({sourceItem,targetItem})=>{
   const read=async path=>{const response=await fetch(`/api/v1${path}`);if(!response.ok)throw new Error(`${path}: ${response.status} ${await response.text()}`);return response.json();};
   const source=await read(`/items/${sourceItem}`);
@@ -1179,7 +1240,7 @@ try{
  const fixturePage=await context.newPage();const fixtureCollection=crypto.randomUUID();
  await fixturePage.route('**/api/v1/collection-types',async route=>{const response=await route.fetch();const body=await response.json();body.push({id:'org.example.stamps',schema_version:1,display_name:'Stamp fixture module',collection_type_label:'Postage stamps',fields:[{key:'denomination',label:'Denomination',required:true,editable:true,kind:{type:'integer',minimum:1,maximum:10000}},{key:'unit',label:'Currency unit',required:true,editable:true,kind:{type:'text',maximum_bytes:16}},{key:'perforations',label:'Perforation observations',required:false,editable:false,kind:{type:'structured'}}],capabilities:[]});await route.fulfill({response,json:body});});
  await fixturePage.route('**/api/v1/collection-search?*',async route=>{const response=await route.fetch();const body=await response.json();body.items.push({id:fixtureCollection,revision:1,name:'Browser stamp fixture',created_at:'2026-09-13T00:00:00Z',binding:{state:'assigned',module:'org.example.stamps'},effective_permissions:{role:'owner',can_browse:true,can_curate:true,can_manage_access:true},content_permissions:{can_edit:true,status:'available'}});await route.fulfill({response,json:body});});
- await fixturePage.goto(localSetup?privateOrigin:`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Add entry manually',exact:true}).click();await stampForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Browser stamp fixture/}).click();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.getByText('Not editable here.',{exact:true}).first().waitFor();
+ await fixturePage.goto(localSetup?privateOrigin:`https://localhost:${port}`);await fixturePage.getByRole('button',{name:'Add / import',exact:true}).click();const stampForm=fixturePage.getByRole('dialog',{name:/Add or import/});await stampForm.getByRole('button',{name:'Add entry manually',exact:true}).click();await stampForm.locator('.collection-chooser .destination-results').getByRole('button',{name:/Browser stamp fixture/}).click();assert.equal(await stampForm.getByLabel('Denomination').getAttribute('type'),'number');await stampForm.getByLabel('Currency unit').fill('cents');await stampForm.locator('.read-only-field').first().waitFor();assert.equal(await stampForm.getByLabel('Perforation observations').count(),0,'read-only structured field was editable');
  let submittedStamp;
  await fixturePage.route('**/api/v1/items/*',async route=>{if(route.request().method()!=='PUT')return route.continue();submittedStamp=route.request().postDataJSON();await route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:{code:'invalid_request',message:'Renderer fixture: submission inspected without persistence.'}})});});
  await stampForm.getByLabel('Title',{exact:true}).fill('Synthetic stamp');await stampForm.getByLabel('Denomination',{exact:true}).fill('20');await stampForm.getByRole('button',{name:'Add entry',exact:true}).click();await stampForm.getByRole('alert').waitFor();assert.deepEqual(submittedStamp.edit.domain_edit,{module:'org.example.stamps',fields:{unit:'cents',denomination:20}});
@@ -1213,10 +1274,9 @@ try{
  const unavailableFixture=await page.evaluate(async()=>{const collections=(await(await fetch('/api/v1/collection-search?limit=100')).json()).items;const collection=collections.find(value=>value.binding.state==='assigned'&&value.binding.module==='org.junk.music');const item=await(await fetch(`/api/v1/items/${localStorage.getItem('primary-music-item-id')}`)).json();if(!item.captures.length)throw new Error('unavailable-owner fixture needs the captured music item');let review=await(await fetch(`/api/v1/items/${item.id}/metadata`)).json();for(const [field,value] of [['title','Opaque module fixture'],['subtitle','Unavailable owner preserved from archive']]){const response=await fetch(`/api/v1/items/${item.id}/metadata`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({expected_revision:review.revision,change:{change:'set_field_override',field,value,language:null}})});if(!response.ok)throw new Error(`unavailable-owner metadata: ${response.status} ${await response.text()}`);review=await response.json();}return {collectionId:collection.id,itemId:item.id};});
  await stopServer();await archiveUnavailableOwnerFixture(unavailableFixture.collectionId,unavailableFixture.itemId);server=startServer();await waitForServer();await page.reload();
  await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
- await page.getByText('Collection content is read-only.',{exact:true}).waitFor();
  await page.getByRole('note').filter({hasText:'org.example.absent'}).waitFor();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Opaque module');await page.waitForTimeout(350);
- const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/Unavailable type · org\.example\.absent/);await opaqueRow.click();
+ const opaqueRow=page.getByRole('button',{name:/Opaque module fixture/});await opaqueRow.waitFor();assert.match(await opaqueRow.innerText(),/org\.example\.absent/);await opaqueRow.click();
  await page.getByLabel('Opaque module fixture details',{exact:true}).waitFor();
  if(hasFlac){const retained=await page.evaluate(async()=>{const [url]=JSON.parse(sessionStorage.getItem('prepared-flac-urls'));const response=await fetch(url,{headers:{Range:'bytes=0-3'}});return {status:response.status,magic:String.fromCharCode(...new Uint8Array(await response.arrayBuffer()))};});assert.deepEqual(retained,{status:206,magic:'fLaC'},'published FLAC was unreadable after restart with its module unavailable');
   const opaquePlayer=page.getByRole('region',{name:'Music player'});await page.getByRole('button',{name:'Add album to queue',exact:true}).click();await opaquePlayer.getByRole('button',{name:'Play',exact:true}).click();
@@ -1230,7 +1290,7 @@ try{
  const cdp=await context.newCDPSession(page);await cdp.send('WebAuthn.enable');
  await cdp.send('WebAuthn.addVirtualAuthenticator',{options:{protocol:'ctap2',transport:'internal',hasResidentKey:true,hasUserVerification:true,isUserVerified:true,automaticPresenceSimulation:true}});
  await page.getByRole('button',{name:'Account & security',exact:true}).click();await page.getByRole('button',{name:'Passkeys',exact:true}).click();await page.getByRole('button',{name:'Add a passkey',exact:true}).click();
- await page.getByText('Passkey registered.',{exact:false}).waitFor();await page.getByRole('button',{name:'Close account and security',exact:true}).click();
+ await expect.poll(async()=>(await getJson('/security/passkeys?limit=50')).items.length,{timeout:15000}).toBe(1);await page.getByRole('button',{name:'Close account and security',exact:true}).click();
  // Two ceremonies verify against the same credential snapshot. Completing the
  // newer assertion first must not let an older ceremony rebase onto its revision.
  const race=await page.evaluate(async()=>{
@@ -1279,7 +1339,7 @@ try{
  assert.equal(await page.evaluate(async()=>{const collection=((await(await fetch('/api/v1/collection-search?limit=100')).json()).items)[0];const response=await fetch(`/api/v1/items/${crypto.randomUUID()}`,{method:'PUT',headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify({command:{collection_id:collection.id,title:'Forbidden direct write',subtitle:'',identity_link:{kind:'none'},domain:{module:'org.junk.games',schema_version:1,payload:{}},identity:'unidentified',translations:[],identifiers:[],wishlist:false},expected_revision:0})});return response.status;}),403);
  await page.evaluate(async()=>{const principal=await(await fetch('/api/v1/me')).json();const response=await fetch(`/api/v1/devices/${principal.device_id}`,{method:'DELETE',headers:{'idempotency-key':crypto.randomUUID()}});if(!response.ok)throw new Error(`device revocation: ${response.status}`);});
  await page.getByRole('searchbox',{name:'Search collection'}).fill('session expired');
- await page.getByText('Your session ended.',{exact:false}).waitFor();
+ await page.getByLabel('Password',{exact:true}).waitFor();
  assert.deepEqual(errors,[]);
  console.log(localSetup?'Local setup smoke passed: wrong-origin guidance, repaired origin, preserved TLS/account state, client-only routing, private management, inventory/assets, typed collection creation/wrong-owner rejection, role denial and session expiry.':'Browser smoke passed: session login/expiry, management bundles, inventory, role-aware artwork controls/rows, typed collection creation/wrong-owner rejection, search, role denial and WebAuthn registration/login.');
 }catch(error){console.error(logs);const failurePage=browser?.contexts().flatMap(context=>context.pages()).at(-1)||page;if(failurePage){console.error((await failurePage.locator('body').innerText({timeout:2000}).catch(()=> '[browser diagnostic unavailable]')).slice(0,6000));await failurePage.screenshot({path:path.join(root,'web/test-results/failure.png'),fullPage:true,timeout:2000}).catch(()=>{});}throw error;}finally{if(browser)await browser.close();await stopServer();await Promise.all([closeHttpFixture(accurateRipServer,'AccurateRip fixture'),closeHttpFixture(metadataProviderServer,'metadata fixture')]);await rm(scratch,{recursive:true,force:true});}

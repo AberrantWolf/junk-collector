@@ -88,9 +88,10 @@ try{
  await player.getByLabel('Playback format').selectOption('original');
  // Browsing never initiates QUIC or prompts; Play starts trusted discovery.
  assert.equal(await page.locator('audio').getAttribute('src'),null);
+ const mediaResponses=[];page.on('response',response=>{if(new URL(response.url()).pathname===fixture.path)mediaResponses.push(response.fromServiceWorker());});
  await player.getByRole('button',{name:'Play',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>.1;});
- assert.match(await player.innerText(),/Direct playback/);assert.equal(await page.evaluate(()=>!!navigator.serviceWorker.controller),true);
+ assert.ok(mediaResponses.length>0&&mediaResponses.every(Boolean),'media was not served by the direct-playback worker');assert.equal(await page.evaluate(()=>!!navigator.serviceWorker.controller),true);
  const direct=await page.evaluate(async path=>(await fetch(path+'?control-negative=1',{method:'HEAD'})).status,fixture.path);
  // Query intentionally bypasses neither the worker nor server; use an unowned API client.
  const cookie=(await context.cookies()).map(c=>`${c.name}=${c.value}`).join('; ');const publicMedia=await fetch(origin+fixture.path,{headers:{cookie}});assert.equal(publicMedia.status,503,'control listener served public media');

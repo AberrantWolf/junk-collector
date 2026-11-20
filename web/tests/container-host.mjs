@@ -33,7 +33,8 @@ try{
    await review.getByLabel('Title mode',{exact:true}).selectOption('manual');await expect(review.getByLabel('Displayed title',{exact:true})).toHaveValue(fixture.desired_title);
    await page.screenshot({path:path.join(scratch,`nas-${fixture.scenario}-save.png`),fullPage:true});
   }else{
-   assert.equal(response.status(),200);await expect(review.getByText('Metadata choices saved.',{exact:true})).toBeVisible();
+   assert.equal(response.status(),200);await expect(review.getByRole('alert')).toHaveCount(0);
+   await expect.poll(async()=>(await(await page.request.get(`${fixture.origin}/api/v1/items/${fixture.item_id}`)).json()).title).toBe(fixture.desired_title);
   }
   await page.goto(`${fixture.origin}/?collection=${fixture.collection_id}&item=${fixture.item_id}`);
  }else if(fixture.scenario){
@@ -46,6 +47,8 @@ try{
    if(batch)await batch.waitFor();return {curator,preparation,batch};
   };
   let {curator,preparation,batch}=await openPreparation();
+  const batchOutcome=async()=>{const response=await page.request.get(`${fixture.origin}/api/v1/music-preparation-batches/${fixture.batch_id}`);assert.equal(response.status(),200);return response.json();};
+  const batchCounts=async()=>{const outcome=await batchOutcome();return {succeeded:outcome.succeeded,failed:outcome.failed,cancelled:outcome.cancelled,members:outcome.members.length};};
   if(fixture.scenario.startsWith('prepare-opus-')||fixture.scenario.startsWith('restored-opus-')){
    assert.ok([64,96,128,160,192,256].includes(fixture.bitrate));
    const label=`Opus ${fixture.bitrate} kbps`;
@@ -63,25 +66,28 @@ try{
    await curator.getByRole('button',{name:'Close curator',exact:true}).click();
   }else if(fixture.scenario==='cancel-preparation'){
    await batch.getByRole('button',{name:'Cancel outstanding tracks',exact:true}).click();
-   await expect(batch).toContainText('1 cancelled');
-   const response=await page.request.get(`${fixture.origin}/api/v1/music-preparation-batches/${fixture.batch_id}`);
-   assert.equal(response.status(),200);const outcome=await response.json();
+   await expect.poll(async()=>(await batchCounts()).cancelled).toBe(1);
+   await expect(batch.getByRole('button',{name:'Cancel outstanding tracks',exact:true})).toHaveCount(0);
+   const outcome=await batchOutcome();
    assert.equal(outcome.cancelled_by_user,true);assert.equal(outcome.cancelled,1);assert.equal(outcome.succeeded,0);
    await page.screenshot({path:path.join(scratch,'nas-cancelled-preparation.png'),fullPage:true});
    cancelledOnly=true;
   }else{
    if(fixture.scenario==='retry-failed-preparation'){
-    await expect(batch).toContainText('1 failed');
-    await batch.getByText('Track outcomes',{exact:true}).click();
-    await expect(batch.getByText(/qualification: encoder failed after output/)).toBeVisible();
+    await expect.poll(async()=>(await batchCounts()).failed).toBe(1);
+    // The failed track's recorded error is shown in its track outcome.
+    const failedMember=(await batchOutcome()).members.find(member=>member.state==='failed');assert.ok(failedMember?.error);
+    await batch.locator('details').filter({has:page.locator('.batch-member')}).locator(':scope > summary').click();
+    await expect(batch.locator('.batch-member small')).toHaveText([failedMember.error]);
     await curator.getByRole('button',{name:'Close curator',exact:true}).click();
     ({curator,preparation,batch}=await openPreparation());
-    await expect(batch).toContainText('1 failed');
+    await expect(batch.getByRole('button',{name:'Retry unfinished tracks',exact:true})).toBeVisible();assert.equal((await batchCounts()).failed,1);
    }else if(fixture.scenario==='retry-cancelled-preparation'){
-    await expect(batch).toContainText('1 cancelled');
+    await expect.poll(async()=>(await batchCounts()).cancelled).toBe(1);await expect(batch.getByRole('button',{name:'Retry unfinished tracks',exact:true})).toBeVisible();
    }else assert.equal(fixture.scenario,'restarted-preparation');
    if(fixture.scenario!=='restarted-preparation')await batch.getByRole('button',{name:'Retry unfinished tracks',exact:true}).click();
-   await expect(batch).toContainText('1/1 ready',{timeout:60000});
+   await expect.poll(async()=>{const counts=await batchCounts();return [counts.succeeded,counts.members];},{timeout:60000}).toEqual([1,1]);
+   await expect(batch.getByRole('button',{name:'Retry unfinished tracks',exact:true})).toHaveCount(0);await expect(batch.getByRole('button',{name:'Cancel outstanding tracks',exact:true})).toHaveCount(0);
    await curator.getByRole('button',{name:'Close curator',exact:true}).click();
   }
  }
@@ -92,7 +98,7 @@ try{
  if(expectedOpusMedia){assert.equal(new URL(await player.locator('audio').evaluate(audio=>audio.currentSrc)).pathname,expectedOpusMedia);await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.duration)).toBeCloseTo(3,1);}
  await player.getByRole('slider').fill('1');await expect.poll(()=>player.locator('audio').evaluate(audio=>audio.currentTime)).toBeGreaterThan(.9);
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
- await page.getByText('Album details & files',{exact:true}).click();
+ await page.locator('details.entry-inspection > summary').click();
  for(const [name,expected] of Object.entries(fixture.originals)){
   const link=page.locator('.entry-inspection').getByRole('link',{name,exact:true});const href=await link.getAttribute('href');assert.ok(href);
   const response=await page.request.get(new URL(href,fixture.origin).toString());assert.equal(response.status(),200);const bytes=await response.body();assert.equal(bytes.length,expected.bytes);assert.equal(createHash('sha256').update(bytes).digest('hex'),expected.sha256);

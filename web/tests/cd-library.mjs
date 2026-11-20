@@ -19,8 +19,8 @@ try{
  const setup=spawnSync(serverBinary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:`http://127.0.0.1:${provider.address().port}/`}});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);await waitForServer(origin+'/healthz',server,{logs:()=>logs});
  browser=await chromium.launch();page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Create collection',exact:true}).click();
- const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('CD workflow fixture');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await admin.getByText('Collection created.',{exact:false}).waitFor();await admin.getByRole('button',{name:'Library settings',exact:true}).click();
- const defaults=admin.getByRole('region',{name:'CD library defaults',exact:true});await defaults.getByLabel('Check CD rips with AccurateRip on import').uncheck();await defaults.getByLabel('Maximum offset (stereo sample frames)').fill('0');await defaults.getByRole('button',{name:'Save CD defaults',exact:true}).click();await expect(defaults.getByRole('status')).toContainText('CD defaults saved');
+ const admin=page.getByRole('dialog',{name:'Administration'});await admin.getByLabel('Collection name').fill('CD workflow fixture');await admin.getByLabel('Collection type').selectOption('org.junk.music');await admin.getByRole('button',{name:'Create collection',exact:true}).click();await expect(admin.getByLabel('Collection name')).toHaveValue('');await admin.getByRole('button',{name:'Library settings',exact:true}).click();
+ const defaults=admin.getByRole('region',{name:'CD library defaults',exact:true});await defaults.getByLabel('Check CD rips with AccurateRip on import').uncheck();await defaults.getByLabel('Maximum offset (stereo sample frames)').fill('0');const savedDefaults=page.waitForResponse(r=>/\/api\/v1\/collections\/[^/]+\/cd-settings$/.test(new URL(r.url()).pathname)&&r.request().method()==='PUT');await defaults.getByRole('button',{name:'Save CD defaults',exact:true}).click();const saved=await savedDefaults;assert.equal(saved.status(),200);const savedSettings=await saved.json();assert.equal(savedSettings.check_accuraterip_on_ingest,false);assert.equal(savedSettings.maximum_offset,0);await expect(defaults.getByRole('status')).toBeVisible();await expect(defaults.getByRole('alert')).toHaveCount(0);
  // Save an older uninspected original through the real ingest API.
  const imported=await page.evaluate(async({bytes})=>{
   const call=async(url,body,method='POST')=>{const r=await fetch('/api/v1'+url,{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},body:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());return r.json();};
@@ -39,19 +39,21 @@ try{
    if(!response.ok)throw Error(await response.text());
   }
  },imported.collection_id??await page.evaluate(async()=>((await(await fetch('/api/v1/collection-search?limit=100')).json()).items.find(c=>c.name==='CD workflow fixture').id)));
- await defaults.getByRole('button',{name:'Check unconfirmed rips',exact:true}).click();const batch=defaults.getByRole('region',{name:'Review batch',exact:true});await expect(batch.getByText('105 selected albums',{exact:false})).toBeVisible();await expect(batch.getByText('1 successful',{exact:false})).toBeVisible({timeout:30000});assert.equal(providerRequests,1);
- await expect(batch.getByText('104 excluded',{exact:false})).toBeVisible();
+ const previewBatch=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/bulk-library/preview'&&r.request().method()==='POST').then(r=>r.json()).then(summary=>summary.id);
+ const batchCounts=id=>page.evaluate(async id=>{const s=await(await fetch('/api/v1/bulk-library/'+id)).json();return {selected:s.selected,excluded:s.excluded,succeeded:s.succeeded,failed:s.failed};},id);
+ let batchId=previewBatch();await defaults.getByRole('button',{name:'Check unconfirmed rips',exact:true}).click();batchId=await batchId;const batch=defaults.getByRole('region',{name:'Review batch',exact:true});await expect(batch).toBeVisible();
+ await expect.poll(()=>batchCounts(batchId),{timeout:30000}).toEqual({selected:105,excluded:104,succeeded:1,failed:0});assert.equal(providerRequests,1);
  await expect(batch.locator('.care-rows .care-row')).toHaveCount(1);
  await expect(batch.locator('.care-rows')).toContainText('Older CD');
  await expect(batch.locator('.care-rows')).not.toContainText('Excluded entry');
  await expect(batch.getByRole('button',{name:'More album results',exact:true})).toHaveCount(0);
  // A later check has only exclusions, including the newly confirmed CD.
- await defaults.getByRole('button',{name:'Check unconfirmed rips',exact:true}).click();
- await expect(batch.getByText('105 excluded',{exact:false})).toBeVisible();
+ batchId=previewBatch();await defaults.getByRole('button',{name:'Check unconfirmed rips',exact:true}).click();batchId=await batchId;
+ await expect.poll(()=>batchCounts(batchId)).toEqual({selected:105,excluded:105,succeeded:0,failed:0});
  await expect(batch.locator('.care-rows .care-row')).toHaveCount(0);
  await expect(batch.getByRole('button',{name:'More album results',exact:true})).toHaveCount(0);
  assert.equal(providerRequests,1,'excluded confirmed audio was checked again');
- await admin.getByRole('button',{name:'Close administration'}).click();await page.reload();await page.getByRole('searchbox',{name:'Search collection'}).fill('Older CD');await expect(page.locator(`[data-item-id="${imported.target_item_id}"]`)).toBeVisible();await expect(page.getByRole('button',{name:/AccurateRip for Older CD: Verified\..*Open audio checks/})).toBeVisible();
+ await admin.getByRole('button',{name:'Close administration'}).click();await page.reload();await page.getByRole('searchbox',{name:'Search collection'}).fill('Older CD');await expect(page.locator(`[data-item-id="${imported.target_item_id}"]`)).toBeVisible();assert.deepEqual(await page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()).accuraterip?.map(check=>check.status),imported.target_item_id),['verified']);await expect(page.getByRole('button',{name:/^AccurateRip for Older CD/})).toBeVisible();
  // The account setting is reachable at phone width, and the desktop dock
  // reflects it. This track has no saved derivative.
  await page.setViewportSize({width:390,height:844});

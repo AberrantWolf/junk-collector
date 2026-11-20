@@ -53,7 +53,7 @@ try{
  const config=path.join(scratch,'collector.toml');await writeFile(config,`archive="${scratch}/archive"\nstate="${scratch}/state"\npublic_bind="127.0.0.1:${publicPort}"\nprivate_bind="127.0.0.1:${privatePort}"\nlan_bind="127.0.0.1:${lanPort}"\nlocal_playback_enabled=false\nmulti_user=true\nallowed_origins=["${origin}"]\n`);
  const setup=spawnSync(serverBinary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,COLLECTOR_MAIL_PROFILES:profiles,COLLECTOR_MAIL_SETUP_DIRECTORY:managed,COLLECTOR_BRIDGE_STATUS:status}});server.stderr.on('data',v=>logs+=v);await waitForServer(origin+'/healthz',server,{logs:()=>logs});}
- await start();browser=await chromium.launch();page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
+ await start();browser=await chromium.launch();page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));const api=url=>page.evaluate(async u=>(await fetch(u)).json(),url);await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByLabel('Password',{exact:true}).waitFor({state:'detached'});
  const ids=await page.evaluate(async()=>{const call=async(url,method='GET',body)=>{const r=await fetch('/api/v1'+url,{method,headers:{'content-type':'application/json','idempotency-key':crypto.randomUUID()},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(await r.text());return r.json();};const actor=await call('/me');const collection=await call('/admin/collections','POST',{name:'Receipt games',module:'org.junk.games'});return {owner:actor.user_id,collection:collection.id};});
  await page.goto(`${origin}/purchase-inbox?collection=${ids.collection}`);
  const submitted=[];page.on('request',r=>{if(r.url().endsWith('/api/v1/mail/setup')&&r.method()==='POST')submitted.push({key:r.headers()['idempotency-key'],body:r.postData()});});
@@ -87,7 +87,7 @@ try{
  await expect(folderChoices).toHaveCount(0);
  await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('alert').first().waitFor();
  assert.equal(await page.evaluate(async()=>{const r=await fetch('/api/v1/mail/profiles');return (await r.json()).length;}),0);
- await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('fixture-imap-password');await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await connection.getByRole('heading',{name:'My Proton Mail · Connected'}).waitFor();
+ await connection.getByLabel('Bridge IMAP password',{exact:true}).fill('fixture-imap-password');await connection.getByRole('button',{name:'Connect Bridge',exact:true}).click();await expect.poll(async()=>(await api('/api/v1/mail/profiles')).length).toBe(1);await connection.getByRole('region',{name:'Receipt scan'}).waitFor();
  const configured=await page.evaluate(async()=>({profiles:await (await fetch('/api/v1/mail/profiles')).json(),connections:await (await fetch('/api/v1/mail/connections')).json()}));
  assert.equal(configured.profiles.length,1);assert.equal(configured.connections.length,0);assert.ok(!JSON.stringify(configured).includes('fixture-imap-password'));
  assert.deepEqual(configured.profiles[0].folders,['INBOX',localizedFolder]);
@@ -123,7 +123,7 @@ try{
  await connection.getByRole('button',{name:'Save folders',exact:true}).click();await connection.getByRole('alert').first().waitFor();
  await expect(connection.getByLabel('Mail folders, one per line',{exact:true})).toHaveValue('Folders/Receipts');
  await connection.getByRole('button',{name:'Cancel folder editing',exact:true}).click();await connection.getByRole('button',{name:'Refresh mail status',exact:true}).click();
- await expect(connection.getByText('Scanned folders: Folders/Other',{exact:true})).toBeVisible();
+ await expect(connection.locator('code').filter({hasText:/^Folders\/Other$/})).toHaveCount(2);await expect(connection.getByRole('region',{name:'Receipt history progress'}).locator('code').filter({hasText:/^Folders\/Other$/})).toHaveCount(1);
  await connection.getByRole('button',{name:'Edit scanned folders',exact:true}).click();await expect(connection.getByLabel('Mail folders, one per line',{exact:true})).toHaveValue('Folders/Other');
  await connection.getByLabel('Mail folders, one per line',{exact:true}).fill('Folders/Receipts');await connection.getByRole('button',{name:'Save folders',exact:true}).click();await connection.getByRole('button',{name:'Edit scanned folders',exact:true}).waitFor();
  const folderConnection=await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0]);
@@ -164,19 +164,19 @@ db.commit()
  const beforeRepair=await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0]);
  await connection.getByRole('button',{name:'Revalidate Bridge connection',exact:true}).click();
  await connection.getByLabel('Current Bridge IMAP username',{exact:true}).fill('fixture-local');await connection.getByLabel('Current Bridge IMAP password',{exact:true}).fill('wrong-rotated-password');
- await connection.getByRole('checkbox',{name:/fingerprint/}).check();
+ await connection.locator('form.bridge-connect-form').getByRole('checkbox').check();
  await connection.getByRole('button',{name:'Save revalidated connection',exact:true}).click();await connection.getByRole('alert').first().waitFor();
  await connection.getByLabel('Current Bridge IMAP password',{exact:true}).fill('fixture-rotated-password');
  const repairsShots=process.env.COLLECTOR_SCREENSHOTS;if(repairsShots)await page.screenshot({path:path.join(repairsShots,'mail-revalidation-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'mobile revalidation overflow');if(repairsShots)await page.screenshot({path:path.join(repairsShots,'mail-revalidation-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1000});
  await connection.getByRole('button',{name:'Save revalidated connection',exact:true}).click();await connection.getByRole('button',{name:'Revalidate Bridge connection',exact:true}).waitFor();
- const afterRepair=await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0]);assert.equal(afterRepair.profile.id,beforeRepair.profile.id);assert.equal(afterRepair.cursor,beforeRepair.cursor);assert.equal(afterRepair.enabled,beforeRepair.enabled);await connection.getByText(/Settings changed/).waitFor();
+ const afterRepair=await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0]);assert.equal(afterRepair.profile.id,beforeRepair.profile.id);assert.equal(afterRepair.cursor,beforeRepair.cursor);assert.equal(afterRepair.enabled,beforeRepair.enabled);assert.ok(afterRepair.problem);assert.notEqual((await api('/api/v1/mail/profiles'))[0].configuration_revision,afterRepair.profile.configuration_revision,'repaired settings should differ from those of the failed scan');const scan=connection.getByRole('region',{name:'Receipt scan'});await expect(scan.getByRole('status')).toBeVisible();await expect(scan.getByRole('alert')).toHaveCount(0);
  await stopProcess(server);server=undefined;await start();await page.reload();
- await connection.getByRole('region',{name:'Receipt history progress'}).getByText(/up to 100 messages left/).waitFor();
+ await expect.poll(async()=>await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0].progress?.some(p=>!p.caught_up&&p.available_through-p.scanned_through===100))).toBe(true);await connection.getByRole('region',{name:'Receipt history progress'}).waitFor();
  await connection.getByRole('button',{name:'Rescan configured folders',exact:true}).click();await connection.getByRole('button',{name:'Pause receipt scanning',exact:true}).waitFor();
  await expect.poll(async()=>await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0].cursor)).toBe('');
  await stopProcess(server);server=undefined;await start();await page.reload();
- await connection.getByRole('region',{name:'Receipt history progress'}).getByText(/up to 100 messages left/).waitFor();
- const unparsed=page.locator('article').filter({hasText:/Unparsed receipt/});await unparsed.getByText('Find original email',{exact:true}).click();await expect(unparsed.getByText('Subject: Synthetic unparsed purchase receipt',{exact:true})).toBeVisible();await unparsed.getByRole('button',{name:'Review suggestion',exact:true}).click();await unparsed.getByRole('button',{name:'Dismiss suggestion',exact:true}).click();await expect(unparsed).toHaveCount(0);
+ await expect.poll(async()=>await page.evaluate(async()=>(await (await fetch('/api/v1/mail/connections')).json())[0].progress?.some(p=>!p.caught_up&&p.available_through-p.scanned_through===100))).toBe(true);await connection.getByRole('region',{name:'Receipt history progress'}).waitFor();
+ const unparsed=page.locator('article').filter({hasText:/Unparsed receipt/});await unparsed.locator('details > summary').click();await expect(unparsed.locator('details')).toHaveAttribute('open','');await expect(unparsed.locator('details')).toContainText('Synthetic unparsed purchase receipt');await unparsed.getByRole('button',{name:'Review suggestion',exact:true}).click();await unparsed.getByRole('button',{name:'Dismiss suggestion',exact:true}).click();await expect(unparsed).toHaveCount(0);
 
  await connection.getByRole('button',{name:'Edit scanned folders',exact:true}).click();await expect(connection.getByLabel('Mail folders, one per line',{exact:true})).toHaveValue('Folders/Receipts');await connection.getByRole('button',{name:'Cancel folder editing',exact:true}).click();
  await expect.poll(async()=>await readFile(mailCommands,'utf8'),{timeout:20000}).toContain('EXAMINE "Folders/Receipts"');
@@ -212,16 +212,17 @@ db.commit()
  await rescanAmazon();
  const delivery=page.locator('article').filter({has:page.getByRole('heading',{name:'Fixture Delivery Adventure',exact:true})});
  await waitForInbox(delivery);
- await expect(delivery.getByText(/Order 123-1234567-1234567/)).toHaveCount(0);
+ await expect(delivery.getByText(/123-1234567-1234567/)).toHaveCount(0);
  await writeFile(amazonReceipt,[...amazonHeaders,...recoveredAmazonBody].join('\r\n'));
  await rescanAmazon();
- await waitForInbox(delivery.getByText(/Order 123-1234567-1234567/));
- const incomplete=page.locator('article').filter({hasText:/could not be recovered/});
- await expect(incomplete.getByText(/Order 123-1234567-1234567/)).toBeVisible();
+ await waitForInbox(delivery.getByText(/123-1234567-1234567/));
+ const inboxItems=(await api(`/api/v1/collections/${ids.collection}/purchase-inbox?view=pending`)).items;const incompleteSuggestion=inboxItems.find(s=>s.issue==='incomplete_item_title');assert.ok(incompleteSuggestion,'incomplete Amazon item was not flagged');assert.equal(incompleteSuggestion.purchase.order_reference,'123-1234567-1234567');
+ const incomplete=page.locator('article').filter({has:page.getByRole('heading',{name:incompleteSuggestion.purchase.title,exact:true})});
+ await expect(incomplete.getByText(/123-1234567-1234567/)).toBeVisible();
  await incomplete.getByRole('button',{name:'Review suggestion',exact:true}).click();
  await expect(incomplete.getByRole('button',{name:'Accept collection update',exact:true})).toBeDisabled();
- await expect(delivery.getByText(/Amazon Japan · out for delivery/)).toBeVisible();
- await expect(delivery.getByText(/Order 123-1234567-1234567/)).toBeVisible();
+ const deliverySuggestion=inboxItems.find(s=>s.purchase.title==='Fixture Delivery Adventure');assert.equal(deliverySuggestion.purchase.status,'out_for_delivery');assert.equal(deliverySuggestion.purchase.order_reference,'123-1234567-1234567');assert.equal(deliverySuggestion.issue??null,null);
+ await expect(delivery.getByText(/123-1234567-1234567/)).toBeVisible();
  await delivery.getByRole('button',{name:'Review suggestion',exact:true}).click();
  await expect(delivery.getByLabel('Status',{exact:true})).toHaveValue('out_for_delivery');
  await expect(delivery.getByLabel('Format',{exact:true})).toHaveValue('physical');
@@ -230,7 +231,7 @@ db.commit()
  await delivery.getByRole('button',{name:'Accept collection update',exact:true}).click();
  await expect(delivery).toHaveCount(0);
  await page.getByLabel('Review status',{exact:true}).selectOption('accepted');
- await expect(delivery.getByText('Accepted',{exact:true})).toBeVisible();
+ await expect(delivery).toHaveCount(1);await expect.poll(async()=>!!(await api(`/api/v1/collections/${ids.collection}/purchase-inbox?view=accepted`)).items.find(s=>s.id===deliverySuggestion.id)?.accepted_item).toBe(true);
  assert.equal(await page.evaluate(async()=>{const r=await fetch('/purchase-inbox.js');return r.status;}),200);
  // The public listener does not compose the inbox page, asset or APIs.
  for(const route of ['/purchase-inbox','/purchase-inbox.js','/api/v1/mail/profiles','/api/v1/collections/'+ids.collection+'/purchase-inbox'])assert.equal((await fetch(`http://127.0.0.1:${publicPort}${route}`)).status,404,route);
