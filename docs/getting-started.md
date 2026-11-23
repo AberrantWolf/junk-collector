@@ -82,16 +82,19 @@ With redumper installed:
 
 ```sh
 cargo build --release --locked -p collector-cd-identity   # once, for automatic naming
-./scripts/rip-cd.sh --auto /path/to/dumps disk7
-./scripts/rip-cd.sh "Album - Disc 1" /path/to/dumps disk7  # fixed folder name, no lookup
+./scripts/rip-cd.sh /path/to/dumps disk7 --auto
+./scripts/rip-cd.sh /path/to/dumps disk7 "Album - Disc 1"  # fixed folder name, no lookup
 ```
 
-The last argument is the drive (`diskN` on macOS, `/dev/sgN` on Linux); omit it to use
-the first drive. Linux media must be unmounted. `RETRIES` (default 100) and
+The folder name (or `--auto`) comes last, so for the next disc you can recall the
+command and change only the name. The middle argument is the drive (`diskN` on macOS,
+`/dev/sgN` on Linux); omit it to use the first drive. Linux media must be unmounted. `RETRIES` (default 100) and
 `REDUMPER=/path/to/redumper` are honoured. See `./scripts/rip-cd.sh --help`.
 
 The helper writes `disc.*` raw files and logs into a new `cd-<timestamp>-<suffix>`
-folder. It runs a refine pass only if the dump reports SCSI or C2 errors. With
+folder. It never refines: if the dump reports SCSI or C2 errors, it finishes with a
+"check this disc" message and a `redumper refine` command you can run by hand after
+cleaning or inspecting the disc. With
 `--auto` it then spends up to 15 seconds on a MusicBrainz lookup and renames the folder
 (for example `SQEX-11226`, with ` - Disc N` for multi-disc releases) only when exactly
 one release matches; otherwise the generated name stays. Naming needs Python 3 and

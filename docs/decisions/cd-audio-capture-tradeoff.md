@@ -10,9 +10,12 @@ perfect subchannel recovery.
 
 - Keep the complete redumper package: raw masters, SUBCODE, STATE, TOC and logs.
   Unresolved Q errors stay visible; subchannels are never discarded or synthesized.
-- `scripts/rip-cd.sh` only refines automatically when the first pass has SCSI/C2
-  errors. Q-only errors don't trigger refinement. Extra Q recovery is an optional
-  manual step, never a gate on importing or listening.
+- `scripts/rip-cd.sh` never refines. When the first pass has SCSI/C2 errors it
+  says to check the disc and prints a manual refine command; Q-only errors aren't
+  flagged. Refining a damaged disc can take hours and can leave the drive reading
+  slowly until it is reconnected, so cleaning the disc first and refining by hand
+  is the owner's choice. Extra Q recovery is likewise an optional manual step,
+  never a gate on importing or listening.
 - Audio is checked with Collector's AccurateRip workflow, within its actual
   coverage. A whole-disc claim needs every expected track and a justified offset;
   one matching track is not enough.
