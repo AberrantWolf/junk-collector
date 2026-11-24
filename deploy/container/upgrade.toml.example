@@ -1,0 +1,30 @@
+# Settings for junk-collector-upgrade (deploy/container/upgrade.py).
+# Copy to /etc/junk-collector/upgrade.toml, owned by root, mode 0600.
+# Every setting is optional; the values below are the defaults.
+
+# The systemd unit that runs the stack, and the settings file it reads.
+service = "junk-collector-remote.service"
+env_file = "/etc/junk-collector/remote.env"
+
+# Compose project name (the containers' com.docker.compose.project label).
+compose_project = "junk-collector"
+
+# Where releases come from.
+image = "ghcr.io/aberrantwolf/junk-collector"
+github_repository = "AberrantWolf/junk-collector"
+
+# The snapper config for the local data subvolume (see "Scheduled snapshots").
+snapper_config = "junk-collector"
+
+# Docker volume holding the media service key; copied into each recovery point.
+# Set to "" if you don't run the media service.
+media_key_volume = "junk-collector_media-authority"
+
+# How long to wait for the new version to report healthy. The first start after a
+# catalog format change rebuilds the catalog from the archive.
+health_timeout_seconds = 1800
+
+# Optional command that takes a NAS snapshot while the service is stopped. It is
+# called with the snapshot description ("before v…") as its last argument and must
+# be owned by root. Leave empty to take and lock the NAS snapshot yourself.
+nas_snapshot_command = []

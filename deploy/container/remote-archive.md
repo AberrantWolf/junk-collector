@@ -229,6 +229,72 @@ back after a conversion means restoring the recovery point.
 Once the new version has proven itself, remove the recovery point and the images
 older than the previous release.
 
+### Upgrading with the script
+
+[`upgrade.py`](upgrade.py) runs the steps above as one command:
+1. It checks the release on GitHub and pulls the image while the server keeps
+   running. It checks that the image was built from the release's commit.
+2. It stops the service and confirms every container exited.
+3. It takes the local snapshot and copies the media service key and `remote.env`
+   into it.
+4. It saves the old `remote.env` beside the original as `remote.env.<old version>`,
+   points both image pins at the new digest, starts the service and waits for the
+   server to report healthy.
+
+Before any downtime it also refuses when:
+- a local state folder from `remote.env` is outside the snapper subvolume, or on
+  a nested subvolume or mount the snapshot would skip;
+- the running collector isn't the image `remote.env` names.
+
+If a step fails before the pins change, it starts the old version again, and
+says so loudly if that fails too. After that, it never reverts on its own: the
+new version may already have converted data, so it stops and prints the
+recovery point and the way back. Interrupting or disconnecting can't stop it
+while the server is down.
+
+It refuses a release that changes files in `deploy/container` (other than
+documentation) until you have applied those changes by hand and pass
+`--deploy-files-updated`. It never edits Compose files, the unit or collector
+config.
+
+Install it once, as root:
+
+```sh
+install -o root -g root -m 0755 deploy/container/upgrade.py /usr/local/sbin/junk-collector-upgrade
+install -o root -g root -m 0600 deploy/container/upgrade.toml.example /etc/junk-collector/upgrade.toml
+```
+
+Edit `/etc/junk-collector/upgrade.toml` to match your install. Every setting is
+optional. To take the NAS snapshot automatically, set `nas_snapshot_command` to
+a root-owned program that takes and locks one; otherwise take it yourself
+during the downtime.
+
+Then:
+
+```sh
+junk-collector-upgrade check v0.1.0-beta.37     # all checks, no downtime
+junk-collector-upgrade upgrade v0.1.0-beta.37
+```
+
+It logs to `/var/log/junk-collector-upgrade.log`. When it finishes, it prints the
+command that deletes the recovery point. Run that command once the new version
+has proven itself: it removes the copies inside the recovery point first, so
+snapper can delete the snapshot's folder.
+
+To let an operator account run upgrades without a password, allow only this
+command. Create the file with `visudo -f /etc/sudoers.d/junk-collector-upgrade`:
+
+```
+operator ALL=(root) NOPASSWD: /usr/local/sbin/junk-collector-upgrade
+```
+
+This is safe only while the script, its settings, `remote.env` and every
+folder above them are owned by root and writable only by root. The script
+checks this and refuses otherwise. It reads no environment variables. Its
+arguments are a published release tag, plus the `--deploy-files-updated`
+acknowledgement, which skips only the deployment-file check. An account in the `docker` group can already act
+as root, so for that account the rule adds no new power.
+
 To run root commands on a host without sudo, use the Docker operator route with
 an already-installed helper image pinned by its local image ID:
 
