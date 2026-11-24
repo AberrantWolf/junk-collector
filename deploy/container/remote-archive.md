@@ -282,10 +282,12 @@ has proven itself: it removes the copies inside the recovery point first, so
 snapper can delete the snapshot's folder.
 
 To let an operator account run upgrades without a password, allow only this
-command. Create the file with `visudo -f /etc/sudoers.d/junk-collector-upgrade`:
+command. Write the rule to a file, check it with `visudo`, then install it; a
+broken file in `/etc/sudoers.d` can stop `sudo` working at all:
 
-```
-operator ALL=(root) NOPASSWD: /usr/local/sbin/junk-collector-upgrade
+```sh
+printf '%s\n' 'operator ALL=(root) NOPASSWD: /usr/local/sbin/junk-collector-upgrade' > sudoers.rule
+visudo -c -f sudoers.rule && install -o root -g root -m 0440 sudoers.rule /etc/sudoers.d/junk-collector-upgrade
 ```
 
 This is safe only while the script, its settings, `remote.env` and every
