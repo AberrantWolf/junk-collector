@@ -326,7 +326,12 @@ try{
  const laterItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items[0].import.target_item_id,laterIntake);
  await page.goto(`${origin}/?collection=${collection}&item=${laterItem}`);
  // The strict WAV reader plays the declared 24-bit segment before any FLAC is prepared.
- await player.getByLabel('Playback format').selectOption('high_bandwidth');
+ // Nothing is playing after navigation, so the format is chosen in Account.
+ await page.getByRole('button',{name:'Account & security',exact:true}).click();
+ const accountDialog=page.getByRole('dialog',{name:'Account & security'});
+ await accountDialog.getByRole('button',{name:'Playback',exact:true}).click();
+ await accountDialog.getByLabel('Playback format').selectOption('high_bandwidth');
+ await accountDialog.getByRole('button',{name:'Close account and security',exact:true}).click();
  const liveWav=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/music-stream/')&&r.url().includes('mode=high_bandwidth'));
  await tracks.getByRole('button',{name:'Play track 1: 03.wav',exact:true}).click();
  const converted=await liveWav;

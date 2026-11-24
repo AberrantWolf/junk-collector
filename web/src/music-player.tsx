@@ -4,6 +4,7 @@ import React,{useEffect,useRef,useState,ApiRequestError,isApiRequestError,reques
 import {useMusicQueue,selectMusicTrack,removeMusicTrack,reorderMusicTrack,clearMusicQueue,musicTrackUrl,streamTrackUrl,type QueuedTrack} from './music-queue';
 import {prepareLocalPlayback,checkPlaybackAccess,playbackUrl,remotePlaybackExpired,remotePlaybackActive,normalPlaybackAvailable} from './local-playback';
 import {useMusicMediaSession,clearMusicMediaSession} from './music-media-session';
+import {registerMediaSurface,claimMediaFocus,useMediaFocus,type MediaSurfaceProps} from './media-dock';
 const time=(n:number)=>`${Math.floor(n/60)}:${String(Math.floor(n%60)).padStart(2,'0')}`;
 
 const dockIcons={
@@ -17,7 +18,7 @@ function DockIcon({name}:{name:keyof typeof dockIcons}){
  return <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={dockIcons[name]}/></svg>;
 }
 
-export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMusic:boolean;onSessionExpired:()=>void}){
+export default function MusicPlayer({onSessionExpired}:MediaSurfaceProps){
  const queue=useMusicQueue();const current=queue.tracks.find(t=>t.id===queue.current);const index=queue.tracks.findIndex(t=>t.id===queue.current);
  const [routeLabel,setRouteLabel]=useState('');
  const live=useRef<{offset:number;duration:number}|undefined>(undefined);
@@ -32,7 +33,9 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  const bindAudio=React.useCallback((element:HTMLAudioElement|null)=>{if(audio.current!==element){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();const previous=audio.current;if(previous){clearMusicMediaSession();previous.pause();previous.removeAttribute('src');previous.load();}audio.current=element;loaded.current='';active.current=null;}},[]);
  function release(){clearTimeout(liveSeek.current);liveSeek.current=undefined;live.current=undefined;resume.current=undefined;streamCheck.current=undefined;clearMusicMediaSession();pendingSeek.current=undefined;generation.current++;request.current?.abort();diagnosis.current?.abort();active.current=null;loaded.current='';const element=audio.current;if(element){element.pause();element.removeAttribute('src');element.load();}setPosition(0);setDuration(0);setRouteLabel('');setState('Ready');}
  useEffect(()=>{if(active.current!==current?.id){release();setError('');}},[current?.id]);
- const visible=browsingMusic||queue.tracks.length>0;
+ // The bar shows only while something is playing or paused in this tab.
+ // A saved queue alone shows a small Resume button instead.
+ const visible=expanded||['Loading','Now playing','Paused'].includes(state);
  useEffect(()=>{if(!visible)return;const element=dock.current;if(!element)return;const observer=new ResizeObserver(()=>document.documentElement.style.setProperty('--music-dock-height',`${element.getBoundingClientRect().height}px`));observer.observe(element);document.body.classList.add('has-music-dock');return()=>{observer.disconnect();document.body.classList.remove('has-music-dock');document.documentElement.style.removeProperty('--music-dock-height');};},[visible]);
  // The queue holds immutable files, including retained historical captures.
  async function checkTrack(track:QueuedTrack,signal:AbortSignal,renew=false){
@@ -74,6 +77,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
   clearTimeout(liveSeek.current);liveSeek.current=undefined;
   if(!renew)recoveredGrant.current=false;
   const element=audio.current;if(!element)return;request.current?.abort();diagnosis.current?.abort();const controller=new AbortController();request.current=controller;const token=++generation.current;
+  claimMediaFocus('music');
   const changed=active.current!==track.id;active.current=track.id;selectMusicTrack(track.id);setError('');setState('Loading');
   const previousPosition=changed||element.ended?0:seek??resume.current??(live.current?.offset||0)+element.currentTime;
   const preference=getPlaybackPreference();
@@ -122,6 +126,7 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
   }
  }
  useEffect(()=>{if(queue.playRequest&&queue.playRequest===current?.id)void play(current);},[queue.playRequest]);
+ useMediaFocus('music',()=>{if(audio.current&&!audio.current.paused)pause();});
  function pause(){clearTimeout(liveSeek.current);liveSeek.current=undefined;generation.current++;request.current?.abort();const element=audio.current;element?.pause();if(element&&live.current){resume.current=live.current.offset+element.currentTime;element.removeAttribute('src');element.load();loaded.current='';}setState('Paused');}
  function seekTo(value:number){
   const element=audio.current;if(!element||!current)return;
@@ -134,11 +139,13 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
  function toggle(){const element=audio.current;if(!element||!current)return;if(!element.paused||state==='Loading')pause();else void play(current);}
  function move(delta:number,automatic=false){const track=queue.tracks[index+delta];if(track)void play(track);else if(automatic)setState('Queue finished');}
  useMusicMediaSession({track:current,audio,enabled:visible&&!!current&&active.current===current.id&&state!=='Ready'&&state!=='Queue finished',play:()=>{if(current)void play(current);},pause,stop:release,previous:index>0?()=>move(-1):undefined,next:index>=0&&index<queue.tracks.length-1?()=>move(1):undefined});
- if(!visible)return null;
  const pauseAction=state==='Now playing'||state==='Loading';
- return <section ref={dock} className="music-player music-dock" aria-label="Music player">
-  <audio ref={bindAudio} crossOrigin="anonymous" preload="none" data-representation-id={current?.representationId} onLoadedMetadata={e=>{setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0));const pending=pendingSeek.current;if(pending?.element===e.currentTarget){pendingSeek.current=undefined;try{e.currentTarget.currentTime=pending.position;}catch{setError('Couldn’t resume from the saved position.');}}}} onDurationChange={e=>setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0))} onTimeUpdate={e=>{if(loaded.current&&!liveSeek.current)setPosition((live.current?.offset||0)+e.currentTarget.currentTime);}} onPlay={e=>{if(!e.currentTarget.paused)setState('Now playing');}} onPause={e=>{if(e.currentTarget.paused&&!e.currentTarget.ended&&e.currentTarget.currentSrc)setState('Paused');}} onEnded={e=>{if(e.currentTarget.ended)move(1,true);}} onError={e=>{if(e.currentTarget.error&&e.currentTarget.currentSrc&&current){if(!live.current&&remotePlaybackActive(musicTrackUrl(current))&&!recoveredGrant.current){recoveredGrant.current=true;void play(current,true);return;}loaded.current='';setState('Paused');setError('Playback failed. Press Play to try again.');if(!e.currentTarget.currentSrc.includes('/music-stream/'))void diagnosePlaybackFailure(current,e.currentTarget,generation.current);}}}/>
-  {expanded&&<section className="music-queue" aria-label="Currently playing list" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setExpanded(false);queueButton.current?.focus();}}}><header><div><h3>Currently playing</h3></div><button onClick={()=>{clearMusicQueue();setExpanded(false);queueButton.current?.focus();}}>Clear queue</button></header>{!queue.tracks.length?<p>Add tracks from an album’s info view.</p>:<ol>{queue.tracks.map((track,i)=><li key={track.id} aria-current={track.id===queue.current?'true':undefined}><button className="queue-track" onClick={()=>void play(track)}><strong>{track.position}. {track.title}</strong><small>{track.album}</small></button><div className="queue-actions"><button aria-label={`Move ${track.title} up`} disabled={i===0} onClick={()=>reorderMusicTrack(track.id,-1)}>↑</button><button aria-label={`Move ${track.title} down`} disabled={i===queue.tracks.length-1} onClick={()=>reorderMusicTrack(track.id,1)}>↓</button><button aria-label={`Remove ${track.title} from queue`} onClick={()=>{removeMusicTrack(track.id);requestAnimationFrame(()=>{const buttons=dock.current?.querySelectorAll<HTMLButtonElement>('.queue-track');(buttons?.[Math.min(i,(buttons?.length||1)-1)]||queueButton.current)?.focus();});}}>Remove</button></div></li>)}</ol>}</section>}
+ const audioElement=<audio ref={bindAudio} crossOrigin="anonymous" preload="none" data-representation-id={current?.representationId} onLoadedMetadata={e=>{setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0));const pending=pendingSeek.current;if(pending?.element===e.currentTarget){pendingSeek.current=undefined;try{e.currentTarget.currentTime=pending.position;}catch{setError('Couldn’t resume from the saved position.');}}}} onDurationChange={e=>setDuration(live.current?.duration||(Number.isFinite(e.currentTarget.duration)?(live.current?.offset||0)+e.currentTarget.duration:0))} onTimeUpdate={e=>{if(loaded.current&&!liveSeek.current)setPosition((live.current?.offset||0)+e.currentTarget.currentTime);}} onPlay={e=>{if(!e.currentTarget.paused)setState('Now playing');}} onPause={e=>{if(e.currentTarget.paused&&!e.currentTarget.ended&&e.currentTarget.currentSrc)setState('Paused');}} onEnded={e=>{if(e.currentTarget.ended)move(1,true);}} onError={e=>{if(e.currentTarget.error&&e.currentTarget.currentSrc&&current){if(!live.current&&remotePlaybackActive(musicTrackUrl(current))&&!recoveredGrant.current){recoveredGrant.current=true;void play(current,true);return;}loaded.current='';setState('Paused');setError('Playback failed. Press Play to try again.');if(!e.currentTarget.currentSrc.includes('/music-stream/'))void diagnosePlaybackFailure(current,e.currentTarget,generation.current);}}}/>;
+ // The dock stays mounted with the audio element inside it, so showing or
+ // hiding the bar never interrupts playback. With nothing playing, a saved
+ // queue shows only a small Resume button.
+ const resumeButton=!visible&&queue.tracks.length>0&&<button className="resume-queue" onClick={()=>{const track=current??queue.tracks[0];if(track)void play(track);}}>Resume queue ({queue.tracks.length})</button>;
+ return <><section ref={dock} className="music-player music-dock" aria-label="Music player" hidden={!visible}>{audioElement}{visible&&<>  {expanded&&<section className="music-queue" aria-label="Currently playing list" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setExpanded(false);queueButton.current?.focus();}}}><header><div><h3>Currently playing</h3></div><button onClick={()=>{clearMusicQueue();setExpanded(false);queueButton.current?.focus();}}>Clear queue</button></header>{!queue.tracks.length?<p>Add tracks from an album’s info view.</p>:<ol>{queue.tracks.map((track,i)=><li key={track.id} aria-current={track.id===queue.current?'true':undefined}><button className="queue-track" onClick={()=>void play(track)}><strong>{track.position}. {track.title}</strong><small>{track.album}</small></button><div className="queue-actions"><button aria-label={`Move ${track.title} up`} disabled={i===0} onClick={()=>reorderMusicTrack(track.id,-1)}>↑</button><button aria-label={`Move ${track.title} down`} disabled={i===queue.tracks.length-1} onClick={()=>reorderMusicTrack(track.id,1)}>↓</button><button aria-label={`Remove ${track.title} from queue`} onClick={()=>{removeMusicTrack(track.id);requestAnimationFrame(()=>{const buttons=dock.current?.querySelectorAll<HTMLButtonElement>('.queue-track');(buttons?.[Math.min(i,(buttons?.length||1)-1)]||queueButton.current)?.focus();});}}>Remove</button></div></li>)}</ol>}</section>}
   <div className="dock-main">
    <div className="dock-track">
     {current?.artwork&&<img src={`/api/v1/collections/${current.collectionId}/assets/${current.artwork}/thumbnail`} alt=""/>}
@@ -156,8 +163,10 @@ export default function MusicPlayer({browsingMusic,onSessionExpired}:{browsingMu
     <label className="seek"><span>{time(position)}</span><input aria-label={`Seek in ${current?.title||'track'}`} type="range" min="0" max={duration||0} step="0.05" value={Math.min(position,duration||0)} disabled={(!loaded.current&&!live.current)||duration<=0} onChange={e=>seekTo(Number(e.target.value))}/><span>{time(duration)}</span></label>
    </div>
    <PlaybackFormatControl compact/>
+   <button className="dock-close" aria-label="Stop and hide player" title="Stop and hide player" onClick={()=>{release();setExpanded(false);}}>×</button>
    <button ref={queueButton} className="queue-toggle" aria-label={`Queue (${queue.tracks.length})`} title={`Queue (${queue.tracks.length})`} aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}><DockIcon name="queue"/></button>
   </div>
   {error&&<p role="alert" className="error dock-error">{error}</p>}
- </section>;
+ </>}</section>{resumeButton}</>;
 }
+registerMediaSurface('music',MusicPlayer);

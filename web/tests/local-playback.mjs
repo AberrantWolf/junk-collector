@@ -84,10 +84,15 @@ try{
   for(let n=0;n<100;n++){const current=await call('GET','/items/'+id);const rep=current.captures.flatMap(c=>c.representations)[0];if(rep){const track={id:crypto.randomUUID(),itemId:id,collectionId:collection.id,album:'Local fixture',title:'Private route audio',position:1,representationId:rep.id,fileIndex:0,mediaType:'audio/wav',original:true};localStorage.setItem('collector.music-queue.v1.'+me.user_id,JSON.stringify({tracks:[track],current:track.id}));return {track,user:me.user_id,path:`/api/v1/items/${id}/representations/${rep.id}/0`};}await new Promise(r=>setTimeout(r,100));}throw new Error('fixture publication timed out');
  });
  await page.unroute('**/api/v1/items/*');assert.equal(injectedReadContention,true,'fixture must exercise publication-read contention');
- await page.reload();const player=page.getByRole('region',{name:'Music player'});await player.waitFor();
- await player.getByLabel('Playback format').selectOption('original');
- // Browsing never initiates QUIC or prompts; Play starts trusted discovery.
+ await page.reload();
+ // A saved queue shows only a Resume button until something plays, and
+ // browsing never initiates QUIC or prompts; Play starts trusted discovery.
+ assert.equal(await page.getByRole('region',{name:'Music player'}).count(),0);
  assert.equal(await page.locator('audio').getAttribute('src'),null);
+ await page.getByRole('button',{name:/^Resume queue/}).click();
+ const player=page.getByRole('region',{name:'Music player'});await player.waitFor();
+ await player.getByRole('button',{name:'Pause',exact:true}).click();
+ await player.getByLabel('Playback format').selectOption('original');
  const mediaResponses=[];page.on('response',response=>{if(new URL(response.url()).pathname===fixture.path)mediaResponses.push(response.fromServiceWorker());});
  await player.getByRole('button',{name:'Play',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>.1;});
@@ -104,10 +109,10 @@ try{
  assert.equal(await page.evaluate(async()=>(await fetch('/api/v1/auth/logout',{method:'POST'})).status),204);
  await page.getByLabel('Username',{exact:true}).waitFor();
  assert.deepEqual(await revokedAudio.evaluate(audio=>({paused:audio.paused,src:audio.getAttribute('src')})),{paused:true,src:null});await revokedAudio.dispose();
- await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await player.waitFor();
+ await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:/^Resume queue/}).waitFor();
  // Fail closed when the transport is unavailable: no ordinary HTTP media request.
  await page.reload();let mediaRequests=0;page.on('request',request=>{if(request.url().startsWith(origin+fixture.path))mediaRequests++;});
- await page.evaluate(()=>{window.WebTransport=undefined;});await player.getByRole('button',{name:'Play',exact:true}).click();await player.getByRole('alert').waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
+ await page.evaluate(()=>{window.WebTransport=undefined;});await page.getByRole('button',{name:/^Resume queue/}).click();await player.getByRole('alert').waitFor();assert.equal(await page.locator('audio').getAttribute('src'),null);assert.equal(mediaRequests,0);
  assert.deepEqual(errors,[]);console.log(`Local playback passed in Chrome ${await browser.version()}: automatic pinned QUIC, actual audio, forward/back seeks, public media refusal, wrong pin, live logout/source release and unsupported-transport fail closed.`);
 }finally{
  await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});
