@@ -5,6 +5,7 @@ import type {components} from './generated/api';
 import MusicTracks from './music-tracks';
 import BulkReview,{type Summary} from './bulk-library-review';
 import {PreparationFormat,conversionProfile,preparationPreset,preparationQuery,profileLabel,type PreparationPreset} from './audio-profiles';
+import SavedFormats from './saved-formats';
 
 type S=components['schemas'];
 type Entry=S['PreparationCareEntry'];
@@ -27,6 +28,7 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
  const [loading,setLoading]=useState(true);
  const [starting,setStarting]=useState(false);
  const [reload,setReload]=useState(0);
+ const [mode,setMode]=useState<'saved'|'add'>('saved');
  const lastRevision=useRef('');
  const startRequest=useRef<AbortController|null>(null);
  const startReceipt=useRef<{body:string;key:string}|undefined>(undefined);
@@ -126,11 +128,13 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
  function toggle(id:string,on:boolean){
   updateSelection(value=>value.all?{...value,exclusions:on?value.exclusions.filter(x=>x!==id):[...value.exclusions,id]}:{...value,selected:on?[...value.selected,id]:value.selected.filter(x=>x!==id)});
  }
- return <section className={`care-workspace ${itemId||batchId?'care-review-open':''}`} aria-label="Prepare audio workspace">
+ // Saved formats is the default view; the preparation tools are one action in it.
+ if(mode==='saved'&&!itemId&&!batchId)return <SavedFormats collection={collection} search={search} onOpenAlbum={item=>{setMode('add');onQuery({item});}} onAddFormat={()=>setMode('add')} onSessionExpired={onSessionExpired}/>;
+ return <section className={`care-workspace ${itemId||batchId?'care-review-open':''}`} aria-label="Prepare audio workspace"><button className="care-return" onClick={()=>{setMode('saved');onQuery({item:'',batch:''});}}>Back to saved formats</button>
   <div className="care-list">
    {!itemId&&<PreparationFormat value={preset} disabled={starting} onChange={preparationPreset=>onQuery({preparationPreset,item:'',batch:''})}/>}
    <label>Show<select aria-label="Show" value={attention?'missing':'all'} disabled={starting} onChange={e=>onQuery({attention:e.target.value==='missing',item:'',batch:''})}>
-    <option value="missing">Albums needing {profile.codec==='opus'?'Opus':'FLAC'}</option><option value="all">All music albums</option>
+    <option value="missing">Albums without {label}</option><option value="all">All music albums</option>
    </select></label>
    {error&&<p role="alert" className="notice error">{error}</p>}
    {listError&&<p role="alert" className="notice error">{listError} <button onClick={()=>setReload(v=>v+1)}>Retry loading albums</button></p>}

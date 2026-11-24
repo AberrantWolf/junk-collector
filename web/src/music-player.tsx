@@ -35,7 +35,10 @@ export default function MusicPlayer({onSessionExpired}:MediaSurfaceProps){
  useEffect(()=>{if(active.current!==current?.id){release();setError('');}},[current?.id]);
  // The bar shows only while something is playing or paused in this tab.
  // A saved queue alone shows a small Resume button instead.
- const visible=expanded||['Loading','Now playing','Paused'].includes(state);
+ // Show queue keeps the bar open until it is closed, even while nothing plays.
+ const [shown,setShown]=useState(false);
+ // An error stays on screen even after playback stops, until it is dismissed.
+ const visible=shown||expanded||!!error||['Loading','Now playing','Paused'].includes(state);
  useEffect(()=>{if(!visible)return;const element=dock.current;if(!element)return;const observer=new ResizeObserver(()=>document.documentElement.style.setProperty('--music-dock-height',`${element.getBoundingClientRect().height}px`));observer.observe(element);document.body.classList.add('has-music-dock');return()=>{observer.disconnect();document.body.classList.remove('has-music-dock');document.documentElement.style.removeProperty('--music-dock-height');};},[visible]);
  // The queue holds immutable files, including retained historical captures.
  async function checkTrack(track:QueuedTrack,signal:AbortSignal,renew=false){
@@ -144,7 +147,7 @@ export default function MusicPlayer({onSessionExpired}:MediaSurfaceProps){
  // The dock stays mounted with the audio element inside it, so showing or
  // hiding the bar never interrupts playback. With nothing playing, a saved
  // queue shows only a small Resume button.
- const resumeButton=!visible&&queue.tracks.length>0&&<button className="resume-queue" onClick={()=>{const track=current??queue.tracks[0];if(track)void play(track);}}>Resume queue ({queue.tracks.length})</button>;
+ const resumeButton=!visible&&queue.tracks.length>0&&<div className="resume-queue" role="group" aria-label="Saved queue"><button onClick={()=>{const track=current??queue.tracks[0];if(track)void play(track);}}>Resume queue ({queue.tracks.length})</button><button onClick={()=>{setShown(true);setExpanded(true);}}>Show queue</button></div>;
  return <><section ref={dock} className="music-player music-dock" aria-label="Music player" hidden={!visible}>{audioElement}{visible&&<>  {expanded&&<section className="music-queue" aria-label="Currently playing list" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setExpanded(false);queueButton.current?.focus();}}}><header><div><h3>Currently playing</h3></div><button onClick={()=>{clearMusicQueue();setExpanded(false);queueButton.current?.focus();}}>Clear queue</button></header>{!queue.tracks.length?<p>Add tracks from an album’s info view.</p>:<ol>{queue.tracks.map((track,i)=><li key={track.id} aria-current={track.id===queue.current?'true':undefined}><button className="queue-track" onClick={()=>void play(track)}><strong>{track.position}. {track.title}</strong><small>{track.album}</small></button><div className="queue-actions"><button aria-label={`Move ${track.title} up`} disabled={i===0} onClick={()=>reorderMusicTrack(track.id,-1)}>↑</button><button aria-label={`Move ${track.title} down`} disabled={i===queue.tracks.length-1} onClick={()=>reorderMusicTrack(track.id,1)}>↓</button><button aria-label={`Remove ${track.title} from queue`} onClick={()=>{removeMusicTrack(track.id);requestAnimationFrame(()=>{const buttons=dock.current?.querySelectorAll<HTMLButtonElement>('.queue-track');(buttons?.[Math.min(i,(buttons?.length||1)-1)]||queueButton.current)?.focus();});}}>Remove</button></div></li>)}</ol>}</section>}
   <div className="dock-main">
    <div className="dock-track">
@@ -163,7 +166,7 @@ export default function MusicPlayer({onSessionExpired}:MediaSurfaceProps){
     <label className="seek"><span>{time(position)}</span><input aria-label={`Seek in ${current?.title||'track'}`} type="range" min="0" max={duration||0} step="0.05" value={Math.min(position,duration||0)} disabled={(!loaded.current&&!live.current)||duration<=0} onChange={e=>seekTo(Number(e.target.value))}/><span>{time(duration)}</span></label>
    </div>
    <PlaybackFormatControl compact/>
-   <button className="dock-close" aria-label="Stop and hide player" title="Stop and hide player" onClick={()=>{release();setExpanded(false);}}>×</button>
+   <button className="dock-close" aria-label="Stop and hide player" title="Stop and hide player" onClick={()=>{release();setExpanded(false);setShown(false);setError('');}}>×</button>
    <button ref={queueButton} className="queue-toggle" aria-label={`Queue (${queue.tracks.length})`} title={`Queue (${queue.tracks.length})`} aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}><DockIcon name="queue"/></button>
   </div>
   {error&&<p role="alert" className="error dock-error">{error}</p>}

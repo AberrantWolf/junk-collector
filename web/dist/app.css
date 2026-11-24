@@ -160,7 +160,7 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 :root{--row-stripe:color-mix(in srgb,var(--paper) 65%,var(--accent))}
 .striped-rows > :nth-child(even){background:var(--row-stripe)}
 /* Review: tabs with counts, rows that say what is wrong, and a fix panel. */
-.review-tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--line)}
+.review-tabs{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:-1rem;border-bottom:1px solid var(--line)}
 .review-tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;padding:.55rem .8rem;color:var(--muted);font-weight:550}
 .review-tabs button[aria-current=page]{color:var(--ink);border-bottom-color:var(--action)}
 .review-group{margin:.5rem 0 1.5rem}
@@ -188,6 +188,14 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .metadata-attention li button,.accepted-reason button{padding:.2rem .5rem;font-size:.75rem}
 .accepted-reason{display:inline-flex;align-items:center;gap:.3rem;margin-inline-end:.6rem}
 .nav-badge{margin-inline-start:auto;align-self:center;min-width:1.4rem;padding:.05rem .4rem;border-radius:999px;background:var(--warning-surface);color:var(--ink);border:1px solid var(--warning-line);font-size:.72rem;text-align:center}
+/* Saved formats: totals, per-album formats and their actions. */
+.saved-format-totals{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;list-style:none;padding:0;margin:.75rem 0}
+.saved-format-list{display:grid;gap:.4rem;padding:.5rem;min-width:16rem}
+.saved-format{display:grid;gap:.15rem;padding:.35rem .5rem;border:1px solid var(--line);border-radius:.35rem;background:var(--surface-soft)}
+.saved-format.partial{border-color:var(--warning-line);background:var(--warning-surface)}
+.saved-format small{color:var(--muted)}
+.saved-format .button-row button{padding:.2rem .5rem;font-size:.75rem}
+.saved-format-row{align-items:flex-start;flex-wrap:wrap}
 
 .art-placeholder {
   display: grid;
@@ -886,8 +894,8 @@ label.intake-select {
 .other-tracks .music-disc{color:var(--ink);font-size:initial}
 .album-format-choice{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:8px 0}
 /* With nothing playing, a saved queue shows only this button, not the player bar. */
-.resume-queue{position:fixed;inset-inline-end:16px;bottom:16px;z-index:20;padding:.55rem .9rem;border-radius:999px;background:var(--surface-warm);border:1px solid var(--line);box-shadow:0 2px 10px var(--shadow);font:inherit;cursor:pointer}
-.resume-queue:focus-visible,.dock-close:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.resume-queue{position:fixed;inset-inline-end:16px;bottom:16px;z-index:20;display:flex;gap:.4rem;padding:.35rem;border-radius:999px;background:var(--surface-warm);border:1px solid var(--line);box-shadow:0 2px 10px var(--shadow)}.resume-queue button{border-radius:999px;padding:.4rem .8rem}
+.resume-queue button:focus-visible,.dock-close:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .dock-close{min-width:2.25rem;font-size:1.25rem;line-height:1}
 
 .artwork-stack{display:grid;justify-items:center;flex:none}.artwork-stack .artwork.large{margin-bottom:8px}.metadata-state{max-width:70px;margin-top:5px;color:var(--warning);font-size:9px;line-height:1.2;text-align:center}.detail>.artwork-stack{justify-items:start}.detail>.artwork-stack .metadata-state{max-width:none;margin-bottom:18px}

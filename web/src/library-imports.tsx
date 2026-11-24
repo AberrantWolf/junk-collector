@@ -303,7 +303,9 @@ export default function Imports({userId,collection,itemId,collections,onQuery,on
  function groupTitle(key:string,title:string){setPackages(current=>current.map(p=>p.destination.destination==='album_group'&&p.destination.key===key?{...p,destination:{...p.destination,title:title.trim()?title:null}}:p));}
  const missingAlbumSelection=packages.some((entry,index)=>entry.package.album_tracks?!entry.package.album_tracks.length:plans[index]?.music_layout?.needs_attention);
  const missingCopy=packages.some(p=>p.destination.destination!=='separate'&&!p.destination.copy_key.trim());
- const needsDecision=(index:number)=>{const entry=packages[index];const plan=plans[index];return expanded.has(index)||!!plan?.blockers.length||(entry.package.album_tracks?!entry.package.album_tracks.length:!!plan?.music_layout?.needs_attention)||entry.destination.destination!=='separate'&&!entry.destination.copy_key.trim();};
+ // Small imports show every package open; larger ones list the packages that
+ // need a decision first and keep the rest compact.
+ const needsDecision=(index:number)=>{const entry=packages[index];const plan=plans[index];return packages.length<=10||expanded.has(index)||!!plan?.blockers.length||(entry.package.album_tracks?!entry.package.album_tracks.length:!!plan?.music_layout?.needs_attention)||entry.destination.destination!=='separate'&&!entry.destination.copy_key.trim();};
  const decisionPositions=packages.map((_,index)=>index).filter(needsDecision);
  const readyPositions=packages.map((_,index)=>index).filter(index=>!needsDecision(index));
  function reviewedPackage(entry:Package,index:number):S['IntakePackage']{
