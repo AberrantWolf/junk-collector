@@ -19,10 +19,12 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  for(const name of names)await chooser.getByLabel(name,{exact:true}).check();
  await imports.getByRole('button',{name:'Review packages',exact:true}).click();
  await imports.getByRole('button',{name:'Start import',exact:true}).click();
- await expect.poll(()=>new URL(page.url()).searchParams.get('item')).toBeTruthy();
- const intake=new URL(page.url()).searchParams.get('item');
+ // Inbox imports open Review > In progress; this journey watches the batch page.
+ await expect.poll(()=>new URL(page.url()).searchParams.get('intake')).toBeTruthy();
+ const intake=new URL(page.url()).searchParams.get('intake');
+ await page.goto(`${origin}/imports?collection=${collectionId}&item=${intake}`);
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).package_count,intake)).toBe(4);
- await expect(imports.getByRole('button',{name:'Review import',exact:true})).toHaveCount(4);
+ await expect(imports.getByRole('button',{name:'Open in Review',exact:true})).toHaveCount(4);
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intake),{timeout:90000}).toBe('completed');
  const members=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);
  await expect.poll(async()=>new Set((await members()).map(member=>member.import.target_item_id)).size,{timeout:60000}).toBe(1);
@@ -59,7 +61,7 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  await page.goBack();if(!process.env.GROUPING_AMBIGUITY)await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track')).toHaveCount(4);
  await page.goForward();await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeVisible();assert.equal(new URL(page.url()).searchParams.get('item'),destination);
  if(process.env.GROUPING_AMBIGUITY){
-  const review=page.getByRole('region',{name:'Review selected metadata'});
+  const review=page.getByRole('region',{name:'Review selected entry'});
   await expect(review.getByRole('button',{name:'Use this album release',exact:true}).first()).toBeVisible();
   await expect(review.getByText('Another possible album',{exact:true}).first()).toBeVisible();
  }
@@ -68,7 +70,7 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  await page.screenshot({path:path.join(scratch,'automatic-grouping-mobile.png'),fullPage:true});
  if(process.env.GROUPING_AMBIGUITY){
   const readMetadata=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/metadata`)).json()),destination);
-  const review=page.getByRole('region',{name:'Review selected metadata'});
+  const review=page.getByRole('region',{name:'Review selected entry'});
   await review.getByRole('article').filter({has:page.getByText('Bulk resolved album',{exact:true})}).first().getByRole('button',{name:'Use this album release',exact:true}).click();
   await expect.poll(async()=>(await readMetadata()).authority?.selected_candidate?.provider_record_id).toBe('11111111-1111-4111-8111-111111111111');
   await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeDisabled();
@@ -84,8 +86,8 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  await expect.poll(async()=>new Set((await members()).map(member=>member.import.target_item_id)).size).toBe(separated);
  await expect.poll(()=>new URL(page.url()).searchParams.has('item')).toBe(false);
  await restartServer();await page.reload({waitUntil:'domcontentloaded'});
- const metadata=page.getByRole('region',{name:'Metadata workspace'});
- await metadata.getByLabel('Show',{exact:true}).selectOption('all');
+ const metadata=page.getByRole('region',{name:'Review workspace'});
+ await metadata.getByRole('button',{name:'All entries',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
  await expect(metadata.locator('[data-item-id]')).toHaveCount(separated);
  assert.equal(new Set((await members()).map(member=>member.import.target_item_id)).size,separated);

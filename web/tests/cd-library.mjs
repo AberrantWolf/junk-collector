@@ -90,7 +90,7 @@ try{
  await page.keyboard.press('Enter');
  await expect(player.getByLabel('Opus bitrate (kbps)')).toHaveValue('113');
  await expect(player.getByLabel('Opus bitrate (kbps)')).toBeVisible();
- assert.equal(await player.locator('.music-dock').evaluate(dock=>dock.scrollWidth>dock.clientWidth),false,'player settings overflow on a narrow screen');
+ assert.equal(await player.evaluate(dock=>dock.scrollWidth>dock.clientWidth),false,'player settings overflow on a narrow screen');
  await player.getByLabel('Opus bitrate (kbps)').press('Escape');
  await expect(bitrateSettings).toBeFocused();
  await expect(player.getByLabel('Opus bitrate (kbps)')).toBeHidden();

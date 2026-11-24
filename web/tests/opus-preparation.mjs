@@ -126,7 +126,7 @@ opus = "${wrapper}"
  await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128`);
  const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
  await expect.poll(()=>preparationRows(page,collection,128)).toBe(0);
- await expect(preparation.getByRole('button',{name:'Select all matching results'})).toBeVisible();
+ await expect(preparation.getByRole('button',{name:'Select all matching entries'})).toBeVisible();
  await expect(preparation.locator('[data-item-id]')).toHaveCount(0);
  const intakePage=await context.newPage();
  intakePage.on('pageerror',error=>errors.push(error.message));
@@ -165,7 +165,7 @@ opus = "${wrapper}"
  const cue=path.join(scratch,'Opus CD.cue'),bin=path.join(scratch,'disc.bin');
  await writeFile(cue,'FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');
  await writeFile(bin,Buffer.alloc(225*2352,1));
- await imports.getByRole('button',{name:'Back to imports',exact:true}).click();
+ await imports.getByRole('button',{name:'Back to Add to library',exact:true}).click();
  const override=await reviewImport(imports,[cue,bin]);
  await expect(override).toHaveValue('default');
  await override.selectOption('none');
@@ -194,7 +194,7 @@ opus = "${wrapper}"
  await bitrate.selectOption('128');
  await expect(digitalRow).toBeVisible();await expect(cdRow).toBeVisible();
  assert.equal(detailReads,0,'Prepare audio list opened album detail or plans');
- await preparation.getByRole('button',{name:'Select all matching results'}).click();
+ await preparation.getByRole('button',{name:'Select all matching entries'}).click();
  await writeFile(refuse,'refuse');
  const accepted=page.waitForResponse(response=>response.url().endsWith('/api/v1/bulk-library/music-preparation')&&response.request().method()==='POST');
  await preparation.getByRole('button',{name:'Start Opus 128 kbps preparation'}).click();
@@ -291,7 +291,7 @@ opus = "${wrapper}"
   },'PUT');
  }
  await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128&search=Scale%20fixture`);
- const selectAll=preparation.getByRole('button',{name:'Select all matching results'});
+ const selectAll=preparation.getByRole('button',{name:'Select all matching entries'});
  await expect(selectAll).toBeEnabled({timeout:45000});
  await expect(preparation.getByRole('checkbox',{name:/^Select Scale fixture/})).toHaveCount(50);
  await selectAll.click();

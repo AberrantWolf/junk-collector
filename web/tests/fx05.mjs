@@ -50,7 +50,7 @@ try{
  await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);
  await page.locator('.entry-inspection summary').click();
  await page.getByRole('button',{name:'Add file to queue',exact:true}).click();
- const player=page.getByRole('region',{name:'Music player'});await player.getByRole('button',{name:'Play',exact:true}).click();
+ const player=page.getByRole('region',{name:'Music player'});await page.getByRole('button',{name:/^Resume queue/}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
  await clickAction(page,'Replace original files');
  const clean=editor.getByRole('region',{name:'Replace original files',exact:true});

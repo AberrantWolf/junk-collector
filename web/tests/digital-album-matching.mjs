@@ -71,7 +71,7 @@ try{
  await expect.poll(async()=>{const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intake);item=members[0]?.import?.target_item_id;return members[0]?.import?.outcome;},{timeout:45000}).toBe('succeeded');
  await page.route('**/api/v1/items/'+item,route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'Metadata changed during read'}}}),{times:1});
  await page.route('**/api/v1/library-care/metadata?*',route=>route.fulfill({status:409,json:{error:{code:'revision_conflict',message:'Catalog changed'}}}),{times:1});
- await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);const matching=page.getByRole('region',{name:'Digital album matching'});await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();await expect(page.locator('.care-rows .care-row').first()).toBeVisible();// Hold an accepted response while inventory refresh supersedes its request scope.
+ await page.goto(`${origin}/library-care/metadata?collection=${collection}&tab=all&item=${item}`);const matching=page.getByRole('region',{name:'Digital album matching'});await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();await expect(page.locator('.care-rows .care-row').first()).toBeVisible();// Hold an accepted response while inventory refresh supersedes its request scope.
  let acceptPost,releasePost;let refreshed=false;const accepted=new Promise(resolve=>acceptPost=resolve);const postGate=new Promise(resolve=>{releasePost=resolve;releaseDiscoveryResponse=resolve;});
  const matchUrl=`**/api/v1/items/${item}/digital-album-matches`;
  await page.route(matchUrl,async route=>{if(route.request().method()!=='POST'){await route.continue();return;}const response=await route.fetch();acceptPost();await postGate;await route.fulfill({response}).catch(()=>{});});
@@ -92,7 +92,7 @@ try{
 
  // Reopening recovers the server-owned workflow without a second submission.
  const lostReceipt=`collector.digital-match.${await page.evaluate(async()=>(await(await fetch('/api/v1/me')).json()).user_id)}.${item}`;await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),lostReceipt)).toBeNull();
- await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&item=${item}`);
+ await page.goto(`${origin}/`);await page.goto(`${origin}/library-care/metadata?collection=${collection}&tab=all&item=${item}`);
  await expect(matching.getByRole('button',{name:'Edit track mapping'})).toBeEnabled({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();await expect.poll(async()=>{const jobs=(await matchingJobs(item))?.filter(job=>job.result)||[];return jobs.length>0&&jobs.every(job=>job.result.matches[0]?.mappings.length===1&&job.result.matches[0]?.local_tracks===2);},{timeout:15000}).toBe(true);await expect(matching.getByRole('img',{name:'Cover of Matched album'})).toBeVisible();
  await expect(matching.locator('.digital-match-edition-badge')).toHaveText('Steam');
  await expect(matching.locator('.digital-match-region')).toBeVisible();assert.equal((await matchingJobs(item)).find(job=>job.result)?.result.matches[0].release.country,'XW');
@@ -291,7 +291,7 @@ try{
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await admissionSeen;
  for(const nextItem of newItems){
   await page.route('**/api/v1/items/'+nextItem,route=>route.fulfill({status:503,json:{error:{code:'catalog_busy',message:'Metadata changed during read'}}}),{times:1});
-  await page.getByRole('button',{name:'Back to metadata results',exact:true}).click();
+  await page.getByRole('button',{name:'Back to the list',exact:true}).click();
   await page.locator(`[data-item-id="${nextItem}"]`).click();
   await expect(matching.getByRole('button',{name:'Find matching albums',exact:true})).toBeEnabled();
   const queuedResponse=page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith(`/items/${nextItem}/digital-album-matches`));

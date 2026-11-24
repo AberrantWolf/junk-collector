@@ -40,6 +40,8 @@ try{
  let releasePoll;
  const holdPoll=new Promise(resolve=>{releasePoll=resolve;});
  await page.route(metadataApi,async route=>{
+  // Only the All entries list is modelled; Needs you reads pass through.
+  if(new URL(route.request().url()).searchParams.get('needs_attention')!=='false')return route.continue();
   const read=++metadataReads;
   const response=await route.fetch();
   const result=await response.json();
@@ -51,8 +53,9 @@ try{
   await route.fulfill({response,json:result});
  });
  await page.setViewportSize({width:1360,height:425});
- await nav.getByRole('button',{name:'Metadata',exact:true}).click();
- const metadata=page.getByRole('region',{name:'Metadata workspace'});
+ await nav.getByRole('button',{name:'Review',exact:true}).click();
+ const metadata=page.getByRole('region',{name:'Review workspace'});
+ await metadata.getByRole('button',{name:'All entries',exact:true}).click();
  const row=metadata.locator('[data-item-id]').last();
  await expect(row).toBeVisible();
  await row.scrollIntoViewIfNeeded();
@@ -102,10 +105,10 @@ try{
  await page.setViewportSize({width:1360,height:900});await nav.getByRole('button',{name:'Library',exact:true}).click();
  await page.setViewportSize({width:390,height:844});const toggle=page.locator('.menu-toggle');await expect(toggle).toBeVisible();await expect(nav).toBeHidden();await expect(summary).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await toggle.focus();await page.keyboard.press('Enter');await expect(nav).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');assert.equal(await nav.evaluate(node=>node.scrollWidth>node.clientWidth),false);await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
- await nav.getByRole('button',{name:'Metadata',exact:true}).click();await expect(page.getByRole('heading',{name:'Metadata',exact:true})).toBeVisible();await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();await expect(summary).toContainText('CD collection');
+ await nav.getByRole('button',{name:'Review',exact:true}).click();await expect(page.getByRole('heading',{name:'Review',exact:true})).toBeVisible();await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();await expect(summary).toContainText('CD collection');
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.keyboard.press('Escape');await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).click();await page.getByRole('dialog',{name:'Account & security'}).waitFor();await page.getByRole('button',{name:'Close account and security',exact:true}).click();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();
  await page.setViewportSize({width:1360,height:600});await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
- const client=await browser.newPage();await client.goto('http://localhost:19961');await client.getByLabel('Username',{exact:true}).fill('owner');await client.getByLabel('Password',{exact:true}).fill(password);await client.getByRole('button',{name:'Sign in',exact:true}).click();await client.getByRole('heading',{name:'Library',exact:true}).waitFor();assert.equal(await client.getByRole('button',{name:'Administration',exact:true}).count(),0);assert.equal(await client.getByRole('button',{name:'Imports',exact:true}).count(),0);await expect(client.getByRole('button',{name:'Lists',exact:true})).toBeVisible();
+ const client=await browser.newPage();await client.goto('http://localhost:19961');await client.getByLabel('Username',{exact:true}).fill('owner');await client.getByLabel('Password',{exact:true}).fill(password);await client.getByRole('button',{name:'Sign in',exact:true}).click();await client.getByRole('heading',{name:'Library',exact:true}).waitFor();assert.equal(await client.getByRole('button',{name:'Administration',exact:true}).count(),0);assert.equal(await client.getByRole('button',{name:'Add to library',exact:true}).count(),0);await expect(client.getByRole('button',{name:'Lists',exact:true})).toBeVisible();
  assert.deepEqual(errors,[]);console.log('Navigation acceptance passed: destination/scope separation, populated desktop/mobile screenshots, scope preservation, browser back, search/pagination, keyboard disclosures and focus, mobile/short viewport access, listener exposure.');
 }finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

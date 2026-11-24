@@ -59,7 +59,7 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
  for(const dir of ['#recycle','@eaDir'])await mkdir(path.join(inbox,dir),{recursive:true});
  startProviderFixture();
  for(const manual of [false,true]){
-  await nav.getByRole('button',{name:'Imports',exact:true}).click();
+  await nav.getByRole('button',{name:'Add to library',exact:true}).click();
   const imports=page.getByRole('region',{name:'Imports workspace'});
   await imports.getByRole('combobox',{name:/^Source/}).selectOption('inbox');
   const chooser=imports.getByRole('region',{name:'Inbox package chooser'});
@@ -101,8 +101,12 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
   await page.screenshot({path:path.join(scratch,`review-${manual?'manual':'automatic'}-mobile.png`),fullPage:true});
   await imports.getByRole('button',{name:'Start import',exact:true}).focus();await page.keyboard.press('Enter');
   await page.setViewportSize({width:1440,height:1000});
-  await expect.poll(()=>new URL(page.url()).searchParams.get('item')).toBeTruthy();
-  const intakeId=new URL(page.url()).searchParams.get('item');
+  // An inbox import has nothing to upload, so it opens Review > In progress
+  // for this batch.
+  await expect.poll(()=>new URL(page.url()).searchParams.get('intake')).toBeTruthy();
+  const intakeId=new URL(page.url()).searchParams.get('intake');
+  assert.equal(new URL(page.url()).pathname,'/review');
+  await expect(page.getByRole('region',{name:'Review workspace'}).getByRole('button',{name:'In progress',exact:true})).toHaveAttribute('aria-current','page');
   await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intakeId),{timeout:60000}).toBe('completed');
   const members=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items,intakeId);
   assert.equal(members.length,2);
@@ -125,13 +129,28 @@ export async function intakeReviewJourney(page,{scratch,startProviderFixture,res
     assert.equal(downloaded.status,200);assert.deepEqual(Buffer.from(downloaded.bytes),original);
    }
   }
+  if(!manual){
+   // Look at the real Review screens for this import.
+   const reviewBase=new URL(`/review?collection=${members[0].import.collection_id}`,page.url());
+   await page.goto(`${reviewBase}&tab=all&item=${itemId}`);
+   const panel=page.getByRole('region',{name:'Review selected entry',exact:true});
+   await panel.getByRole('heading',{level:2}).waitFor();
+   await page.screenshot({path:path.resolve(import.meta.dirname,'../test-results/review-entry-desktop.png'),fullPage:true});
+   await page.setViewportSize({width:390,height:844});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Review panel overflows on mobile');
+   await page.screenshot({path:path.resolve(import.meta.dirname,'../test-results/review-entry-mobile.png'),fullPage:true});
+   await page.setViewportSize({width:1440,height:1000});
+   await page.goto(`${reviewBase}&tab=added`);
+   await page.getByRole('region',{name:'Added recently',exact:true}).locator('.review-row').first().waitFor();
+   await page.screenshot({path:path.resolve(import.meta.dirname,'../test-results/review-added-desktop.png'),fullPage:true});
+  }
   await restartServer();
-  await page.reload({waitUntil:'domcontentloaded'});
-  await expect(imports.getByRole('button',{name:'Review import',exact:true})).toHaveCount(2);
+  await page.goto(new URL(`/imports?collection=${members[0].import.collection_id}&item=${intakeId}`,page.url()).href,{waitUntil:'domcontentloaded'});
+  await expect(imports.getByRole('button',{name:'Open in Review',exact:true})).toHaveCount(2);
   assert.equal((await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()),intakeId)).package_count,2);
   const recovered=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),itemId);
   assert.equal(recovered.title,album.title);assert.equal(recovered.specimens.length,album.specimens.length);assert.equal(recovered.captures.length,2);
-  await imports.getByRole('button',{name:'Back to imports',exact:true}).click();
+  await imports.getByRole('button',{name:'Back to Add to library',exact:true}).click();
  }
  console.log('HL-07A passed: real inbox anchor selection, retained privacy/drafts, automatic/manual titles and artwork, one-copy/separate-copy grouping, housekeeping exclusion and restart.');
  return cleanupFixture;

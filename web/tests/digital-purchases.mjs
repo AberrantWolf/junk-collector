@@ -277,8 +277,9 @@ try{
  await page.waitForURL(url=>url.searchParams.has('item'));
  const wavIntake=new URL(page.url()).searchParams.get('item');
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,wavIntake),{timeout:60000}).toBe('completed');
- await imports.getByRole('button',{name:'Review import',exact:true}).click();
- const wavReview=page.getByRole('dialog',{name:'Import review',exact:true});
+ const wavBatch=page.url();
+ await imports.getByRole('button',{name:'Open in Review',exact:true}).click();
+ const wavReview=page.getByRole('region',{name:'Selected import',exact:true});
  // Trailing bytes outside the WAV RIFF segment are reported as an import limitation.
  const wavImport=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items[0].import.import_id,wavIntake);
  const wavLimitations=(await page.evaluate(async id=>(await(await fetch(`/api/v1/ingests/${id}`)).json()),wavImport)).import.limitations;
@@ -286,12 +287,11 @@ try{
  const wavSteps=wavReview.locator('.ingest-steps p');
  await expect(wavSteps).toHaveCount(1);
  await page.reload();
- await imports.getByRole('button',{name:'Review import',exact:true}).click();
  await expect(wavSteps).toHaveCount(1);
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  
- await wavReview.getByRole('button',{name:'Close import review',exact:true}).click();
+ await page.goto(wavBatch);
  await page.setViewportSize({width:1440,height:1000});
  const wavItem=await page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}/members?limit=32`)).json()).items[0].import.target_item_id,wavIntake);
  const wavStored=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()),wavItem);
@@ -357,6 +357,13 @@ try{
  await page.reload();await tracks.getByRole('button',{name:'Play album',exact:true}).click();
  await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');if(audio){audio.loop=true;return !audio.paused&&audio.currentTime>.02;}return false;});
  await player.getByRole('button',{name:'Pause',exact:true}).click();await player.locator('audio').evaluate(audio=>audio.loop=false);
+ // Saved formats lists the FLAC copy made from the album's preparation tools,
+ // with what it was made for; the original is not listed.
+ await page.goto(`${origin}/library-care/music-preparation?collection=${collection}`);
+ const savedFormats=page.getByRole('region',{name:'Saved formats',exact:true});
+ await expect(savedFormats.locator('.saved-format').filter({hasText:'Made for an album'}).first()).toContainText('FLAC');
+ await expect(savedFormats.getByLabel('Space used by saved formats')).toContainText('FLAC');
+ await page.screenshot({path:path.resolve(import.meta.dirname,'../test-results/saved-formats-desktop.png'),fullPage:true});
  // Trailing INFO/ID3 supplies real metadata/artwork; downloads are portable tagged FLACs.
  const taggedFile=path.join(root,'crates/collector-store/tests/fixtures/digital-audio/03-tagged.wav');
  await page.goto(`${origin}/imports?collection=${collection}`);
@@ -635,28 +642,13 @@ try{
  }
  await page.unroute(`**/api/v1/intakes/${steamIntake}/members?*`,shortMembers);
  await page.setViewportSize({width:1440,height:1000});
- let releaseSaved;
- const heldSaved=new Promise(resolve=>{releaseSaved=resolve;});
- const shortSaved=async route=>{
-  const url=new URL(route.request().url());
-  url.searchParams.set('limit','2');
-  if(url.searchParams.has('cursor'))await heldSaved;
-  await route.fulfill({response:await route.fetch({url:url.href})});
- };
- await page.route('**/api/v1/intakes?*',shortSaved);
- const savedList=page.waitForResponse(response=>{const url=new URL(response.url());return url.pathname==='/api/v1/intakes'&&!url.searchParams.has('cursor');});
- await steamImports.getByRole('button',{name:'Back to imports',exact:true}).click();
- const savedImports=steamImports.getByRole('region',{name:'Saved imports'});
- const newestSaved=(await (await savedList).json()).items[0];assert.equal(newestSaved.id,steamIntake);assert.equal(newestSaved.package_count,3);
- const savedRows=savedImports.locator('button.collection-row');
- await expect(savedRows).toHaveCount(2);
- await savedImports.getByRole('button',{name:'More imports',exact:true}).click();
- try{
-  const loading=savedImports.getByRole('button',{name:'Loading imports…',exact:true});
-  await expect(loading).toBeDisabled();
- }finally{releaseSaved();}
- await expect(savedRows).toHaveCount(4);
- await page.unroute('**/api/v1/intakes?*',shortSaved);
+ // Finished batches leave Add to library; their results are in Review.
+ await steamImports.getByRole('button',{name:'Back to Add to library',exact:true}).click();
+ const savedImports=steamImports.getByRole('region',{name:'Unfinished imports'});
+ await expect(savedImports.locator('button.collection-row')).toHaveCount(0);
+ await savedImports.getByRole('button',{name:'See finished imports in Review',exact:true}).click();
+ const added=page.getByRole('region',{name:'Added recently',exact:true});
+ await expect(added.getByText('Game Name OST',{exact:true})).toBeVisible();
  // Immediate Library refresh exposes the newly imported version and its track.
  await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
  await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track .track-title strong[title="FLAC original"]')).toBeVisible();

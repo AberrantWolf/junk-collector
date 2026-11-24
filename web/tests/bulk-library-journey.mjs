@@ -14,7 +14,7 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  }
  await writeFile(path.join(folder,'notes.txt'),'Keep this unassigned file visible in review.');
  startProviderFixture();
- await nav.getByRole('button',{name:'Imports',exact:true}).click();
+ await nav.getByRole('button',{name:'Add to library',exact:true}).click();
  const imports=page.getByRole('region',{name:'Imports workspace'});
  await chooseFolder(page,imports.getByLabel('Choose folders',{exact:true}),folder);
  await imports.getByRole('button',{name:'Start import',exact:true}).waitFor();
@@ -39,17 +39,17 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const ids=members.map(m=>m.import.target_item_id);assert.equal(new Set(ids).size,2,'Conflicting release disc placements must remain available for reviewed grouping');
  await expect.poll(()=>page.evaluate(async ids=>Promise.all(ids.map(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).title)),ids),{timeout:60000}).toEqual(['Bulk resolved album','Bulk resolved album']);
  await expect.poll(()=>page.evaluate(async id=>(await(await fetch(`/api/v1/intakes/${id}`)).json()).state,intakeId),{timeout:60000}).toBe('completed');
- await nav.getByRole('button',{name:'Metadata',exact:true}).click();
+ await nav.getByRole('button',{name:'Review',exact:true}).click();
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
- const metadata=page.getByRole('region',{name:'Metadata workspace'});
- await metadata.getByLabel('Show',{exact:true}).selectOption('all');
+ const metadata=page.getByRole('region',{name:'Review workspace'});
+ await metadata.getByRole('button',{name:'All entries',exact:true}).click();
  await metadata.locator(`[data-item-id="${ids[0]}"]`).click();
- await metadata.getByRole('region',{name:'Review selected metadata'}).getByRole('heading',{name:'Bulk resolved album',exact:true}).waitFor();
- await metadata.getByRole('button',{name:'Back to metadata results',exact:true}).click();
+ await metadata.getByRole('region',{name:'Review selected entry'}).getByRole('heading',{name:'Bulk resolved album',exact:true}).waitFor();
+ await metadata.getByRole('button',{name:'Back to the list',exact:true}).click();
  await expect(metadata.locator(`[data-item-id="${ids[0]}"]`)).toBeFocused();
- assert.equal(await metadata.getByLabel('Show',{exact:true}).inputValue(),'all');
+ await expect(metadata.getByRole('button',{name:'All entries',exact:true})).toHaveAttribute('aria-current','page');
  for(const id of ids){const row=metadata.locator(`[data-item-id="${id}"]`).locator('..');await row.getByRole('checkbox').check();}
- await metadata.getByRole('button',{name:'Group into an album',exact:true}).click();
+ await metadata.getByRole('button',{name:'Group into one album',exact:true}).click();
  const grouping=page.getByRole('region',{name:'Review album grouping'});
  await grouping.getByLabel('Destination album',{exact:true}).selectOption(ids[1]);
  for(const field of ['Title','Artist / edition text','Identity link','Album information','Selected artwork'])await grouping.getByLabel(field,{exact:true}).selectOption(ids[1]);
@@ -79,7 +79,8 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
  const livePlayer=page.getByRole('region',{name:'Music player'});
  await expect.poll(()=>livePlayer.locator('audio').evaluate(audio=>!audio.paused&&audio.currentTime>0)).toBe(true);
  if(hasFlac){
-  await nav.getByRole('button',{name:'Prepare audio',exact:true}).click();
+  await nav.getByRole('button',{name:'Saved formats',exact:true}).click();
+  await page.getByRole('region',{name:'Saved formats',exact:true}).getByRole('button',{name:'Add a format…',exact:true}).click();
   const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
   const row=preparation.locator(`[data-item-id="${destinationId}"]`).locator('..');await row.getByRole('checkbox').check();
   await preparation.getByRole('button',{name:'Start FLAC preparation',exact:true}).click();
@@ -132,9 +133,8 @@ export async function bulkLibraryJourney(page,{scratch,hasFlac,startProviderFixt
   await player.locator('audio').evaluate(audio=>{audio.loop=true;});
   await page.waitForFunction(()=>{const audio=document.querySelector('.music-player audio');return audio&&!audio.paused&&audio.currentTime>0.1;});
   const playing=await player.locator('audio').getAttribute('data-representation-id');
-  await nav.getByRole('button',{name:'Metadata',exact:true}).click();
-  await page.getByRole('region',{name:'Metadata workspace'}).getByLabel('Show',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('region',{name:'Metadata workspace'}).getByLabel('Show',{exact:true}).inputValue(),'all','Metadata filter was lost across workspaces');
+  await nav.getByRole('button',{name:'Review',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Review workspace'}).getByRole('button',{name:'All entries',exact:true})).toHaveAttribute('aria-current','page');
   await page.waitForTimeout(300);assert.equal(await player.locator('audio').getAttribute('data-representation-id'),playing);
   assert.equal(await player.locator('audio').evaluate(a=>a.paused),false,'Workspace navigation stopped actual playback');
   await player.getByRole('button',{name:'Pause',exact:true}).click();
