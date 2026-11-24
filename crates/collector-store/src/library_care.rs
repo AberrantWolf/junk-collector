@@ -421,7 +421,8 @@ impl LibraryCarePort for Store {
         };
         // Saved formats are representations derived from an original. Filters
         // read catalog rows only; no payload is opened.
-        let saved = "json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL AND (?4 IS NULL OR json_extract(r.value,'$.profile.codec')=?4) AND (?5 IS NULL OR json_extract(r.value,'$.profile.bitrate_kbps')=?5) AND (?6 IS NULL OR json_extract(r.value,'$.requested_by')=?6)";
+        // Only copies made here (they have a conversion recipe) are listed.
+        let saved = "json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL AND EXISTS(SELECT 1 FROM conversion_recipes cr WHERE cr.id=json_extract(r.value,'$.id') AND cr.collection_id=i.collection_id) AND (?4 IS NULL OR json_extract(r.value,'$.profile.codec')=?4) AND (?5 IS NULL OR json_extract(r.value,'$.profile.bitrate_kbps')=?5) AND (?6 IS NULL OR json_extract(r.value,'$.requested_by')=?6)";
         let scope = "i.deleted=0 AND (?2 IS NULL OR i.collection_id=?2) AND (?3='' OR instr(lower(i.title||' '||i.subtitle),lower(?3))>0)";
         let grants = "JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1";
         let db = self.read_db()?;

@@ -32189,6 +32189,18 @@ fn saved_formats_list_their_origin_and_can_be_removed_without_touching_originals
         Err(Error::Forbidden)
     ));
     let target = &flac.captures[0];
+    let before = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let payload_of = |role_is_original: bool| {
+        let id = before
+            .representations
+            .iter()
+            .find(|r| (r.role == RepresentationRole::PreservationMaster) == role_is_original)
+            .unwrap()
+            .id;
+        walkdir_find(&_root.path().join("archive"), &id.to_string())
+    };
+    let copy_folder = payload_of(false).expect("saved copy folder");
+    let original_folder = payload_of(true).expect("original folder");
     let removed = service
         .remove_saved_format(
             &actor,
@@ -32201,7 +32213,11 @@ fn saved_formats_list_their_origin_and_can_be_removed_without_touching_originals
             &command(),
         )
         .unwrap();
-    assert!(removed.formats.is_empty());
+    assert!(removed.album.formats.is_empty());
+    // The copy's files are gone and the space is reported; the originals stay.
+    assert!(!copy_folder.exists());
+    assert_eq!(removed.freed_bytes, flac.bytes);
+    assert!(original_folder.exists());
     let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
     assert!(
         capture
@@ -32240,4 +32256,49 @@ fn saved_formats_list_their_origin_and_can_be_removed_without_touching_originals
             )
             .is_err()
     );
+    // The same format can be made again. The removed copy's records stay in
+    // the archive, so the new copy gets its own identity.
+    service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    while service.run_next_job("saved-formats-again").unwrap() {}
+    let again = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let remade = again
+        .representations
+        .iter()
+        .find(|r| r.profile == Some(ConversionProfile::Flac))
+        .expect("format made again");
+    assert!(!before.representations.iter().any(|r| r.id == remade.id));
+    assert!(payload_of_id(&_root, remade.id).is_some());
+    // Reopening validates every listed copy against its records.
+    drop(service);
+    drop(store);
+    Store::open(_root.path().join("archive"), _root.path().join("state")).unwrap();
+}
+
+fn payload_of_id(root: &tempfile::TempDir, id: RepresentationId) -> Option<std::path::PathBuf> {
+    walkdir_find(&root.path().join("archive"), &id.to_string())
+}
+
+/// Find a payload folder by representation id.
+fn walkdir_find(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(root).ok()? {
+        let path = entry.ok()?.path();
+        if path.is_dir() {
+            if path.file_name().is_some_and(|n| n == name)
+                && path.parent().is_some_and(|p| p.ends_with("payload"))
+            {
+                return Some(path);
+            }
+            if let Some(found) = walkdir_find(&path, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
 }

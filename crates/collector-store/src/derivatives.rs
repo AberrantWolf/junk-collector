@@ -491,6 +491,100 @@ impl Store {
 }
 
 impl Store {
+    /// Delete the payload folders of saved formats that a capture no longer
+    /// lists. A folder is deleted only when its name is a representation with a
+    /// conversion recipe in this collection whose source is one of this
+    /// capture's originals, so originals and unknown folders are never touched.
+    /// Running it again after a crash finishes what is left. Returns the bytes
+    /// freed.
+    pub(crate) fn discard_unlisted_derivative_payloads(
+        &self,
+        capture_id: CaptureId,
+    ) -> Result<u64> {
+        let _writer = lock(&self.writer)?;
+        self.archive_guard.check()?;
+        let capture = self.capture(capture_id)?;
+        let (root, recipes) = {
+            let db = lock(&self.db)?;
+            let root = collection_path(&db, &self.archive, capture.collection_id)?
+                .join("captures")
+                .join(capture.id.to_string())
+                .join("payload");
+            if !root.try_exists().map_err(storage)? {
+                return Ok(0);
+            }
+            let mut recipes = Vec::new();
+            for entry in fs::read_dir(&root).map_err(storage)? {
+                let entry = entry.map_err(storage)?;
+                if !entry.file_type().map_err(storage)?.is_dir() {
+                    continue;
+                }
+                let Some(id) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| name.parse::<RepresentationId>().ok())
+                else {
+                    continue;
+                };
+                if capture.representations.iter().any(|r| r.id == id) {
+                    continue;
+                }
+                let recipe: Option<String> = db
+                    .query_row(
+                        "SELECT record FROM conversion_recipes WHERE id=? AND collection_id=?",
+                        params![id.to_string(), capture.collection_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?;
+                if let Some(recipe) = recipe {
+                    recipes.push((
+                        id,
+                        serde_json::from_str::<ConversionRecipe>(&recipe).map_err(storage)?,
+                    ));
+                }
+            }
+            (root, recipes)
+        };
+        let mut freed = 0;
+        for (id, recipe) in recipes {
+            let from_this_capture = matches!(recipe.source_fingerprint.source,
+            PackageScope::Representation(source) if capture.representations.iter().any(|r| {
+                r.id == source && r.role == RepresentationRole::PreservationMaster
+            }));
+            if recipe.id.0 != id.0 || !from_this_capture {
+                continue;
+            }
+            let folder = root.join(id.to_string());
+            freed += directory_bytes(&folder)?;
+            fs::remove_dir_all(&folder).map_err(storage)?;
+        }
+        if freed > 0 {
+            sync_directory(&root)?;
+        }
+        Ok(freed)
+    }
+}
+
+/// Sizes from directory metadata only; contents are never read.
+fn directory_bytes(path: &Path) -> Result<u64> {
+    let mut total = 0;
+    for entry in fs::read_dir(path).map_err(storage)? {
+        let entry = entry.map_err(storage)?;
+        let kind = entry.file_type().map_err(storage)?;
+        if kind.is_symlink() {
+            return Err(Error::Storage("symlink in a saved format folder".into()));
+        }
+        total += if kind.is_dir() {
+            directory_bytes(&entry.path())?
+        } else {
+            entry.metadata().map_err(storage)?.len()
+        };
+    }
+    Ok(total)
+}
+
+impl Store {
     pub(crate) fn cleanup_derivative_scratch(&self) -> Result<()> {
         let root = self.state.join("derivative-scratch");
         if !root.try_exists().map_err(storage)? {

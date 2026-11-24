@@ -779,6 +779,10 @@ pub trait ProcessingPort: ProcessingReadPort + SnapshotPort + Send + Sync {
     ) -> Result<SnapshotId>;
     fn processing_record(&self, id: ObservationId) -> Result<PortableProcessingRecord>;
     fn recipe(&self, id: RecipeId) -> Result<collector_core::ConversionRecipe>;
+    /// Delete the files of saved formats that this capture no longer lists.
+    /// Only copies this server made (they have a conversion recipe) are
+    /// deleted; originals are never touched. Returns the bytes freed.
+    fn discard_unlisted_derivatives(&self, capture: collector_core::CaptureId) -> Result<u64>;
     fn publish_recipe(
         &self,
         job: collector_core::JobId,

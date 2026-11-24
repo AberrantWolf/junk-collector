@@ -78,6 +78,14 @@ pub struct RemoveSavedFormat {
     pub profile: ConversionProfile,
 }
 
+/// What a removal did.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct SavedFormatRemoval {
+    pub album: SavedFormatAlbum,
+    /// Disk space given back by deleting the removed copy's files.
+    pub freed_bytes: u64,
+}
+
 /// The format key used by filters and totals.
 pub fn saved_format_key(profile: &ConversionProfile) -> String {
     match profile {
@@ -152,16 +160,17 @@ impl CollectionService {
         Ok(page)
     }
 
-    /// Remove one saved format from one capture. Originals cannot be removed,
-    /// and the removed copy stays in the archive's history of that capture,
-    /// so playback falls back to live conversion of the original.
+    /// Remove one saved format from one capture and delete its files. Only
+    /// copies this server made can be removed; originals (including FLAC or
+    /// MP3 files that came with an import) go only with the whole entry.
+    /// Playback falls back to live conversion of the original.
     pub fn remove_saved_format(
         &self,
         actor: &Principal,
         item_id: ItemId,
         command: RemoveSavedFormat,
         context: &CommandContext,
-    ) -> Result<SavedFormatAlbum> {
+    ) -> Result<SavedFormatRemoval> {
         let item = self.reader.item(item_id)?;
         self.authorize(actor, item.collection_id, Action::Curate)?;
         self.execute_command(
@@ -179,11 +188,23 @@ impl CollectionService {
                     return Err(Error::Forbidden);
                 }
                 let before = capture.representations.len();
-                capture.representations.retain(|representation| {
-                    representation.role == RepresentationRole::PreservationMaster
-                        || representation.source.is_none()
-                        || representation.profile.as_ref() != Some(&command.profile)
-                });
+                let mut kept = Vec::new();
+                for representation in std::mem::take(&mut capture.representations) {
+                    let candidate = representation.role != RepresentationRole::PreservationMaster
+                        && representation.source.is_some()
+                        && representation.profile.as_ref() == Some(&command.profile);
+                    // Only a copy with a conversion recipe was made here.
+                    let made_here = candidate
+                        && match self.processing.recipe(RecipeId(representation.id.0)) {
+                            Ok(_) => true,
+                            Err(Error::NotFound) => false,
+                            Err(error) => return Err(error),
+                        };
+                    if !made_here {
+                        kept.push(representation);
+                    }
+                }
+                capture.representations = kept;
                 if capture.representations.len() == before {
                     return Err(Error::Invalid(
                         "This capture has no saved copy in that format.".into(),
@@ -193,20 +214,28 @@ impl CollectionService {
                 Ok(())
             },
         )?;
+        // Runs on a replayed request too, so a crash after the record was
+        // saved still frees the space on retry.
+        let freed_bytes = self
+            .processing
+            .discard_unlisted_derivatives(command.capture_id)?;
         let item = self.reader.item(item_id)?;
         let captures = item
             .captures
             .iter()
             .map(|c| self.reader.capture(c.id))
             .collect::<Result<Vec<_>>>()?;
-        Ok(SavedFormatAlbum {
-            item_id,
-            collection_id: item.collection_id,
-            title: item.title.clone(),
-            subtitle: item.subtitle.clone(),
-            artwork: None,
-            album_tracks: 0,
-            formats: saved_formats_of(&captures),
+        Ok(SavedFormatRemoval {
+            album: SavedFormatAlbum {
+                item_id,
+                collection_id: item.collection_id,
+                title: item.title.clone(),
+                subtitle: item.subtitle.clone(),
+                artwork: None,
+                album_tracks: 0,
+                formats: saved_formats_of(&captures),
+            },
+            freed_bytes,
         })
     }
 }

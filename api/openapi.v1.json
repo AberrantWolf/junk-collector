@@ -6581,7 +6581,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SavedFormatAlbum"
+                  "$ref": "#/components/schemas/SavedFormatRemoval"
                 }
               }
             }
@@ -23312,6 +23312,25 @@
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "SavedFormatRemoval": {
+        "type": "object",
+        "description": "What a removal did.",
+        "required": [
+          "album",
+          "freed_bytes"
+        ],
+        "properties": {
+          "album": {
+            "$ref": "#/components/schemas/SavedFormatAlbum"
+          },
+          "freed_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk space given back by deleting the removed copy's files.",
+            "minimum": 0
           }
         }
       },

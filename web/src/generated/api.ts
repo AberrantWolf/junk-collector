@@ -6165,6 +6165,15 @@ export interface components {
             capture_id: components["schemas"]["CaptureId"];
             revision: components["schemas"]["Revision"];
         };
+        /** @description What a removal did. */
+        SavedFormatRemoval: {
+            album: components["schemas"]["SavedFormatAlbum"];
+            /**
+             * Format: int64
+             * @description Disk space given back by deleting the removed copy's files.
+             */
+            freed_bytes: number;
+        };
         /** @description One saved format of one album. */
         SavedFormatSummary: {
             /** Format: int64 */
@@ -12327,7 +12336,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SavedFormatAlbum"];
+                    "application/json": components["schemas"]["SavedFormatRemoval"];
                 };
             };
             /** @description Forbidden */

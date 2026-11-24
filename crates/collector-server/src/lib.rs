@@ -1958,13 +1958,13 @@ async fn saved_formats(
     ))
 }
 
-#[utoipa::path(post, path = "/api/v1/items/{id}/saved-formats/remove", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::RemoveSavedFormat, responses((status = 200, body = collector_app::SavedFormatAlbum), (status = 403), (status = 409), (status = 422)))]
+#[utoipa::path(post, path = "/api/v1/items/{id}/saved-formats/remove", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::RemoveSavedFormat, responses((status = 200, body = collector_app::SavedFormatRemoval), (status = 403), (status = 409), (status = 422)))]
 async fn remove_saved_format(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<ItemId>,
     Json(command): Json<collector_app::RemoveSavedFormat>,
-) -> ApiResult<Json<collector_app::SavedFormatAlbum>> {
+) -> ApiResult<Json<collector_app::SavedFormatRemoval>> {
     let actor = principal(&state, &headers).await?;
     let context = command_context(&headers)?;
     Ok(Json(

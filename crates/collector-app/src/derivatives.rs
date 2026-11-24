@@ -610,6 +610,15 @@ pub struct FrozenDerivativeJob {
     /// Who asked for this copy; older durable jobs have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_by: Option<collector_core::FormatRequest>,
+    /// Counts earlier copies of the same recipe that were made and later
+    /// removed. Their recipe and validation records stay in the archive, so a
+    /// copy made again needs a fresh identity rather than reusing theirs.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl FrozenDerivativeJob {
@@ -646,7 +655,8 @@ impl FrozenDerivativeJob {
                 PackageScope::Representation(_)
             )
             || self.representation_id.0 != self.recipe.id.0
-            || self.representation_id.0 != derivative_identity(self.capture_id, &self.recipe.digest)
+            || self.representation_id.0
+                != derivative_identity(self.capture_id, &self.recipe.digest, self.generation)
         {
             return Err(Error::Invalid("invalid frozen music derivative".into()));
         }
@@ -913,7 +923,21 @@ impl CollectionService {
             recipe = wav_recipe_format(recipe, &track.audio)?;
         }
         // Identity excludes requester/key, so separate requests converge at publication.
-        let identity = derivative_identity(capture_id, &recipe.digest);
+        // A copy that was removed keeps its recipe and validation records, so
+        // its identity cannot be published again. Skip to the next unused one;
+        // a copy that is still present keeps its identity so requests converge.
+        let mut generation = 0;
+        let identity = loop {
+            let identity = derivative_identity(capture_id, &recipe.digest, generation);
+            if capture.representations.iter().any(|r| r.id.0 == identity) {
+                break identity;
+            }
+            match self.processing.recipe(RecipeId(identity)) {
+                Err(Error::NotFound) => break identity,
+                Ok(_) => generation = generation.checked_add(1).ok_or(Error::Conflict)?,
+                Err(error) => return Err(error),
+            }
+        };
         recipe.id = RecipeId(identity);
         let converter = self
             .audio_converter
@@ -957,6 +981,7 @@ impl CollectionService {
             representation_id: RepresentationId(identity),
             created_at: self.authentication.now(),
             requested_by: Some(requested_by),
+            generation,
         };
         frozen.validate()?;
         Ok(frozen)
@@ -2129,12 +2154,17 @@ fn profile_order(profile: &ConversionProfile) -> u32 {
     }
 }
 
-fn derivative_identity(capture: CaptureId, digest: &Digest) -> uuid::Uuid {
+fn derivative_identity(capture: CaptureId, digest: &Digest, generation: u32) -> uuid::Uuid {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(b"collector music derivative identity v1");
     hasher.update(capture.0.as_bytes());
     hasher.update(digest.hex.as_bytes());
+    // Generation 0 keeps the original identity of existing copies.
+    if generation > 0 {
+        hasher.update(b"generation");
+        hasher.update(generation.to_be_bytes());
+    }
     let mut bytes: [u8; 16] = hasher.finalize()[..16].try_into().expect("SHA-256 prefix");
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;

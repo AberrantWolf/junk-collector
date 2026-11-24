@@ -27,9 +27,11 @@ bulk selection or the import setting), by copies that cover only some tracks, or
 albums with several Opus bitrates. Copies made before the reason was recorded say so.
 
 - **Remove** takes a saved format off an album after a confirmation that shows its
-  size. Originals are never removed here; those tracks play from the originals again.
-  The removed copy stays in the archive's history of that capture, so removing a
-  format does not free disk space yet.
+  size, and deletes its files to free the space. Only copies this server made can
+  be removed; files that came with the import (a FLAC and an MP3 set, for
+  example) are originals and go only when the whole entry is removed. Those
+  tracks play from the originals again, and the format can be made again later.
+  The recipe and validation records of the removed copy stay in the archive.
 - **Fix** opens a partly made format, where each missing track shows why it wasn't
   made (for example, a 32-bit float WAV can't be saved as FLAC without changing it).
   Finish it, remove it, or accept it as it is in **Review**.

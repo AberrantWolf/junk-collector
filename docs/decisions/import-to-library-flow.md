@@ -19,8 +19,6 @@ Not built yet:
   afterwards as possible album groups).
 - Blocked reasons are not sorted first across pages; rows keep title order.
 - Setup gaps are counted, not grouped per system.
-- Removing a saved format keeps its files in the archive's history, so no disk
-  space is freed yet (see the open question below).
 - The player code still ships in the main bundle, because it shares the play
   queue's state with the rest of the app.
 
@@ -511,8 +509,6 @@ None of this changes how files or originals are stored.
   unless you opt in.
 - Do copies made by the **Opus on import** setting count as "asked for" (listed
   in Saved formats, with a filter), or as automatic and left out?
-- When a format is removed, should its files go at once (after the
-  confirmation), or wait in a recoverable state for a while first?
 - Should multi-disc games be grouped like multi-disc albums, using the same
   grouping step with game wording?
 - Should an accepted reason be stored with the collection (it travels with an

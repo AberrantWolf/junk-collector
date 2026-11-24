@@ -1478,6 +1478,9 @@ impl ProcessingPort for Store {
         let db = lock(&self.db)?;
         projected_record(&db, "conversion_recipes", &id.to_string())
     }
+    fn discard_unlisted_derivatives(&self, capture: CaptureId) -> Result<u64> {
+        self.discard_unlisted_derivative_payloads(capture)
+    }
     fn publish_recipe(
         &self,
         job: JobId,

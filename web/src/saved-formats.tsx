@@ -30,11 +30,11 @@ export default function SavedFormats({collection,search,onOpenAlbum,onAddFormat,
   if(!targets.length)return;
   const size=targets.reduce((sum,{format})=>sum+format.bytes,0);
   const label=profileLabel(targets[0].format.profile);
-  if(!window.confirm(`Remove the saved ${label} copy from ${targets.length===1?targets[0].album.title:`${targets.length} albums`} (${bytes(size)})?\n\nThe original files stay. Those tracks will play from the originals through live conversion, and the copy can be made again later. The removed copy stays in the archive's history, so this doesn't free disk space yet.`))return;
-  setBusy(true);setError('');setNotice('');let removed=0;
-  try{for(const {album,format} of targets){for(const capture of format.captures){await api(`/items/${album.item_id}/saved-formats/remove`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({capture_id:capture.capture_id,expected_revision:capture.revision,profile:format.profile})});}removed++;}
-   setNotice(`Removed the ${label} copy from ${removed} ${removed===1?'album':'albums'}.`);}
-  catch(e){fail(e);if(removed)setNotice(`Removed the ${label} copy from ${removed} ${removed===1?'album':'albums'} before the error.`);}
+  if(!window.confirm(`Remove the saved ${label} copy from ${targets.length===1?targets[0].album.title:`${targets.length} albums`} (${bytes(size)})?\n\nIts files are deleted to free the space. The original files stay, those tracks play from the originals through live conversion, and the copy can be made again later.`))return;
+  setBusy(true);setError('');setNotice('');let removed=0,freed=0;
+  try{for(const {album,format} of targets){for(const capture of format.captures){const result=await api<S['SavedFormatRemoval']>(`/items/${album.item_id}/saved-formats/remove`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({capture_id:capture.capture_id,expected_revision:capture.revision,profile:format.profile})});freed+=result.freed_bytes;}removed++;}
+   setNotice(`Removed the ${label} copy from ${removed} ${removed===1?'album':'albums'} and freed ${bytes(freed)}.`);}
+  catch(e){fail(e);if(removed)setNotice(`Removed the ${label} copy from ${removed} ${removed===1?'album':'albums'} (${bytes(freed)} freed) before the error.`);}
   finally{setBusy(false);setSelected([]);setVersion(v=>v+1);}
  }
  const formatOptions=totals.map(total=>({value:key(total.profile),label:profileLabel(total.profile)}));
