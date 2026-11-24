@@ -332,6 +332,9 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
       const pending=pendingTracks.has(`${trackKey(row)}/${label}`);
       if(canPrepare&&row.can_prepare&&row.state.status!=='preparing')return <button className="track-format prepare" key={label} disabled={pending} onClick={()=>void prepare(row)} aria-label={pending?`Submitting ${label}…`:`Prepare ${label}`} title={`Prepare ${detail}`}><span aria-hidden="true">{pending?'…':'+'}</span> {compactLabel}</button>;
       if(row.state.status==='preparing')return <span className="track-format preparing" key={label} role="img" aria-label={`${label}: Preparing…`} title={`${label}: Preparing…`}><span aria-hidden="true">…</span> {compactLabel}</span>;
+      // A missing saved copy isn't a problem: the original plays through live
+      // conversion. Only the preparation tools list formats that can be made.
+      if(!canPrepare)return null;
       return <details className="track-format-details" key={label}><summary className="track-format unavailable" aria-label={detail} title={detail}><span aria-hidden="true">−</span> {compactLabel}</summary><p>{detail}</p></details>;
      })}{!canPrepare&&flac&&!canDecode(flac)&&<InfoHelp label="FLAC playback">This browser can’t play FLAC. Download the file to play it in another app.</InfoHelp>}</div>
     </div>;

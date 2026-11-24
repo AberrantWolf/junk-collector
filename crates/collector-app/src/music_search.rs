@@ -208,17 +208,20 @@ impl CollectionService {
             else {
                 return false;
             };
+            // Live conversion plays supported originals without a saved copy,
+            // so a missing FLAC or Opus file is not a playback problem.
             rows.iter().any(|row| {
                 row.source_representation_id == *source_representation_id
                     && row.track_position == *track_position
-                    && matches!(row.state, MusicTrackAvailabilityState::Available { .. })
+                    && (row.can_stream_original
+                        || matches!(row.state, MusicTrackAvailabilityState::Available { .. }))
             })
         });
         Ok(if ready {
             AlbumPlaybackReadiness::Ready
         } else {
             AlbumPlaybackReadiness::NeedsAttention {
-                reason: "Some tracks aren't prepared for playback yet.".into(),
+                reason: "Some tracks can't be played from their original files.".into(),
             }
         })
     }

@@ -27315,7 +27315,8 @@ fn album_playback_uses_available_discs_while_release_media_remain_missing() {
             .album_playback
     );
     // A provider-listed absent disc remains visible in coverage, but does not
-    // block selecting the available tracks. They still require preparation.
+    // block selecting the available tracks. Their originals play through live
+    // conversion, so no saved copy is needed for playback.
     assert_eq!(
         service
             .music_album_coverage(&actor, items[0].id)
@@ -27327,7 +27328,7 @@ fn album_playback_uses_available_discs_while_release_media_remain_missing() {
     let view = service.item_presented(&actor, items[0].id).unwrap();
     assert!(matches!(
         view.album_playback,
-        Some(collector_app::AlbumPlaybackReadiness::NeedsAttention { .. })
+        Some(collector_app::AlbumPlaybackReadiness::Ready)
     ));
     let snapshot = service
         .album_playback_snapshot(&actor, items[0].id, None)
@@ -27336,7 +27337,7 @@ fn album_playback_uses_available_discs_while_release_media_remain_missing() {
 }
 
 #[test]
-fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparation() {
+fn cd_album_plays_from_originals_and_stays_ready_with_opus_only_tracks() {
     let (_root, store, actor, service, collection) = setup();
     let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
     let imported = derivative_import(&service, &actor, collection.id);
@@ -27351,14 +27352,15 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
         ..Default::default()
     };
     rebuild_library_summaries(&service);
-    // Cache the initial missing-audio result before publishing each format.
+    // The CD originals play through live conversion before any saved copy
+    // exists, so the album is neither flagged nor missing from Playable.
     assert_eq!(
         service
             .library_entries(&actor, attention_query.clone())
             .unwrap()
             .items
             .len(),
-        1
+        0
     );
     assert!(
         service
@@ -27375,7 +27377,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
             .any(|entry| entry.id == album.id)
     );
     assert!(
-        !service
+        service
             .library_entries(
                 &actor,
                 BrowseQuery {
@@ -27398,7 +27400,7 @@ fn album_playback_attention_accepts_opus_only_tracks_and_clears_after_preparatio
             .unwrap();
         while service.run_next_job("album-opus-readiness").unwrap() {}
         assert_eq!(service.job(&actor, job).unwrap().state, JobState::Completed);
-        let ready = position == 2;
+        let ready = true;
         assert_eq!(
             matches!(
                 service
