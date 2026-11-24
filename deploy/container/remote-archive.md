@@ -244,7 +244,8 @@ older than the previous release.
 Before any downtime it also refuses when:
 - a local state folder from `remote.env` is outside the snapper subvolume, or on
   a nested subvolume or mount the snapshot would skip;
-- the running collector isn't the image `remote.env` names.
+- the collector container wasn't created from the image `remote.env` names. A
+  stopped one counts, so a fixed release can follow a failed upgrade.
 
 If a step fails before the pins change, it starts the old version again, and
 says so loudly if that fails too. After that, it never reverts on its own: the

@@ -282,12 +282,13 @@ def checked_plan(host, config, tag, deploy_files_updated):
     old_commit = labels.get("org.opencontainers.image.revision", "")
     if not TAG.fullmatch(old_version) or not SHA.fullmatch(old_commit):
         raise Refused(f"The running image {current_ref} has no release labels; upgrade it by hand")
-    running = project_containers(host, config["compose_project"], "collector")
-    if not running:
-        raise Refused(f"No collector container of Compose project {config['compose_project']} is running; "
-                      f"start {config['service']} first, or check compose_project")
-    if json.loads(host.run("docker", "inspect", running[0]))[0].get("Image") != current.get("Id"):
-        raise Refused(f"The running collector isn't {current_ref}; is {config['env_file']} the file the service uses?")
+    # A stopped container counts, so a failed upgrade can be followed by a fixed release.
+    existing = project_containers(host, config["compose_project"], "collector", stopped=True)
+    if not existing:
+        raise Refused(f"Compose project {config['compose_project']} has no collector container; "
+                      f"start {config['service']} once, or check compose_project")
+    if json.loads(host.run("docker", "inspect", existing[0]))[0].get("Image") != current.get("Id"):
+        raise Refused(f"The collector container isn't from {current_ref}; is {config['env_file']} the file the service uses?")
     require_covered(snapper_subvolume(host, config), env_values(env_text))
 
     commit = release_commit(host, config["github_repository"], tag)
@@ -320,8 +321,10 @@ def checked_plan(host, config, tag, deploy_files_updated):
             "new_id": new["Id"], "env_text": env_text, "new_env": new_env, "deploy_changes": changed or []}
 
 
-def project_containers(host, project, service=None):
+def project_containers(host, project, service=None, stopped=False):
     argv = ["docker", "ps", "--quiet", "--filter", f"label=com.docker.compose.project={project}"]
+    if stopped:
+        argv.insert(2, "--all")
     if service:
         argv += ["--filter", f"label=com.docker.compose.service={service}"]
     return host.run(*argv).split()

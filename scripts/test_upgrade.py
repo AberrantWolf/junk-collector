@@ -37,6 +37,7 @@ class FakeHost:
         self.snapshots = root / "data/.snapshots"
         self.signals_during_stop = None
         self.interrupt_wait = False
+        self.no_container = False
         self.volume = root / "volume"
         self.volume.mkdir(exist_ok=True)
         (self.volume / "service.key").write_text("key")
@@ -68,6 +69,8 @@ class FakeHost:
                 self.started_image = "sha256:new" if NEW in (self.root / "remote.env").read_text() else "sha256:old"
                 return ""
             case ("docker", "ps", *rest):
+                if "--all" in rest:
+                    return "" if self.no_container else "c1\n"
                 if not self.running:
                     return "\n".join(self.stop_leaves)
                 return "c1\n"
@@ -251,8 +254,12 @@ class UpgradeTests(unittest.TestCase):
         self.env.write_text(self.original)
         self.host.started_image = "sha256:other"
         self.assertEqual(self.main("check", "v0.1.0-beta.37"), 2)
-        self.host.running = False
+        self.host.started_image = "sha256:old"
+        self.host.running = False  # A stopped collector, as after a failed upgrade, is accepted.
+        self.assertEqual(self.main("check", "v0.1.0-beta.37"), 0)
+        self.host.no_container = True
         self.assertEqual(self.main("check", "v0.1.0-beta.37"), 2)
+        self.host.no_container = False
         self.host.running = True
         self.host.started_image = "sha256:old"
         self.host.fail = {("docker", "pull"): "network down"}
