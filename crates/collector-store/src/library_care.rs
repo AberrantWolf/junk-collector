@@ -294,6 +294,8 @@ impl LibraryCarePort for Store {
                 &query.search,
                 query.reason,
                 query.needs_attention,
+                query.level,
+                &query.setup_system,
             ))
             .map_err(storage)?,
         )
@@ -316,6 +318,7 @@ impl LibraryCarePort for Store {
         let failure = FAILED_LOOKUP;
         let grouping = GROUPING_PROPOSAL;
         let order = REVIEW_ORDER;
+        let system = 10;
         let reason = reason_filter(query.reason, failure, grouping);
         let level = match query.level {
             Some(collector_app::ReviewLevel::Polish) => "h.polish=1",
@@ -324,7 +327,7 @@ impl LibraryCarePort for Store {
         };
         let db = self.read_db()?;
         let sql = format!(
-            "SELECT i.record,{order} FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR ({order},i.id)>(?6,?7)) ORDER BY {order},i.id LIMIT ?8"
+            "SELECT i.record,{order} FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?{system} IS NULL OR h.setup_system=?{system}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR ({order},i.id)>(?6,?7)) ORDER BY {order},i.id LIMIT ?8"
         );
         let mut stmt = db.prepare(&sql).map_err(storage)?;
         let mut rows = stmt
@@ -337,7 +340,8 @@ impl LibraryCarePort for Store {
                 cursor.as_ref().map(|value| value.0.as_str()).unwrap_or(""),
                 cursor.as_ref().map(|value| value.1.as_str()).unwrap_or(""),
                 u32::from(limit) + 1,
-                language
+                language,
+                query.setup_system
             ])
             .map_err(storage)?;
         let mut items = Vec::new();
@@ -385,10 +389,32 @@ impl LibraryCarePort for Store {
                     needs_you: row.get::<_, i64>(0)?.max(0) as u64,
                     polish: row.get::<_, i64>(1)?.max(0) as u64,
                     setup: row.get::<_, i64>(2)?.max(0) as u64,
+                    setup_systems: vec![],
                 })
             },
         )
         .map_err(storage)
+        .and_then(|mut counts| {
+            let mut statement = db
+                .prepare("SELECT h.setup_system,count(*) FROM metadata_health h JOIN items i ON i.id=h.item_id JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 WHERE i.deleted=0 AND h.setup_system IS NOT NULL AND (?2 IS NULL OR h.collection_id=?2) GROUP BY 1 ORDER BY 2 DESC,1")
+                .map_err(storage)?;
+            counts.setup_systems = statement
+                .query_map(
+                    params![user.to_string(), collection.map(|id| id.to_string())],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .map_err(storage)?
+                .map(|row| {
+                    let (key, entries) = row.map_err(storage)?;
+                    Ok(collector_app::SetupSystemCount {
+                        systems: collector_app::catalog_wait_names(&key),
+                        key,
+                        entries: entries.max(0) as u64,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(counts)
+        })
     }
 
     fn partial_saved_format(&self, item: ItemId) -> Result<bool> {
@@ -598,6 +624,8 @@ impl LibraryCarePort for Store {
                 &query.search,
                 query.reason,
                 query.needs_attention,
+                query.level,
+                &query.setup_system,
             ))
             .map_err(storage)?,
         )
@@ -620,6 +648,7 @@ impl LibraryCarePort for Store {
         let failure = FAILED_LOOKUP;
         let grouping = GROUPING_PROPOSAL;
         let order = REVIEW_ORDER;
+        let system = 12;
         let reason = reason_filter(query.reason, failure, grouping);
         let level = match query.level {
             Some(collector_app::ReviewLevel::Polish) => "h.polish=1",
@@ -628,7 +657,7 @@ impl LibraryCarePort for Store {
         };
         let db = self.read_db()?;
         let sql = format!(
-            "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),{order},g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1),h.reasons,{failure},{grouping} FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR ({order},i.id)>(?6,?7)) ORDER BY {order},i.id LIMIT ?8"
+            "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),{order},g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1),h.reasons,{failure},{grouping} FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?{system} IS NULL OR h.setup_system=?{system}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR ({order},i.id)>(?6,?7)) ORDER BY {order},i.id LIMIT ?8"
         );
         let mut stmt = db.prepare(&sql).map_err(storage)?;
         let mut rows = stmt
@@ -643,7 +672,8 @@ impl LibraryCarePort for Store {
                 u32::from(limit) + 1,
                 language,
                 namespace,
-                full_language
+                full_language,
+                query.setup_system
             ])
             .map_err(storage)?;
         let mut items = Vec::new();
@@ -1222,12 +1252,16 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
     if !had_record && partial_saved_format(db, item.id)? {
         reasons.push(Reason::PartialSavedFormat);
     }
+    let setup_system = identification
+        .as_ref()
+        .filter(|_| reasons.contains(&Reason::NoCatalog))
+        .map(collector_app::catalog_wait_key);
     let level = |wanted: &[ReviewLevel]| {
         reasons
             .iter()
             .any(|reason| wanted.contains(&reason.level()))
     };
-    db.execute("INSERT INTO metadata_health VALUES(?,?,?,?,?,?,?,?,NULL) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,title_key=excluded.title_key,reasons=excluded.reasons,needs_attention=excluded.needs_attention,polish=excluded.polish,setup=excluded.setup,blocked=excluded.blocked,setup_system=excluded.setup_system",params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),serde_json::to_string(&reasons).map_err(storage)?,level(&[ReviewLevel::Blocked,ReviewLevel::Decision]),level(&[ReviewLevel::Polish]),level(&[ReviewLevel::Setup]),level(&[ReviewLevel::Blocked])]).map_err(storage)?;
+    db.execute("INSERT INTO metadata_health VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,title_key=excluded.title_key,reasons=excluded.reasons,needs_attention=excluded.needs_attention,polish=excluded.polish,setup=excluded.setup,blocked=excluded.blocked,setup_system=excluded.setup_system",params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),serde_json::to_string(&reasons).map_err(storage)?,level(&[ReviewLevel::Blocked,ReviewLevel::Decision]),level(&[ReviewLevel::Polish]),level(&[ReviewLevel::Setup]),level(&[ReviewLevel::Blocked]),setup_system]).map_err(storage)?;
     Ok(())
 }
 

@@ -3903,6 +3903,12 @@ export interface components {
             analyses: components["schemas"]["GameProcessingResult"][];
             candidates: components["schemas"]["MetadataCandidateObservation"][];
             catalogs: components["schemas"]["GameCatalogIdentification"][];
+            /**
+             * @description The standard system the file's own header names (an iNES or N64
+             *     header, or a Mega Drive or GBA header). Absent when the bytes alone
+             *     don't settle it, and on identifications recorded before this existed.
+             */
+            detected_system?: string | null;
             inspections: components["schemas"]["GameFormatInspection"][];
             limitations: string[];
             status: components["schemas"]["GameDetectionStatus"];
@@ -4784,6 +4790,8 @@ export interface components {
             needs_attention?: boolean;
             reason?: components["schemas"]["MetadataReviewReason"] | null;
             search?: string;
+            /** @description Only entries waiting for this game catalog (a `SetupSystemCount` key). */
+            setup_system?: string | null;
         };
         MetadataCatalogSourceView: {
             current: boolean;
@@ -6078,6 +6086,8 @@ export interface components {
              * @description Entries waiting on setup, such as a game catalog for their system.
              */
             setup: number;
+            /** @description Entries waiting for a game catalog, grouped by the download they need. */
+            setup_systems: components["schemas"]["SetupSystemCount"][];
         };
         ReviewImportCommand: {
             association: components["schemas"]["CaptureAssociation"];
@@ -6237,6 +6247,18 @@ export interface components {
             expires_at: string;
             id: components["schemas"]["SessionId"];
             label: string;
+        };
+        /** @description Entries that wait for the same game catalog download. */
+        SetupSystemCount: {
+            /** Format: int64 */
+            entries: number;
+            /** @description Filter value for `setup_system` in Review lists. */
+            key: string;
+            /**
+             * @description Catalog names that would settle it; several when the bytes alone don't
+             *     name one system, empty when no system could be told at all.
+             */
+            systems: string[];
         };
         /** Format: uuid */
         SnapshotId: string;
@@ -13413,6 +13435,8 @@ export interface operations {
                 /** @description polish or setup */
                 level?: string;
                 needs_attention?: boolean;
+                /** @description a review counts setup_systems key */
+                setup_system?: string;
                 cursor?: string;
                 limit?: number;
             };

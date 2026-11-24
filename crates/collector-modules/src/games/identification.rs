@@ -26,6 +26,11 @@ pub struct GameIdentification {
     pub catalogs: Vec<GameCatalogIdentification>,
     pub candidates: Vec<MetadataCandidateObservation>,
     pub limitations: Vec<String>,
+    /// The standard system the file's own header names (an iNES or N64
+    /// header, or a Mega Drive or GBA header). Absent when the bytes alone
+    /// don't settle it, and on identifications recorded before this existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_system: Option<String>,
 }
 
 pub fn identify_game(
@@ -41,6 +46,7 @@ pub fn identify_game(
         catalogs: vec![],
         candidates: vec![],
         limitations: vec![],
+        detected_system: None,
     };
     let mut profiles = Vec::new();
     let mut cue = None;
@@ -124,6 +130,14 @@ pub fn identify_game(
         }
     } else if profiles.len() == 1 {
         let (index, format) = &profiles[0];
+        result.detected_system = match format {
+            Some(DetectedFormat::Ines) => Some("nes".into()),
+            Some(DetectedFormat::N64) => Some("n64".into()),
+            Some(DetectedFormat::RawSystem(system)) => {
+                super::systems::standard_system(system).map(|system| system.id)
+            }
+            _ => None,
+        };
         let file = &inventory.files[*index];
         let choices: Vec<GameHashProfile> = match format {
             Some(DetectedFormat::Ines) => vec![GameHashProfile::InesPayload, GameHashProfile::Raw],
@@ -467,4 +481,35 @@ pub(super) fn validate_identification_evidence(result: &GameIdentification) -> M
         return Err(invalid());
     }
     Ok(())
+}
+
+/// The systems whose catalog an entry waits for. A header that names its
+/// system settles it; otherwise these are the systems that hash the same kind
+/// of bytes (a raw CD track could be PlayStation, Saturn or Sega CD). Empty
+/// when nothing about the bytes points at a system.
+pub fn catalog_systems(identification: &GameIdentification) -> Vec<super::StandardGameSystem> {
+    let systems = super::standard_game_systems();
+    if let Some(detected) = &identification.detected_system {
+        return systems
+            .into_iter()
+            .filter(|system| &system.id == detected)
+            .collect();
+    }
+    let domains = identification
+        .analyses
+        .iter()
+        .flat_map(|analysis| match analysis {
+            GameProcessingResult::Hashes { files } => {
+                files.iter().map(|f| f.domain.name.clone()).collect()
+            }
+            GameProcessingResult::TrackHashes { tracks } => {
+                tracks.iter().map(|t| t.domain.name.clone()).collect()
+            }
+            _ => Vec::new(),
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    systems
+        .into_iter()
+        .filter(|system| domains.contains(&system.byte_domain))
+        .collect()
 }

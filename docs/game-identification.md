@@ -12,8 +12,23 @@
 
 No system string or normalization profile has to be entered. A game imported without
 an active catalog keeps its originals and reports that no catalog match was
-attempted; that is not a failed verification. Game collections do not show the
-music-only import and preparation controls.
+attempted; that is not a failed verification. **Review** lists these games as
+waiting for a game catalog, grouped by system, since each system is a separate
+catalog download. A header that names its system (iNES, N64, Mega Drive, GBA)
+settles the group; a raw CD track could be PlayStation, Saturn or Sega CD, so
+those wait on any of the three. Game collections do not show the music-only
+import and preparation controls.
+
+Review reasons for games, from the latest identification:
+
+| Result | Reason |
+| --- | --- |
+| Several CUE sheets, or several files and no main file | Choose the main file (blocks everything else) |
+| A file's format check stopped (malformed or unsupported) | Format not supported |
+| Hashed, but no active catalog covers those bytes | Waiting for a game catalog |
+| A catalog covers them but nothing matched | No match found |
+| Several complete catalog identities | Several catalog entries match |
+| Only a partial or CRC32-only match | Only a partial catalog match |
 
 ## Supported formats
 

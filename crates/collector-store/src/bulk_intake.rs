@@ -474,7 +474,18 @@ impl BulkIntakePort for Store {
         limit: u16,
         pending: bool,
     ) -> Result<Page<IntakePackageRecord>> {
-        self.read_intake_members(user, id, after, limit, pending, None, false)
+        self.read_intake_members(
+            user,
+            id,
+            after,
+            limit,
+            if pending {
+                MemberFilter::Pending
+            } else {
+                MemberFilter::All
+            },
+            None,
+        )
     }
     fn intake_problem_members(
         &self,
@@ -483,7 +494,7 @@ impl BulkIntakePort for Store {
         after: Option<u32>,
         limit: u16,
     ) -> Result<Page<IntakePackageRecord>> {
-        self.read_intake_members(user, id, after, limit, false, None, true)
+        self.read_intake_members(user, id, after, limit, MemberFilter::Problems, None)
     }
     fn intake_destination_members(
         &self,
@@ -493,7 +504,7 @@ impl BulkIntakePort for Store {
         after: Option<u32>,
         limit: u16,
     ) -> Result<Page<IntakePackageRecord>> {
-        self.read_intake_members(user, id, after, limit, false, Some(import), false)
+        self.read_intake_members(user, id, after, limit, MemberFilter::All, Some(import))
     }
     fn admit_intake_members(
         &self,
@@ -672,10 +683,11 @@ impl Store {
         id: JobId,
         after: Option<u32>,
         limit: u16,
-        pending: bool,
+        filter: MemberFilter,
         destination_import: Option<ImportId>,
-        problems: bool,
     ) -> Result<Page<IntakePackageRecord>> {
+        let pending = filter == MemberFilter::Pending;
+        let problems = filter == MemberFilter::Problems;
         let limit = page_limit(limit)?;
         let failed = crate::provisional_imports::IMPORT_NEEDS_YOU;
         let db = lock(&self.db)?;
@@ -728,4 +740,14 @@ impl Store {
         };
         Ok(Page { items, next_cursor })
     }
+}
+
+/// Which intake members a page lists.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemberFilter {
+    All,
+    /// Not yet admitted and not refused.
+    Pending,
+    /// Refused, or admitted and stopped where the curator is needed.
+    Problems,
 }

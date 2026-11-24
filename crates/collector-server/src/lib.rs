@@ -1994,7 +1994,7 @@ async fn review_counts(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("level" = Option<String>, Query, description = "polish or setup"), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::MetadataCareEntry>), (status = 401), (status = 403)))]
+#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("level" = Option<String>, Query, description = "polish or setup"), ("needs_attention" = Option<bool>, Query), ("setup_system" = Option<String>, Query, description = "a review counts setup_systems key"), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::MetadataCareEntry>), (status = 401), (status = 403)))]
 async fn metadata_care(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3568,6 +3568,7 @@ async fn preparation_care(
         needs_attention: query.needs_attention.unwrap_or(true),
         reason: None,
         level: None,
+        setup_system: None,
         cursor: query.cursor,
         limit: query.limit,
     };

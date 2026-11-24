@@ -173,6 +173,9 @@ pub struct MetadataCareQuery {
     pub level: Option<crate::ReviewLevel>,
     #[serde(default = "needs_attention_default")]
     pub needs_attention: bool,
+    /// Only entries waiting for this game catalog (a `SetupSystemCount` key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_system: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<u16>,
 }
@@ -337,6 +340,19 @@ pub struct ReviewCounts {
     pub polish: u64,
     /// Entries waiting on setup, such as a game catalog for their system.
     pub setup: u64,
+    /// Entries waiting for a game catalog, grouped by the download they need.
+    pub setup_systems: Vec<SetupSystemCount>,
+}
+
+/// Entries that wait for the same game catalog download.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct SetupSystemCount {
+    /// Filter value for `setup_system` in Review lists.
+    pub key: String,
+    /// Catalog names that would settle it; several when the bytes alone don't
+    /// name one system, empty when no system could be told at all.
+    pub systems: Vec<String>,
+    pub entries: u64,
 }
 
 impl CollectionService {

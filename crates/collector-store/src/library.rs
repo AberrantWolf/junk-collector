@@ -660,6 +660,7 @@ mod tests {
             reason: None,
             level: None,
             needs_attention: true,
+            setup_system: None,
             cursor: None,
             limit: Some(1),
         };
@@ -741,6 +742,7 @@ mod tests {
                     reason: None,
                     level: None,
                     needs_attention: true,
+                    setup_system: None,
                     cursor: None,
                     limit: Some(50),
                 },
@@ -1257,6 +1259,7 @@ mod tests {
                 reason: None,
                 level: None,
                 needs_attention: false,
+                setup_system: None,
                 cursor: None,
                 limit: Some(50),
             },

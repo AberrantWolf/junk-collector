@@ -17,7 +17,6 @@ Not built yet:
   package to an existing entry, and several journeys rely on the dialog flow.
 - Suggested album groups before an import starts (they appear in Review
   afterwards as possible album groups).
-- Setup gaps are counted, not grouped per system.
 - The player code still ships in the main bundle, because it shares the play
   queue's state with the rest of the app.
 

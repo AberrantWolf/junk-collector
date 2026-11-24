@@ -14406,6 +14406,7 @@ fn preparation_readiness_requires_recorded_coverage_for_a_partially_prepared_cd(
                     reason: None,
                     level: None,
                     needs_attention: true,
+                    setup_system: None,
                     cursor: None,
                     limit: Some(1),
                 },
@@ -18711,6 +18712,7 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         reason: None,
         level: None,
         needs_attention: true,
+        setup_system: None,
         cursor: None,
         limit: Some(1),
     };
@@ -19678,6 +19680,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
         reason: None,
         level: None,
         needs_attention: true,
+        setup_system: None,
         cursor: None,
         limit: Some(1),
     };
@@ -19803,6 +19806,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
                     reason: None,
                     level: None,
                     needs_attention: true,
+                    setup_system: None,
                     cursor: None,
                     limit: None
                 },
@@ -28623,6 +28627,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
                         reason: None,
                         level: None,
                         needs_attention: false,
+                        setup_system: None,
                         cursor: None,
                         limit: Some(200),
                     },
@@ -32404,13 +32409,13 @@ fn review_lists_blocked_entries_first_across_pages() {
             &command(),
         )
         .unwrap();
-    // Alphabetically first, but only needs a decision (unrecognized format).
+    // Alphabetically first, but only needs a decision (a malformed header).
     let decision = import_identified_game(
         &service,
         &actor,
         collection.id,
-        "Alpha.rom",
-        &[("Alpha.rom", b"owned fixture")],
+        "Alpha.nes",
+        &[("Alpha.nes", b"NES\x1a\x01")],
     );
     // Two CUE sheets: the main file must be chosen before anything else.
     let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n";
@@ -32431,6 +32436,7 @@ fn review_lists_blocked_entries_first_across_pages() {
         search: String::new(),
         reason: None,
         level: None,
+        setup_system: None,
         cursor,
         limit: Some(1),
     };
@@ -32446,4 +32452,35 @@ fn review_lists_blocked_entries_first_across_pages() {
         .unwrap();
     assert_eq!(second.items[0].id, decision);
     assert!(second.next_cursor.is_none());
+    // A CD that is recognized but has no catalog waits on setup, grouped by
+    // the catalogs that could settle it.
+    let waiting = import_identified_game(
+        &service,
+        &actor,
+        collection.id,
+        "Middle",
+        &[("Middle/game.cue", cue), ("Middle/disc.bin", &[0_u8; 2352])],
+    );
+    let counts = service.review_counts(&actor, Some(collection.id)).unwrap();
+    assert_eq!(counts.setup, 1, "{counts:?}");
+    assert_eq!(counts.setup_systems.len(), 1);
+    assert_eq!(counts.setup_systems[0].key, "ps1,saturn,segacd");
+    assert_eq!(counts.setup_systems[0].systems.len(), 3);
+    assert_eq!(counts.setup_systems[0].entries, 1);
+    let listed = service
+        .metadata_care(
+            &actor,
+            collector_app::MetadataCareQuery {
+                needs_attention: false,
+                level: Some(collector_app::ReviewLevel::Setup),
+                setup_system: Some("ps1,saturn,segacd".into()),
+                limit: Some(10),
+                ..query(None)
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        listed.items.iter().map(|i| i.id).collect::<Vec<_>>(),
+        vec![waiting]
+    );
 }

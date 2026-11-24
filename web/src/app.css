@@ -196,3 +196,8 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 .saved-format small{color:var(--muted)}
 .saved-format .button-row button{padding:.2rem .5rem;font-size:.75rem}
 .saved-format-row{align-items:flex-start;flex-wrap:wrap}
+.review-setup p{margin:0}
+.review-setup ul{margin:.4rem 0 0;padding-left:1.1rem}
+.review-setup li{margin:.25rem 0}
+.review-setup li button{margin-left:.5rem}
+.review-setup li button[aria-current]{font-weight:600}

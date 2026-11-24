@@ -7931,6 +7931,15 @@
             }
           },
           {
+            "name": "setup_system",
+            "in": "query",
+            "description": "a review counts setup_systems key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -13701,6 +13710,13 @@
               "$ref": "#/components/schemas/GameCatalogIdentification"
             }
           },
+          "detected_system": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The standard system the file's own header names (an iNES or N64\nheader, or a Mega Drive or GBA header). Absent when the bytes alone\ndon't settle it, and on identifications recorded before this existed."
+          },
           "inspections": {
             "type": "array",
             "items": {
@@ -17444,6 +17460,13 @@
           },
           "search": {
             "type": "string"
+          },
+          "setup_system": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only entries waiting for this game catalog (a `SetupSystemCount` key)."
           }
         },
         "additionalProperties": false
@@ -22990,7 +23013,8 @@
         "required": [
           "needs_you",
           "polish",
-          "setup"
+          "setup",
+          "setup_systems"
         ],
         "properties": {
           "needs_you": {
@@ -23009,6 +23033,13 @@
             "format": "int64",
             "description": "Entries waiting on setup, such as a game catalog for their system.",
             "minimum": 0
+          },
+          "setup_systems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupSystemCount"
+            },
+            "description": "Entries waiting for a game catalog, grouped by the download they need."
           }
         }
       },
@@ -23596,6 +23627,33 @@
           },
           "label": {
             "type": "string"
+          }
+        }
+      },
+      "SetupSystemCount": {
+        "type": "object",
+        "description": "Entries that wait for the same game catalog download.",
+        "required": [
+          "key",
+          "systems",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "key": {
+            "type": "string",
+            "description": "Filter value for `setup_system` in Review lists."
+          },
+          "systems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Catalog names that would settle it; several when the bytes alone don't\nname one system, empty when no system could be told at all."
           }
         }
       },

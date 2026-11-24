@@ -389,43 +389,81 @@ pub struct MetadataHealth {
 }
 
 /// Review reasons from the latest game identification of the entry's files.
+///
+/// The identification's overall status describes the catalog result: it is
+/// Recognized only when exactly one complete catalog identity matched, and
+/// Ambiguous either when several did or when the package has several CUE
+/// sheets. So the reason depends first on whether any bytes were hashed.
 pub fn game_identification_reasons(
     identification: &collector_modules::games::GameIdentification,
     user_picked: bool,
 ) -> Vec<MetadataReviewReason> {
-    use collector_modules::games::{CatalogMatchResult, GameDetectionStatus};
-    match identification.status {
-        GameDetectionStatus::Ambiguous => vec![MetadataReviewReason::NeedsMainFile],
-        GameDetectionStatus::Unsupported
-        | GameDetectionStatus::Malformed
-        | GameDetectionStatus::Unrecognized => vec![MetadataReviewReason::UnsupportedFormat],
-        GameDetectionStatus::Recognized if identification.catalogs.is_empty() => {
-            vec![MetadataReviewReason::NoCatalog]
-        }
-        GameDetectionStatus::Recognized if user_picked => vec![],
-        GameDetectionStatus::Recognized => {
-            if identification.catalogs.iter().any(|c| {
-                matches!(
-                    c.catalog,
-                    CatalogMatchResult::AmbiguousCompleteMatches { .. }
-                )
-            }) {
-                vec![MetadataReviewReason::CatalogAmbiguity]
-            } else if identification
-                .catalogs
-                .iter()
-                .any(|c| matches!(c.catalog, CatalogMatchResult::PartialIdentification { .. }))
-                || identification
-                    .limitations
-                    .iter()
-                    .any(|l| l.starts_with("CRC32-only"))
-            {
-                vec![MetadataReviewReason::WeakCatalogMatch]
-            } else {
-                vec![]
-            }
-        }
+    use collector_modules::games::{CatalogMatchResult, GameDetectionStatus, GameProcessingResult};
+    let hashed = identification.analyses.iter().any(|analysis| {
+        matches!(
+            analysis,
+            GameProcessingResult::Hashes { .. } | GameProcessingResult::TrackHashes { .. }
+        )
+    });
+    if !hashed {
+        // Nothing was hashed: either a file's format stopped the check, or no
+        // single main file (or CUE sheet) could be chosen automatically.
+        let format_stopped = identification
+            .inspections
+            .iter()
+            .any(|inspection| !matches!(inspection.status, GameDetectionStatus::Recognized));
+        return if format_stopped && !matches!(identification.status, GameDetectionStatus::Ambiguous)
+        {
+            vec![MetadataReviewReason::UnsupportedFormat]
+        } else {
+            vec![MetadataReviewReason::NeedsMainFile]
+        };
     }
+    if identification.catalogs.is_empty() {
+        return vec![MetadataReviewReason::NoCatalog];
+    }
+    if user_picked {
+        return vec![];
+    }
+    let partial = identification
+        .catalogs
+        .iter()
+        .any(|c| matches!(c.catalog, CatalogMatchResult::PartialIdentification { .. }))
+        || identification
+            .limitations
+            .iter()
+            .any(|l| l.starts_with("CRC32-only"));
+    match identification.status {
+        GameDetectionStatus::Recognized if partial => vec![MetadataReviewReason::WeakCatalogMatch],
+        GameDetectionStatus::Recognized => vec![],
+        GameDetectionStatus::Ambiguous => vec![MetadataReviewReason::CatalogAmbiguity],
+        _ if partial => vec![MetadataReviewReason::WeakCatalogMatch],
+        _ => vec![MetadataReviewReason::NoMatch],
+    }
+}
+
+/// Which game catalog download an entry waits for, as a stable key: the
+/// systems that could settle it, joined, or "unknown".
+pub fn catalog_wait_key(identification: &collector_modules::games::GameIdentification) -> String {
+    let systems = collector_modules::games::catalog_systems(identification);
+    if systems.is_empty() {
+        "unknown".into()
+    } else {
+        systems
+            .iter()
+            .map(|system| system.id.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+/// Catalog names for a `catalog_wait_key`.
+pub fn catalog_wait_names(key: &str) -> Vec<String> {
+    let systems = collector_modules::games::standard_game_systems();
+    key.split(',')
+        .filter_map(|id| systems.iter().find(|system| system.id == id))
+        .map(|system| system.name.clone())
+        .collect()
 }
 
 pub fn metadata_health(input: MetadataHealthInput<'_>) -> Result<MetadataHealth> {
@@ -4291,7 +4329,40 @@ mod review_health_tests {
             catalogs: vec![],
             candidates: vec![],
             limitations: vec![],
+            detected_system: None,
         }
+    }
+
+    #[test]
+    fn catalog_waits_are_keyed_by_the_systems_that_could_settle_them() {
+        let mut game = identification(GameDetectionStatus::Recognized);
+        assert_eq!(catalog_wait_key(&game), "unknown");
+        assert!(catalog_wait_names("unknown").is_empty());
+        game.detected_system = Some("gba".into());
+        assert_eq!(catalog_wait_key(&game), "gba");
+        assert_eq!(
+            catalog_wait_names("gba"),
+            vec!["Nintendo - Game Boy Advance".to_string()]
+        );
+        game.detected_system = None;
+        game.analyses = vec![
+            collector_modules::games::GameProcessingResult::TrackHashes {
+                tracks: vec![collector_modules::games::GameTrackDigest {
+                    track_number: 1,
+                    source_file_id: collector_core::PackageFileId::new(),
+                    source_byte_offset: 0,
+                    bytes: collector_core::ByteLength(2352),
+                    synthetic_pregap_frames: 0,
+                    synthetic_postgap_frames: 0,
+                    domain: collector_modules::games::NormalizedByteDomain {
+                        name: "org.junk.game.cd.raw-2352-track".into(),
+                        version: 1,
+                    },
+                    digests: vec![],
+                }],
+            },
+        ];
+        assert_eq!(catalog_wait_key(&game), "ps1,saturn,segacd");
     }
 
     fn health(
@@ -4333,17 +4404,90 @@ mod review_health_tests {
 
     #[test]
     fn game_identification_explains_a_missing_name() {
+        use collector_modules::games::{
+            CatalogMatchResult, GameCatalogIdentification, GameFormatInspection,
+            GameProcessingResult, GameTrackDigest, NormalizedByteDomain,
+        };
         let authority = MetadataAuthority::default();
-        let waiting = identification(GameDetectionStatus::Recognized);
-        let game = health("org.junk.games", &authority, Some(&waiting), false);
-        assert_eq!(game.reasons, vec![MetadataReviewReason::NoCatalog]);
+        let reasons = |value: &GameIdentification| {
+            health("org.junk.games", &authority, Some(value), false).reasons
+        };
+        let hashed = |status| GameIdentification {
+            analyses: vec![GameProcessingResult::TrackHashes {
+                tracks: vec![GameTrackDigest {
+                    track_number: 1,
+                    source_file_id: collector_core::PackageFileId::new(),
+                    source_byte_offset: 0,
+                    bytes: collector_core::ByteLength(2352),
+                    synthetic_pregap_frames: 0,
+                    synthetic_postgap_frames: 0,
+                    domain: NormalizedByteDomain {
+                        name: "org.junk.game.cd.raw-2352-track".into(),
+                        version: 1,
+                    },
+                    digests: vec![],
+                }],
+            }],
+            ..identification(status)
+        };
+        let with_catalog = |status, catalog| GameIdentification {
+            catalogs: vec![GameCatalogIdentification {
+                snapshot_id: collector_core::SnapshotId::new(),
+                snapshot_digest: collector_core::Digest::sha256(b"catalog"),
+                byte_domain: "org.junk.game.cd.raw-2352-track".into(),
+                system: "Sony - PlayStation".into(),
+                catalog,
+            }],
+            ..hashed(status)
+        };
+        // Hashed, but no catalog covers those bytes. Without a catalog the
+        // status is never Recognized, so it must not read as unsupported.
+        assert_eq!(
+            reasons(&hashed(GameDetectionStatus::Unrecognized)),
+            vec![MetadataReviewReason::NoCatalog]
+        );
         assert_eq!(MetadataReviewReason::NoCatalog.level(), ReviewLevel::Setup);
-        let unsupported = identification(GameDetectionStatus::Unsupported);
-        let game = health("org.junk.games", &authority, Some(&unsupported), false);
-        assert_eq!(game.reasons, vec![MetadataReviewReason::UnsupportedFormat]);
-        let cues = identification(GameDetectionStatus::Ambiguous);
-        let game = health("org.junk.games", &authority, Some(&cues), false);
-        assert_eq!(game.reasons, vec![MetadataReviewReason::NeedsMainFile]);
+        // A catalog exists but nothing in it matched.
+        assert_eq!(
+            reasons(&with_catalog(
+                GameDetectionStatus::Unrecognized,
+                CatalogMatchResult::NoMatch
+            )),
+            vec![MetadataReviewReason::NoMatch]
+        );
+        // Several complete catalog identities: a catalog choice, not a file choice.
+        assert_eq!(
+            reasons(&with_catalog(
+                GameDetectionStatus::Ambiguous,
+                CatalogMatchResult::AmbiguousCompleteMatches { candidates: vec![] }
+            )),
+            vec![MetadataReviewReason::CatalogAmbiguity]
+        );
+        assert!(
+            game_identification_reasons(
+                &with_catalog(GameDetectionStatus::Recognized, CatalogMatchResult::NoMatch),
+                false
+            )
+            .is_empty()
+        );
+        // A file's format stopped the check before hashing.
+        let unsupported = GameIdentification {
+            inspections: vec![GameFormatInspection {
+                file_id: collector_core::PackageFileId::new(),
+                status: GameDetectionStatus::Malformed,
+                reason: "truncated header".into(),
+            }],
+            ..identification(GameDetectionStatus::Malformed)
+        };
+        assert_eq!(
+            reasons(&unsupported),
+            vec![MetadataReviewReason::UnsupportedFormat]
+        );
+        // Several CUE sheets: nothing is hashed until one is chosen.
+        assert_eq!(
+            reasons(&identification(GameDetectionStatus::Ambiguous)),
+            vec![MetadataReviewReason::NeedsMainFile]
+        );
         assert_eq!(
             MetadataReviewReason::NeedsMainFile.level(),
             ReviewLevel::Blocked
