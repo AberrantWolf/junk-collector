@@ -70,7 +70,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
  const canPrepare=canPrepareRequested&&(!item.digital_audio||rows.some(row=>!!row.profile));
  const [coverage,setCoverage]=useState<Coverage>();
  const [assignmentBusy,setAssignmentBusy]=useState<string>();
- const [editingTrack,setEditingTrack]=useState<{source:string;position:number;title:string;disc:string;number:string;albumSelected:boolean}>();
+ const [editingTrack,setEditingTrack]=useState<{source:string;position:number;title:string;disc:string;number:string;album:'auto'|'include'|'exclude'}>();
  // Captures are independent records; publication need not revise the Item.
  const captureRevisions=item.captures.map(capture=>`${capture.id}:${capture.revision}`).join(',');
  const [loading,setLoading]=useState(true);
@@ -199,21 +199,71 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   }catch(value){if(!requests.current.signal.aborted)report(value);}finally{if(!requests.current.signal.aborted)setAssignmentBusy(undefined);}
  }
 
+ async function editTrack(row:Availability){
+  const controller=requests.current;setError('');
+  try{const review=await api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal});if(controller.signal.aborted)return;
+   const saved=(Array.isArray(object(review.authority.domain_overrides?.payload).track_overrides)?object(review.authority.domain_overrides?.payload).track_overrides as unknown[]:[]).map(object).find(value=>value.source_representation_id===row.source_representation_id&&value.track_position===row.track_position);
+   setEditingTrack({source:row.source_representation_id,position:row.track_position,title:row.title,disc:row.disc_position?String(row.disc_position):'',number:String(row.display_position??row.track_position),album:saved?.album_selected===true?'include':saved?.album_selected===false?'exclude':'auto'});
+  }catch(value){if(!controller.signal.aborted)report(value);}
+ }
  async function saveTrack(){
   if(!editingTrack)return;const edit=editingTrack;const controller=requests.current;setBusy(true);setError('');
   try{const review=await api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal});
    const previous=review.authority.domain_overrides;const payload=object(previous?.payload);
-   const track_overrides=Array.isArray(payload.track_overrides)?payload.track_overrides.filter(value=>object(value).source_representation_id!==edit.source||object(value).track_position!==edit.position):[];
-   track_overrides.push({source_representation_id:edit.source,track_position:edit.position,title:edit.title.trim()||null,disc_position:edit.disc?Number(edit.disc):null,display_position:edit.number?Number(edit.number):null,album_selected:edit.albumSelected});
+   const existing=Array.isArray(payload.track_overrides)?payload.track_overrides.map(object):[];
+   const prior=existing.find(value=>value.source_representation_id===edit.source&&value.track_position===edit.position);
+   const track_overrides=existing.filter(value=>value!==prior);
+   // Automatic leaves the choice to the server, so saving a title doesn't pin
+   // today's pick or quietly exclude a track that is waiting for review.
+   const album_selected=edit.album==='auto'?null:edit.album==='include';
+   track_overrides.push({source_representation_id:edit.source,track_position:edit.position,title:edit.title.trim()||null,disc_position:edit.disc?Number(edit.disc):null,display_position:edit.number?Number(edit.number):null,album_selected});
    await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides}}}})});
    if(controller.signal.aborted)return;setEditingTrack(undefined);setAvailabilityRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
   }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
  }
- const discs=React.useMemo(()=>{
+ // Sets which copy the album uses for every track of one original at once,
+ // such as WAV instead of MP3. Automatic clears the choices and lets the server
+ // pick the best quality again. Other per-track edits are kept.
+ async function chooseAlbumFormat(source:string,codec:string){
+  const originals=rows.filter(row=>row.source_representation_id===source&&!row.profile);
+  const controller=requests.current;setBusy(true);setError('');setEditingTrack(undefined);
+  try{const review=await api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal});
+   const previous=review.authority.domain_overrides;const payload=object(previous?.payload);
+   const existing=Array.isArray(payload.track_overrides)?payload.track_overrides.map(object):[];
+   const positions=new Set(originals.map(row=>row.track_position));
+   const kept=existing.filter(value=>value.source_representation_id!==source||!positions.has(Number(value.track_position)));
+   const updated=originals.map(row=>{const prior=existing.find(value=>value.source_representation_id===source&&value.track_position===row.track_position);
+    return {source_representation_id:source,track_position:row.track_position,title:prior?.title??null,disc_position:prior?.disc_position??null,display_position:prior?.display_position??null,album_selected:codec?row.audio_format?.codec===codec:null};
+   }).filter(value=>value.title!=null||value.disc_position!=null||value.display_position!=null||value.album_selected!=null);
+   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:[...kept,...updated]}}}})});
+   if(controller.signal.aborted)return;setAvailabilityRefresh(v=>v+1);setRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
+  }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
+ }
+ // Excluded rows are files the album does not use, such as the MP3 copy of a
+ // purchase that also has WAV files. List them apart so tracks are not doubled.
+ const groupDiscs=(source:Availability[])=>{
   const grouped=new Map<string,Map<number,Availability[]>>();
-  for(const row of rows){const key=discKey(row);const tracks=grouped.get(key)||new Map<number,Availability[]>();const variants=tracks.get(row.track_position)||[];variants.push(row);tracks.set(row.track_position,variants);grouped.set(key,tracks);}
+  for(const row of source){const key=discKey(row);const tracks=grouped.get(key)||new Map<number,Availability[]>();const variants=tracks.get(row.track_position)||[];variants.push(row);tracks.set(row.track_position,variants);grouped.set(key,tracks);}
   return [...grouped.entries()].map(([key,tracks])=>[key,[...tracks.entries()].sort(([,a],[,b])=>(a[0].disc_position??1)-(b[0].disc_position??1)||(a[0].display_position??a[0].track_position)-(b[0].display_position??b[0].track_position)).map(([,variants])=>variants)] as const).sort(([a],[b])=>discPosition(coverage,a)-discPosition(coverage,b)||a.localeCompare(b));
- },[rows,coverage]);
+ };
+ const discs=React.useMemo(()=>groupDiscs(rows.filter(row=>row.album_selection!=='excluded')),[rows,coverage]);
+ const otherDiscs=React.useMemo(()=>groupDiscs(rows.filter(row=>row.album_selection==='excluded')),[rows,coverage]);
+ const otherCount=otherDiscs.reduce((count,[,tracks])=>count+tracks.length,0);
+ // Originals holding the same tracks in more than one format, for example a
+ // purchase with MP3 and WAV folders. Each offers one album-wide format choice.
+ const formatChoices=React.useMemo(()=>{
+  const sources=new Map<string,{label:string;codecs:Map<string,{included:number;total:number}>}>();
+  for(const row of rows){if(row.profile||!row.audio_format)continue;
+   const source=sources.get(row.source_representation_id)||{label:row.source_label,codecs:new Map()};
+   const count=source.codecs.get(row.audio_format.codec)||{included:0,total:0};
+   count.total++;if(row.album_selection==='included')count.included++;
+   source.codecs.set(row.audio_format.codec,count);sources.set(row.source_representation_id,source);}
+  return [...sources.entries()].filter(([,source])=>source.codecs.size>1).map(([id,source])=>{
+   const codecs=[...source.codecs.entries()];
+   const used=codecs.filter(([,count])=>count.included>0);
+   return {id,label:source.label,codecs:codecs.map(([codec])=>codec),current:used.length===1&&used[0][1].included===used[0][1].total?used[0][0]:''};
+  });
+ },[rows]);
  const orderedMedia=[...(coverage?.media||[])].sort((a,b)=>a.position-b.position);
  const orderedPlanDiscs=[...(plan?.discs||[])].sort((a,b)=>{
   const selected=(disc:AlbumPlan['discs'][number])=>disc.sources.find(source=>source.source_representation_id===discSources[disc.capture_id])||disc.sources.find(source=>source.default_selected);
@@ -267,7 +317,27 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   const added=addMusicTracks(tracks);setQueueNotice(added===tracks.length?`Added ${added} ${added===1?'track':'tracks'} to your queue.`:`Added ${added} tracks. The queue is full (5,000 tracks).`);
  }
 
- if(!discs.length&&!error&&!item.supports_listening)return null;
+ const renderDisc=([key,tracks]:(typeof discs)[number],discIndex:number,other=false)=><article className="music-disc" key={key} data-disc-key={key}>
+   <header><strong>{coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position?`Album disc ${coverage.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)!.medium_position}`:tracks[0][0].profile?`Disc ${discIndex+1}`:'Digital original'}</strong>{!other&&<button disabled={playBusy||!tracks.some(playableRow)} title="Replaces your queue" onClick={()=>void play(tracks[0][0].source_representation_id)}>Play original</button>}{!other&&onAddToList&&<ActionMenu label={`Disc ${discIndex+1} actions`}><button onClick={()=>onAddToList(tracks[0][0].source_representation_id)}>{tracks[0][0].profile?'Add disc to list':'Add original to list'}</button></ActionMenu>}</header>
+   <small className="playback-source">Original: {tracks[0][0].source_label} · Import {tracks[0][0].capture_id.slice(-6)}</small>
+   {tracks.map((group,index)=>{const first=group[0];const playable=playableRow(group);const flac=group.find(row=>row.profile?.codec==='flac'&&row.state.status==='available');
+    return <div className="music-track" key={trackKey(first)} data-track-position={first.track_position} data-representation-id={playable?.state.status==='available'?playable.state.representation_id:undefined}>
+     <div className="track-title"><button className="track-play" disabled={playBusy||!playable} aria-label={`Play track ${first.display_position??first.track_position}: ${first.title}`} title={playable?'Play now (replaces your queue)':'Can’t play in this browser. See formats below.'} onClick={()=>void play(first.source_representation_id,first.track_position)}>Play</button><strong title={first.title}>{first.display_position??first.track_position}. {first.title}</strong>{!first.profile&&first.disc_position&&<small>Disc {first.disc_position}</small>}{(onAddToList||!canPrepare||canPrepareRequested)&&<ActionMenu label={`Track ${first.track_position} actions`}>{canPrepareRequested&&<button onClick={()=>void editTrack(first)}>Edit track details</button>}{onAddToList&&<button onClick={()=>onAddToList(first.source_representation_id,first.track_position)}>Add track to list</button>}{!canPrepare&&<button disabled={!playable} onClick={()=>enqueue([group])}>Add to queue</button>}</ActionMenu>}</div>
+     {editingTrack?.source===first.source_representation_id&&editingTrack.position===first.track_position&&<form aria-label="Edit purchased track" onSubmit={event=>{event.preventDefault();void saveTrack();}}><label>Album playback and lists<select aria-label="Album playback and lists" value={editingTrack.album} onChange={e=>setEditingTrack({...editingTrack,album:e.target.value as 'auto'|'include'|'exclude'})}><option value="auto">Automatic{first.album_selection==='needs_review'?' (needs a choice)':''}</option><option value="include">Include this version</option><option value="exclude">Leave this version out</option></select></label><label>Track title<input maxLength={4096} value={editingTrack.title} onChange={e=>setEditingTrack({...editingTrack,title:e.target.value})}/></label><label>Disc number<input type="number" min="1" max="65535" value={editingTrack.disc} onChange={e=>setEditingTrack({...editingTrack,disc:e.target.value})}/></label><label>Track number<input type="number" min="1" max="65535" value={editingTrack.number} onChange={e=>setEditingTrack({...editingTrack,number:e.target.value})}/></label><button disabled={busy}>Save track details</button><button type="button" disabled={busy} onClick={()=>setEditingTrack(undefined)}>Cancel track edit</button></form>}
+     <div className="track-formats" role="group" aria-label="Track formats">{group.map(row=>{
+      const label=row.profile?profileLabel(row.profile):`${row.audio_format?.codec.toUpperCase()||'Audio'} original`;
+      const compactLabel=!row.profile?(row.audio_format?.codec.toUpperCase()||'Original'):row.profile.codec==='flac'?'FLAC':`${group.find(value=>value.profile?.codec==='opus')===row?'Opus ':''}${row.profile.bitrate_kbps}k`;
+      const detail=`${label}: ${stateLabel(row)}`;
+      if(row.state.status==='available'){const enriched=row.profile?.codec==='flac'&&item.domain.module==='org.junk.music';const url=enriched?`/api/v1/items/${item.id}/music-exports/${row.source_representation_id}/${row.track_position}`:mediaUrl(item.id,row)!;return <a className="track-format ready" key={label} href={url} download aria-label={enriched?'Download FLAC with album details and available cover art':`Download ${label} · ${stateLabel(row)}`} title={enriched?'Download FLAC with album details and available cover art':`Download ${detail}`}><span aria-hidden="true">✓</span> {compactLabel}</a>;}
+      const pending=pendingTracks.has(`${trackKey(row)}/${label}`);
+      if(canPrepare&&row.can_prepare&&row.state.status!=='preparing')return <button className="track-format prepare" key={label} disabled={pending} onClick={()=>void prepare(row)} aria-label={pending?`Submitting ${label}…`:`Prepare ${label}`} title={`Prepare ${detail}`}><span aria-hidden="true">{pending?'…':'+'}</span> {compactLabel}</button>;
+      if(row.state.status==='preparing')return <span className="track-format preparing" key={label} role="img" aria-label={`${label}: Preparing…`} title={`${label}: Preparing…`}><span aria-hidden="true">…</span> {compactLabel}</span>;
+      return <details className="track-format-details" key={label}><summary className="track-format unavailable" aria-label={detail} title={detail}><span aria-hidden="true">−</span> {compactLabel}</summary><p>{detail}</p></details>;
+     })}{!canPrepare&&flac&&!canDecode(flac)&&<InfoHelp label="FLAC playback">This browser can’t play FLAC. Download the file to play it in another app.</InfoHelp>}</div>
+    </div>;
+   })}
+  </article>;
+ if(!rows.length&&!error&&!item.supports_listening)return null;
  return <section className={canPrepare?'music-preparation':'album-tracks'} aria-label={canPrepare?'Prepare audio':'Album tracks'}>
   {canPrepare&&<div className="music-heading">{item.primary_artwork?<img src={`/api/v1/collections/${item.collection_id}/assets/${item.primary_artwork}/thumbnail`} alt={`${item.title} cover`}/>:<div className="music-cover-placeholder" aria-label="No cover artwork">♪</div>}<div><h3>{canPrepare?'Prepare audio':'Album tracks'}</h3><strong>{item.title}</strong>{item.subtitle&&<small>{item.subtitle}</small>}</div></div>}
   {coverage&&item.domain.module==='org.junk.music'&&!item.digital_audio&&!rows.some(row=>!row.profile)&&<details className="album-inspection"><summary>Disc details &amp; checks</summary><section className="album-coverage" aria-label="Album discs"><header><h4>Album discs</h4><span>{coverage.media.filter(medium=>coverage.sources.some(source=>source.medium_position===medium.position)).length} of {coverage.media.length||'?'} linked</span></header>{coverage.release_title?<p className="muted">Selected release: {coverage.release_title}.</p>:<p className="notice">No album release selected. {onOpenMetadata?<button onClick={onOpenMetadata}>Find album and track names</button>:'A curator can choose one.'}</p>}
@@ -276,7 +346,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
    {!coverage.sources.length&&<p className="notice">No CD files attached. {onOpenFiles&&<button onClick={onOpenFiles}>Attach original files</button>}</p>}
   </section></details>}
   {loading&&<p role="status">Checking tracks…</p>}
-  {!loading&&!discs.length&&!error&&<p className="notice">{item.digital_audio?(item.content_permissions.can_edit?'Purchased files are saved but not ready to play yet. Check Work & history.':'No purchased tracks are ready yet.') : item.captures.length?(item.content_permissions.can_edit?'No playable audio tracks found. Check that the full CD was imported.':'No playable audio tracks found.'):(item.content_permissions.can_edit?'No files attached yet. Use Edit / attach files to add them.':'No files attached yet.')}</p>}
+  {!loading&&!rows.length&&!error&&<p className="notice">{item.digital_audio?(item.content_permissions.can_edit?'Purchased files are saved but not ready to play yet. Check Work & history.':'No purchased tracks are ready yet.') : item.captures.length?(item.content_permissions.can_edit?'No playable audio tracks found. Check that the full CD was imported.':'No playable audio tracks found.'):(item.content_permissions.can_edit?'No files attached yet. Use Edit / attach files to add them.':'No files attached yet.')}</p>}
   {item.domain.module==='org.junk.games'&&<>{canPrepareRequested&&onOpenAnalysis&&item.captures.flatMap(c=>c.representations).filter(r=>r.role==='preservation_master').map(r=><button key={r.id} disabled={busy} onClick={()=>onOpenAnalysis(r.id,'structure')}>Inspect game CD audio</button>)}</>}
   {canPrepare&&<InfoHelp label="audio preparation">FLAC is lossless. Opus makes smaller files. Set up encoders in Administration → Audio encoders.</InfoHelp>}
   {error&&<p role="alert" className="error">{error}</p>}
@@ -292,25 +362,8 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   {canPrepareRequested&&item.digital_audio&&item.captures.map(capture=><PurchaseDetails key={`${item.id}/${capture.id}`} itemId={item.id} capture={capture} onChanged={()=>{setAvailabilityRefresh(v=>v+1);if(callbacks.current.onPrepared)void api<Item>(`/items/${item.id}`,{signal:requests.current.signal}).then(value=>callbacks.current.onPrepared?.(value)).catch(report);}}/>)}
   {rows.some(row=>row.album_selection==='needs_review')&&<p className="notice">Some tracks have more than one version. A curator can choose one with Edit track details before the album can play.</p>}{queueNotice&&<p role="status">{queueNotice}</p>}
   <div className="album-track-toolbar"><h3>Tracks</h3>{discs.length>0&&<button className="primary" disabled={loading||playBusy} onClick={()=>void play()}>Play album</button>}{!canPrepare&&discs.some(([,tracks])=>tracks.some(playableRow))&&<button onClick={()=>enqueue(discs.flatMap(([,tracks])=>tracks),true)}>Add album to queue</button>}<ActionMenu label="Album actions">{onAddToList&&discs.length>0&&<button onClick={()=>onAddToList()}>Add album to list</button>}<button disabled={busy} onClick={()=>{setError('');setAvailabilityRefresh(value=>value+1);setRefresh(value=>value+1);}}>Refresh tracks</button></ActionMenu></div>
-  {discs.map(([key,tracks],discIndex)=><article className="music-disc" key={key} data-disc-key={key}>
-   <header><strong>{coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position?`Album disc ${coverage.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)!.medium_position}`:tracks[0][0].profile?`Disc ${discIndex+1}`:'Digital original'}</strong><button disabled={playBusy||!tracks.some(playableRow)} title="Replaces your queue" onClick={()=>void play(tracks[0][0].source_representation_id)}>Play original</button>{onAddToList&&<ActionMenu label={`Disc ${discIndex+1} actions`}><button onClick={()=>onAddToList(tracks[0][0].source_representation_id)}>{tracks[0][0].profile?'Add disc to list':'Add original to list'}</button></ActionMenu>}</header>
-   <small className="playback-source">Original: {tracks[0][0].source_label} · Import {tracks[0][0].capture_id.slice(-6)}</small>
-   {tracks.map((group,index)=>{const first=group[0];const playable=playableRow(group);const flac=group.find(row=>row.profile?.codec==='flac'&&row.state.status==='available');
-    return <div className="music-track" key={trackKey(first)} data-track-position={first.track_position} data-representation-id={playable?.state.status==='available'?playable.state.representation_id:undefined}>
-     <div className="track-title"><button className="track-play" disabled={playBusy||!playable} aria-label={`Play track ${first.display_position??first.track_position}: ${first.title}`} title={playable?'Play now (replaces your queue)':'Can’t play in this browser. See formats below.'} onClick={()=>void play(first.source_representation_id,first.track_position)}>Play</button><strong title={first.title}>{first.display_position??first.track_position}. {first.title}</strong>{!first.profile&&first.disc_position&&<small>Disc {first.disc_position}</small>}{(onAddToList||!canPrepare||canPrepareRequested)&&<ActionMenu label={`Track ${first.track_position} actions`}>{canPrepareRequested&&<button onClick={()=>setEditingTrack({source:first.source_representation_id,position:first.track_position,title:first.title,disc:first.disc_position?String(first.disc_position):'',number:String(first.display_position??first.track_position),albumSelected:first.album_selection==='included'})}>Edit track details</button>}{onAddToList&&<button onClick={()=>onAddToList(first.source_representation_id,first.track_position)}>Add track to list</button>}{!canPrepare&&<button disabled={!playable} onClick={()=>enqueue([group])}>Add to queue</button>}</ActionMenu>}</div>
-     {editingTrack?.source===first.source_representation_id&&editingTrack.position===first.track_position&&<form aria-label="Edit purchased track" onSubmit={event=>{event.preventDefault();void saveTrack();}}><label><input type="checkbox" checked={editingTrack.albumSelected} onChange={e=>setEditingTrack({...editingTrack,albumSelected:e.target.checked})}/> Include in album playback and lists</label><label>Track title<input maxLength={4096} value={editingTrack.title} onChange={e=>setEditingTrack({...editingTrack,title:e.target.value})}/></label><label>Disc number<input type="number" min="1" max="65535" value={editingTrack.disc} onChange={e=>setEditingTrack({...editingTrack,disc:e.target.value})}/></label><label>Track number<input type="number" min="1" max="65535" value={editingTrack.number} onChange={e=>setEditingTrack({...editingTrack,number:e.target.value})}/></label><button disabled={busy}>Save track details</button><button type="button" disabled={busy} onClick={()=>setEditingTrack(undefined)}>Cancel track edit</button></form>}
-     <div className="track-formats" role="group" aria-label="Track formats">{group.map(row=>{
-      const label=row.profile?profileLabel(row.profile):`${row.audio_format?.codec.toUpperCase()||'Audio'} original`;
-      const compactLabel=!row.profile?(row.audio_format?.codec.toUpperCase()||'Original'):row.profile.codec==='flac'?'FLAC':`${group.find(value=>value.profile?.codec==='opus')===row?'Opus ':''}${row.profile.bitrate_kbps}k`;
-      const detail=`${label}: ${stateLabel(row)}`;
-      if(row.state.status==='available'){const enriched=row.profile?.codec==='flac'&&item.domain.module==='org.junk.music';const url=enriched?`/api/v1/items/${item.id}/music-exports/${row.source_representation_id}/${row.track_position}`:mediaUrl(item.id,row)!;return <a className="track-format ready" key={label} href={url} download aria-label={enriched?'Download FLAC with album details and available cover art':`Download ${label} · ${stateLabel(row)}`} title={enriched?'Download FLAC with album details and available cover art':`Download ${detail}`}><span aria-hidden="true">✓</span> {compactLabel}</a>;}
-      const pending=pendingTracks.has(`${trackKey(row)}/${label}`);
-      if(canPrepare&&row.can_prepare&&row.state.status!=='preparing')return <button className="track-format prepare" key={label} disabled={pending} onClick={()=>void prepare(row)} aria-label={pending?`Submitting ${label}…`:`Prepare ${label}`} title={`Prepare ${detail}`}><span aria-hidden="true">{pending?'…':'+'}</span> {compactLabel}</button>;
-      if(row.state.status==='preparing')return <span className="track-format preparing" key={label} role="img" aria-label={`${label}: Preparing…`} title={`${label}: Preparing…`}><span aria-hidden="true">…</span> {compactLabel}</span>;
-      return <details className="track-format-details" key={label}><summary className="track-format unavailable" aria-label={detail} title={detail}><span aria-hidden="true">−</span> {compactLabel}</summary><p>{detail}</p></details>;
-     })}{!canPrepare&&flac&&!canDecode(flac)&&<InfoHelp label="FLAC playback">This browser can’t play FLAC. Download the file to play it in another app.</InfoHelp>}</div>
-    </div>;
-   })}
-  </article>)}
+  {item.content_permissions.can_edit&&formatChoices.map(choice=><div className="album-format-choice" key={choice.id}><label>{formatChoices.length>1?`Album uses (${choice.label})`:'Album uses'}<select aria-label={formatChoices.length>1?`Album uses (${choice.label})`:'Album uses'} disabled={busy} value={choice.current} onChange={event=>void chooseAlbumFormat(choice.id,event.target.value)}>{!choice.current&&<option value="">Mixed or automatic</option>}{choice.codecs.map(codec=><option key={codec} value={codec}>{codec.toUpperCase()} files</option>)}</select></label>{choice.current&&<button type="button" disabled={busy} onClick={()=>void chooseAlbumFormat(choice.id,'')}>Use best quality automatically</button>}</div>)}
+  {discs.map((disc,index)=>renderDisc(disc,index))}
+  {otherCount>0&&<details className="other-tracks"><summary>{otherCount} {otherCount===1?'file':'files'} not part of the album</summary><p className="muted">Other copies saved with this album, such as an MP3 version beside lossless files. They stay saved but are left out of album playback and lists.{canPrepareRequested&&' Use Edit track details to include one.'}</p>{otherDiscs.map((disc,index)=>renderDisc(disc,index,true))}</details>}
  </section>;
 }

@@ -108,3 +108,8 @@
 .dock-bitrate summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .dock-bitrate-panel{position:absolute;bottom:calc(100% + 8px);inset-inline-end:0;display:flex;gap:.5rem;align-items:end;width:max-content;padding:.65rem;background:var(--surface-warm);border:1px solid var(--line);border-radius:5px;box-shadow:0 -4px 16px var(--shadow)}
 .dock-bitrate-panel input{padding:.5rem;font-size:inherit}
+.other-tracks{margin:12px 0;font-size:11px;color:var(--muted)}
+.other-tracks>summary{cursor:pointer;padding:5px 0}
+.other-tracks>p{margin:4px 0 8px}
+.other-tracks .music-disc{color:var(--ink);font-size:initial}
+.album-format-choice{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:8px 0}

@@ -249,7 +249,7 @@ try{
  await editor.getByRole('button',{name:'Music',exact:true}).click();
  for(const [index,included] of [[0,true],[1,false]]){
   await clickAction(editor,'Edit track details',index);
-  await editor.getByLabel('Include in album playback and lists',{exact:true}).setChecked(included);
+  await editor.getByLabel('Album playback and lists',{exact:true}).selectOption(included?'include':'exclude');
   await editor.getByRole('button',{name:'Save track details',exact:true}).click();
   await expect(editor.getByRole('form',{name:'Edit purchased track'})).toHaveCount(0);
  }
@@ -503,6 +503,33 @@ try{
  assert.equal(steamFiles.length,5);
  const selectedSteam=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,flacMember.import.target_item_id);
  assert.equal(selectedSteam.length,1);assert.equal(selectedSteam[0].audio_format.codec,'flac');
+ // The album lists only the copy it plays; the MP3 and WAV copies of the same
+ // track are kept, collapsed, rather than shown as extra album tracks.
+ const importsUrl=page.url();
+ await page.goto(`${origin}/?collection=${collection}&item=${flacMember.import.target_item_id}`);
+ const albumTracks=page.getByRole('region',{name:'Album tracks'});
+ const otherCopies=albumTracks.locator('details.other-tracks');
+ await expect(albumTracks.locator('.music-track')).toHaveCount(3);
+ await expect(otherCopies.locator('.music-track')).toHaveCount(2);
+ await expect(otherCopies.locator('.music-track').first()).toBeHidden();
+ await otherCopies.locator(':scope > summary').click();
+ await expect(otherCopies.locator('.music-track')).toHaveCount(2);
+ await expect(otherCopies.getByRole('button',{name:/^Play track /}).first()).toBeEnabled();
+ await expect(otherCopies.getByRole('button',{name:'Play original',exact:true})).toHaveCount(0);
+ // One choice switches every track to another copy, and Automatic restores the
+ // best-quality pick. Playback follows the saved choice.
+ const playedCodecs=()=>page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks.map(track=>track.audio_format.codec).join(),flacMember.import.target_item_id);
+ const albumUses=albumTracks.getByRole('combobox',{name:'Album uses'});
+ await expect(albumUses).toHaveValue('flac');
+ await albumUses.selectOption('mp3');
+ await expect.poll(playedCodecs).toBe('mp3');
+ await expect(albumUses).toHaveValue('mp3');
+ await expect(albumTracks.locator('.music-track')).toHaveCount(3);
+ await expect(otherCopies.locator('.music-track')).toHaveCount(2);
+ await albumTracks.getByRole('button',{name:'Use best quality automatically'}).click();
+ await expect.poll(playedCodecs).toBe('flac');
+ await expect(albumUses).toHaveValue('flac');
+ await page.goto(importsUrl);
  const wildMember=steamMembers.find(m=>m.plan.default_title==='Wild Album');
  const selectedWild=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}/client-playback`)).json()).tracks,wildMember.import.target_item_id);
  assert.equal(selectedWild.length,1);assert.equal(selectedWild[0].disc_position,2);
