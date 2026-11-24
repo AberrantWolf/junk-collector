@@ -460,9 +460,10 @@ impl LibraryCarePort for Store {
         let mut items = Vec::new();
         let mut after = cursor.clone();
         let mut more = false;
+        let mut last = None;
         'pages: loop {
             let sql = format!(
-                "SELECT i.record FROM items i {grants} WHERE {scope} AND EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND {saved}) AND (?7 IS NULL OR (lower(i.title),i.id)>(?7,?8)) ORDER BY lower(i.title),i.id LIMIT 101"
+                "SELECT i.record,lower(i.title) FROM items i {grants} WHERE {scope} AND EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND {saved}) AND (?7 IS NULL OR (lower(i.title),i.id)>(?7,?8)) ORDER BY lower(i.title),i.id LIMIT 101"
             );
             let mut statement = db.prepare(&sql).map_err(storage)?;
             let rows = statement
@@ -477,17 +478,26 @@ impl LibraryCarePort for Store {
                         after.as_ref().map(|v| v.0.clone()),
                         after.as_ref().map(|v| v.1.clone()),
                     ],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .map_err(storage)?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(storage)?;
             let exhausted = rows.len() < 101;
-            for raw in rows.into_iter().take(100) {
+            for (raw, key) in rows.into_iter().take(100) {
                 let mut item: Item = serde_json::from_str(&raw).map_err(storage)?;
-                after = Some((item.title.to_lowercase(), item.id.to_string()));
+                // SQLite's lower() folds only ASCII, so the cursor keeps its key.
+                let position = (key, item.id.to_string());
+                after = Some(position.clone());
                 crate::hydrate_captures(&db, &mut item)?;
-                let formats = collector_app::saved_formats_of(&item.captures);
+                let mut made_here = db
+                    .prepare_cached("SELECT EXISTS(SELECT 1 FROM conversion_recipes WHERE id=?)")
+                    .map_err(storage)?;
+                let formats = collector_app::saved_formats_of(&item.captures, &mut |id| {
+                    made_here
+                        .query_row([id.to_string()], |row| row.get(0))
+                        .map_err(storage)
+                })?;
                 let album_tracks: i64 = db
                     .query_row(
                         "SELECT count(*) FROM music_search WHERE item_id=?",
@@ -526,6 +536,7 @@ impl LibraryCarePort for Store {
                     .map_err(storage)?
                     .and_then(|raw| serde_json::from_str::<collector_app::LibraryEntry>(&raw).ok())
                     .and_then(|entry| entry.artwork);
+                last = Some(position);
                 items.push(collector_app::SavedFormatAlbum {
                     item_id: item.id,
                     collection_id: item.collection_id,
@@ -541,14 +552,12 @@ impl LibraryCarePort for Store {
             }
         }
         let next_cursor = if more {
-            items
-                .last()
-                .map(|album| {
-                    serde_json::to_vec(&(album.title.to_lowercase(), album.item_id.to_string()))
-                        .map(hex::encode)
-                        .map_err(storage)
-                })
-                .transpose()?
+            last.map(|position: (String, String)| {
+                serde_json::to_vec(&position)
+                    .map(hex::encode)
+                    .map_err(storage)
+            })
+            .transpose()?
         } else {
             None
         };
@@ -1064,7 +1073,7 @@ fn reason_filter(
 /// only.
 pub(crate) fn partial_saved_format(db: &Connection, item: ItemId) -> Result<bool> {
     db.query_row(
-        "WITH saved AS (SELECT json_extract(r.value,'$.profile') AS profile,count(*) AS tracks FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=?1 AND json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL GROUP BY 1) SELECT EXISTS(SELECT 1 FROM saved WHERE tracks<(SELECT count(*) FROM music_search WHERE item_id=?1))",
+        "WITH saved AS (SELECT json_extract(r.value,'$.profile') AS profile,count(*) AS tracks FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=?1 AND json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL AND EXISTS(SELECT 1 FROM conversion_recipes cr WHERE cr.id=json_extract(r.value,'$.id')) GROUP BY 1) SELECT EXISTS(SELECT 1 FROM saved WHERE tracks<(SELECT count(*) FROM music_search WHERE item_id=?1))",
         [item.to_string()],
         |row| row.get(0),
     )

@@ -94,14 +94,20 @@ pub fn saved_format_key(profile: &ConversionProfile) -> String {
     }
 }
 
-/// Summarise the saved formats on an item's captures. Only representations
-/// derived from an original count; originals never appear.
-pub fn saved_formats_of(captures: &[Capture]) -> Vec<SavedFormatSummary> {
+/// Summarise the saved formats on an item's captures. Only copies this server
+/// made from an original count (`made_here`: the copy has a conversion
+/// recipe); originals never appear.
+pub fn saved_formats_of(
+    captures: &[Capture],
+    made_here: &mut dyn FnMut(RepresentationId) -> Result<bool>,
+) -> Result<Vec<SavedFormatSummary>> {
     let mut formats: Vec<SavedFormatSummary> = Vec::new();
     for capture in captures {
         for representation in &capture.representations {
             if representation.role == RepresentationRole::PreservationMaster
                 || representation.source.is_none()
+                || representation.profile.is_none()
+                || !made_here(representation.id)?
             {
                 continue;
             }
@@ -141,7 +147,7 @@ pub fn saved_formats_of(captures: &[Capture]) -> Vec<SavedFormatSummary> {
         }
     }
     formats.sort_by_key(|f| saved_format_key(&f.profile));
-    formats
+    Ok(formats)
 }
 
 impl CollectionService {
@@ -233,7 +239,14 @@ impl CollectionService {
                 subtitle: item.subtitle.clone(),
                 artwork: None,
                 album_tracks: 0,
-                formats: saved_formats_of(&captures),
+                formats: saved_formats_of(&captures, &mut |id| match self
+                    .processing
+                    .recipe(RecipeId(id.0))
+                {
+                    Ok(_) => Ok(true),
+                    Err(Error::NotFound) => Ok(false),
+                    Err(error) => Err(error),
+                })?,
             },
             freed_bytes,
         })
