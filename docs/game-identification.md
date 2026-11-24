@@ -8,7 +8,7 @@
 2. In **Administration → Game catalogs**, upload the DAT files or ZIPs, review the
    detected documents, import them and activate the saved catalogs.
 3. Activation queues identification of existing games in the collection. New guided
-   imports use the same service, and **Metadata → Identify game** runs it again for one item.
+   imports use the same service, and **Identify game** in an entry's **Review** panel runs it again for one item.
 
 No system string or normalization profile has to be entered. A game imported without
 an active catalog keeps its originals and reports that no catalog match was

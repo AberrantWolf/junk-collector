@@ -25,7 +25,7 @@ the owner when one matters.
 | [Security](security.md) | Trust boundaries, recovery and enrollment rules |
 | [Home-lab scope](home-lab-scope.md) | Product scope, provenance, security and backup expectations |
 | [CD capture](cd-audio-capture-tradeoff.md) | Accepting Q-subchannel errors on ordinary music CDs |
-| [Import to library flow](import-to-library-flow.md) | One review queue and one fix panel from import to finished entry |
+| [Import to library flow](import-to-library-flow.md) | One review queue and one fix panel from import to finished entry (mostly implemented) |
 
 To add a decision, create the next numbered file with Context, Decision and
 (optionally) Consequences sections, and add it to this table.

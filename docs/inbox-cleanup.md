@@ -3,7 +3,7 @@
 Imports keep their inbox source files by default. Removing them is an explicit,
 per-package action.
 
-Open **Activity**, select the completed inbox import and expand its details. Under
+Open **Review → Added recently**, select the completed inbox import and expand its details. Under
 **Inbox source files**, make sure nothing is still copying or editing the source
 package, then choose **Remove imported inbox files**. You need curation access and
 must be the user who requested the import.

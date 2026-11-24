@@ -1,6 +1,28 @@
 # From import to finished entry: one flow
 
-Status: proposed, not yet reviewed by the owner.
+Status: mostly implemented; not yet reviewed by the owner.
+
+Built: one reason policy for list rows and the fix panel, with levels and
+accept-as-is; game reasons; Review (tabs, counts, reasons on rows, lists that
+load as they scroll, the fix panel with import details and Next entry);
+Add to library with decision-first package review and Save originals only;
+Activity without import batches; the media dock; live-playable originals no
+longer flagged; Saved formats with origins, partial detection and removal;
+a game heading and Soundtrack label on entry pages.
+
+Not built yet:
+
+- The Library's **Add / import** dialog still has its own importer. Merging
+  it needs Add to library to gain game dump-folder discovery and attaching one
+  package to an existing entry, and several journeys rely on the dialog flow.
+- Suggested album groups before an import starts (they appear in Review
+  afterwards as possible album groups).
+- Blocked reasons are not sorted first across pages; rows keep title order.
+- Setup gaps are counted, not grouped per system.
+- Removing a saved format keeps its files in the archive's history, so no disk
+  space is freed yet (see the open question below).
+- The player code still ships in the main bundle, because it shares the play
+  queue's state with the rest of the app.
 
 This proposes how bringing things into the library *should* work, from picking
 files to having a correctly named album or game with artwork. It is not a list

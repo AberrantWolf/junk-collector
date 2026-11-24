@@ -15,11 +15,34 @@
 
 Preparation can be cancelled and retried, and resumes after a restart.
 
+## Saved formats
+
+Every supported original plays without a saved copy: the server converts CD audio,
+WAV and the other originals to FLAC or Opus while it streams. A missing FLAC or Opus
+copy is therefore not a problem, and albums are not flagged for it.
+
+**Saved formats** lists the albums that have extra saved copies, with the space each
+format uses. Filter by format, by what the copy was made for (one track, an album, a
+bulk selection or the import setting), by copies that cover only some tracks, or by
+albums with several Opus bitrates. Copies made before the reason was recorded say so.
+
+- **Remove** takes a saved format off an album after a confirmation that shows its
+  size. Originals are never removed here; those tracks play from the originals again.
+  The removed copy stays in the archive's history of that capture, so removing a
+  format does not free disk space yet.
+- **Fix** opens a partly made format, where each missing track shows why it wasn't
+  made (for example, a 32-bit float WAV can't be saved as FLAC without changing it).
+  Finish it, remove it, or accept it as it is in **Review**.
+- **Add a format…** opens the preparation tools below.
+
+A format that covers only some of an album's tracks also appears in **Review** as
+*A saved format is only partly made*. Accepting it keeps what worked.
+
 ## Prepare one album or a batch
 
 Configure the [external encoders](configuration.md#audio-encoders). In **Prepare
 audio**, choose **FLAC** or **Opus**; for Opus choose 96, 128 or 192 kbps VBR.
-**Albums needing Opus** uses the selected bitrate, so an album with a ready
+**Albums without Opus** uses the selected bitrate, so an album with a ready
 96 kbps copy still appears when you ask for 128 kbps.
 
 Open an album to choose its sources and prepare missing tracks, or select albums

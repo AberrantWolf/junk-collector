@@ -52,11 +52,16 @@ a missing or damaged one from the archive.
 ## Add your first collection
 
 1. Sign in on a management address and choose **Create collection** (games or music).
-2. Open **Imports**, select the collection, and choose **Browser folder / files** or **Server inbox**.
-3. Review the detected packages. Music collections show **Files and album playback**;
-   other packages show **Files and analysis**.
-4. Choose **Start import** and keep the page open until the browser upload finishes.
-5. Open the item to see its files, metadata, artwork and checks.
+2. Open **Add to library**, select the collection, and choose **Browser folder / files** or **Server inbox**.
+3. Check the detected packages. Packages that need a decision are listed first;
+   in large imports the rest stay in a compact list until you choose **Change**.
+   Music collections show **Files and album playback**; other packages show
+   **Files and analysis**.
+4. Choose **Start import**. Browser uploads need the page open until they finish;
+   inbox imports open **Review → In progress** for that import.
+5. Use **Review** to see what is still running, what was added and what needs you.
+   Open an entry there to fix its name, match, cover or import, or accept a reason
+   as it is.
 
 | Option | Use |
 | --- | --- |
@@ -67,7 +72,8 @@ a missing or damaged one from the archive.
 | Album group | Give related discs the same label. Leave the title empty to use automatic metadata. |
 | Physical copy label | The same label within an album means one purchased copy; different labels mean separate copies. |
 | Prepare FLAC after import | Optional for supported CDs. FLAC/MP3 purchases play directly. |
-| Interrupted upload | Reopen the saved batch and reselect the same folder/files to resume. |
+| Save originals only | Keep the files without analysis, lookups or audio preparation. |
+| Interrupted upload | Reopen the unfinished import and reselect the same folder/files to resume. |
 | Add / import → manual entry | Record inventory without files. |
 
 Keep dump packages complete: BIN/CUE sets need their BIN files, and Redumper CDs need
@@ -107,9 +113,10 @@ anchor. Q-subchannel errors alone are acceptable for ordinary music CDs; run
 
 ## Play music
 
-FLAC/MP3 purchases play directly. For CDs, live playback converts on demand, or you can
-save prepared copies: configure the [encoders](configuration.md#audio-encoders), open
-**Prepare audio**, select albums and start. See [audio support](audio-preparation.md).
+Every supported original plays: the server converts CD audio and WAV while it
+streams. Saved FLAC or Opus copies are optional extras. To make or manage them,
+configure the [encoders](configuration.md#audio-encoders) and open **Saved formats**.
+See [audio support](audio-preparation.md).
 
 On an album choose **Play album**, **Play original** or a track's **Play**. Play replaces
 your queue; **Add album to queue** appends. The player keeps running while you navigate.
