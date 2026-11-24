@@ -13,8 +13,17 @@ Type=simple
 WorkingDirectory=/opt/junk-collector/deploy/container
 EnvironmentFile=/etc/junk-collector/remote.env
 ExecStartPre=/usr/bin/python3 /opt/junk-collector/deploy/container/remote-preflight.py
+# Start Collector alone and wait until it is healthy. If it exits first, this
+# step fails and systemd retries. Started together, Compose would print the
+# failure and then never exit, so systemd would never notice.
+ExecStartPre=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml up --detach --wait collector
 ExecStart=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml up --abort-on-container-exit --exit-code-from collector collector media media-https
 ExecStop=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml stop
+# Also after a failed start, so a container left running unhealthy is stopped
+# before the retry.
+ExecStopPost=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml stop
+# Waiting can take as long as the health check's start_period (10 minutes).
+TimeoutStartSec=15min
 TimeoutStopSec=120
 # Restart after any exit (a companion failing stops Collector cleanly); the
 # preflight runs again first and keeps the stack down if the mounts are wrong.

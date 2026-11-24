@@ -86,8 +86,11 @@ Use `compose.yaml`, `compose.media.yaml`, `compose.inbox.yaml` and
 [remote.env.example](remote.env.example) at `/etc/junk-collector/remote.env`
 (mode 0600). The remote overlay disables the generic initializer and Docker
 automatic restarts; the systemd unit restarts the stack 30 seconds after any exit,
-running the preflight first, so wrong mounts keep it down. Media waits for the
-core to be ready. CLI import/restore get
+running the preflight first, so wrong mounts keep it down. The unit starts the
+core on its own and waits for it to report healthy before starting the rest. A
+core that exits during startup, for example while rebuilding its catalog, then
+fails that step and is retried. Started together, Compose would report the
+failure but never exit, leaving the stack down without a restart. CLI import/restore get
 the NFS source through `COLLECTOR_NFS_SOURCE` (same as `--nfs-source`).
 
 In the local `collector.toml`:
@@ -124,9 +127,10 @@ including `fsync`, rename and media's read-only refusal, on a disposable export 
 ### Proton Bridge and Cloudflare Tunnel
 
 To add them, put `-f compose.mail.yaml -f compose.remote-mail.yaml -f compose.tunnel.yaml`
-after `compose.remote.yaml` in all three Compose commands of the unit, add
-`cloudflared` to the `ExecStart` service list, and start Bridge before the stack
-(it isn't tied to the core's lifetime):
+after `compose.remote.yaml` in every Compose command of the unit, add
+`cloudflared` to the `ExecStart` service list, and start Bridge before the core,
+above the unit's other `ExecStartPre` Compose line (Bridge isn't tied to the
+core's lifetime):
 
 ```ini
 ExecStartPre=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -f compose.yaml -f compose.media.yaml -f compose.inbox.yaml -f compose.remote.yaml -f compose.mail.yaml -f compose.remote-mail.yaml -f compose.tunnel.yaml up -d --no-deps --pull never proton-bridge
