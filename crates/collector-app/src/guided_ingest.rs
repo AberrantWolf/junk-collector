@@ -1216,6 +1216,13 @@ impl CollectionService {
         {
             return Ok(());
         }
+        // Album groups share one entry; another disc may still be on its way.
+        if self
+            .provisional_imports
+            .unsettled_guided_intent_targets(intent.target_item_id, intent.import_id)?
+        {
+            return Ok(());
+        }
         let item = self.reader.item(intent.target_item_id)?;
         // The copy this import created, whichever importer started it.
         let (copy_id, copy_label) = automatic_copy(intent);

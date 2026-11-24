@@ -971,6 +971,8 @@ pub trait ProvisionalImportPort: Send + Sync {
     fn cleanup_import(&self, id: ImportId) -> Result<IngestDiscardResult>;
     fn guided_cleanup_status(&self, id: ImportId) -> Result<Option<IngestDiscardResult>>;
     fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()>;
+    /// Whether another import that hasn't finished still targets this entry.
+    fn unsettled_guided_intent_targets(&self, item: ItemId, except: ImportId) -> Result<bool>;
     fn guided_import_records(
         &self,
         user: UserId,

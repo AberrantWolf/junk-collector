@@ -1078,6 +1078,16 @@ impl ProvisionalImportPort for Store {
         lock(&self.db)?.query_row("SELECT reclaimed_bytes,pending_bytes,completed FROM private.import_cleanup WHERE import_id=?",[id.to_string()],|row| Ok((row.get::<_,u64>(0)?,row.get::<_,u64>(1)?,row.get::<_,bool>(2)?))).optional().map_err(storage).map(|value| value.map(|(reclaimed,pending,completed)| IngestDiscardResult { import_id:id,reclaimed_bytes:ByteLength(reclaimed),pending_bytes:ByteLength(pending),cleanup_pending:!completed }))
     }
 
+    fn unsettled_guided_intent_targets(&self, item: ItemId, except: ImportId) -> Result<bool> {
+        lock(&self.db)?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM private.guided_ingest_intents WHERE target_item_id=?1 AND import_id<>?2 AND settled=0 AND cancelled=0)",
+                params![item.to_string(), except.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(storage)
+    }
+
     fn save_guided_ingest_intent(&self, intent: GuidedIngestIntent) -> Result<()> {
         let mut db = lock(&self.db)?;
         let tx = db

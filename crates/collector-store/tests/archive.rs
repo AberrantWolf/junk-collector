@@ -7685,6 +7685,41 @@ fn guided_ingest_acceptance_replays_stable_outputs_and_publishes_without_browser
     recovered.resume_guided_ingests().unwrap();
     assert!(store.item(target).unwrap().deleted);
 
+    // Another disc of the same album group still on its way keeps the entry.
+    let mut original = store.item(target).unwrap();
+    original.deleted = false;
+    let revision = original.revision;
+    store.save(original, revision).unwrap();
+    let sibling = "00000000-0000-4000-8000-0000000000d2";
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    private
+        .execute_batch(&format!(
+            "CREATE TEMP TABLE sibling AS SELECT * FROM guided_ingest_intents WHERE import_id='{id}';
+             UPDATE sibling SET import_id='{sibling}', settled=0, cancelled=0;
+             INSERT INTO guided_ingest_intents SELECT * FROM sibling;"
+        ))
+        .unwrap();
+    recovered.resume_guided_ingests().unwrap();
+    assert!(
+        !store.item(target).unwrap().deleted,
+        "retired an album entry another import still targets"
+    );
+    private
+        .execute(
+            "UPDATE guided_ingest_intents SET settled=1 WHERE import_id=?",
+            [sibling],
+        )
+        .unwrap();
+    recovered.resume_guided_ingests().unwrap();
+    assert!(store.item(target).unwrap().deleted);
+    private
+        .execute(
+            "DELETE FROM guided_ingest_intents WHERE import_id=?",
+            [sibling],
+        )
+        .unwrap();
+    drop(private);
+
     // Meaningful inventory is independent of the moved dump.
     let mut original = store.item(target).unwrap();
     original.deleted = false;
