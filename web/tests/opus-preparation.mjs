@@ -18,9 +18,16 @@ const password=randomBytes(24).toString('hex');
 let server,browser,page,logs='';
 async function request(page,route,body,method='POST'){
  return page.evaluate(async ({route,body,method})=>{
-  const response=await fetch('/api/v1'+route,body===undefined?{}:{method,headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(body)});
-  if(!response.ok)throw Error(await response.text());
-  return response.json();
+  // Reads retry while background work briefly holds the catalog.
+  const until=Date.now()+10000;
+  for(;;){
+   const response=await fetch('/api/v1'+route,body===undefined?{}:{method,headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(body)});
+   if(response.ok)return response.json();
+   const text=await response.text();
+   let code;try{code=JSON.parse(text).error?.code;}catch{}
+   if(body===undefined&&response.status===503&&code==='catalog_busy'&&Date.now()<until){await new Promise(r=>setTimeout(r,100));continue;}
+   throw Error(text);
+  }
  },{route,body,method});
 }
 async function setDefaultBitrate(page,collection,bitrate_kbps,scope='cd_and_digital'){
