@@ -646,6 +646,7 @@ pub fn router(state: AppState) -> Router {
             .route("/purchase-inbox", get(index))
             .route("/curation.js", get(curation_js))
             .route("/library-care/metadata", get(index))
+            .route("/review", get(index))
             .route("/library-metadata.js", get(library_metadata_js))
             .route("/imports", get(index))
             .route("/library-care/music-preparation", get(index))

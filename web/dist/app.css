@@ -159,6 +159,35 @@ button.audio-check-status:hover{text-decoration-color:currentColor}
 
 :root{--row-stripe:color-mix(in srgb,var(--paper) 65%,var(--accent))}
 .striped-rows > :nth-child(even){background:var(--row-stripe)}
+/* Review: tabs with counts, rows that say what is wrong, and a fix panel. */
+.review-tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--line)}
+.review-tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;padding:.55rem .8rem;color:var(--muted);font-weight:550}
+.review-tabs button[aria-current=page]{color:var(--ink);border-bottom-color:var(--action)}
+.review-group{margin:.5rem 0 1.5rem}
+.review-group>h2{font-size:1rem;margin:.75rem 0 .25rem}
+.review-row{display:flex;align-items:center;gap:.5rem;border-bottom:1px solid var(--line)}
+.review-row:nth-child(even){background:var(--row-stripe)}
+.review-row.selected{background:var(--accent)}
+.review-row-main{display:flex;align-items:center;gap:1rem;flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:.8rem .5rem;color:inherit}
+.review-row-main .row-text{display:grid;gap:.3rem;min-width:0}
+.review-row-main small{color:var(--muted)}
+.review-row .care-cover-empty,.review-row img{width:3.2rem;height:3.2rem;object-fit:cover;flex-shrink:0;display:grid;place-items:center}
+.review-select{padding-inline:.5rem}
+.review-action{flex-shrink:0;margin-inline-end:.5rem}
+.reason-chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.reason-chip{font-size:.72rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--line);background:var(--surface-soft);color:var(--ink)}
+.reason-chip.level-blocked{border-color:var(--danger-line);color:var(--danger)}
+.reason-chip.level-decision{border-color:var(--warning-line);background:var(--warning-surface)}
+.reason-chip.level-polish,.reason-chip.level-setup{color:var(--muted)}
+.review-empty{color:var(--muted);padding:1rem .5rem}
+.auto-more{padding:.75rem .5rem}
+.review-panel-nav{display:flex;justify-content:space-between;gap:.5rem;margin:.5rem 0}
+.review-import-details{margin:1rem 0}
+.metadata-attention ol{margin:.4rem 0;padding-inline-start:1.4rem}
+.metadata-attention li{margin:.3rem 0;display:flex;flex-wrap:wrap;align-items:center;gap:.6rem}
+.metadata-attention li button,.accepted-reason button{padding:.2rem .5rem;font-size:.75rem}
+.accepted-reason{display:inline-flex;align-items:center;gap:.3rem;margin-inline-end:.6rem}
+.nav-badge{margin-inline-start:auto;align-self:center;min-width:1.4rem;padding:.05rem .4rem;border-radius:999px;background:var(--warning-surface);color:var(--ink);border:1px solid var(--warning-line);font-size:.72rem;text-align:center}
 
 .art-placeholder {
   display: grid;
