@@ -32,6 +32,9 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
  // An album opened from Saved formats returns there once it closes, by any
  // route including the browser's Back button.
  const [openedFromSaved,setOpenedFromSaved]=useState(false);
+ // Opened at an album or batch from elsewhere (Activity, Review): its Back
+ // button leads to the preparation results, not Saved formats.
+ useEffect(()=>{if((itemId||batchId)&&!openedFromSaved)setMode('add');},[itemId,batchId]);
  const albumShown=useRef(false);
  useEffect(()=>{if(itemId){albumShown.current=true;return;}if(albumShown.current&&openedFromSaved){setMode('saved');setOpenedFromSaved(false);}albumShown.current=false;},[itemId,openedFromSaved]);
  const lastRevision=useRef('');
