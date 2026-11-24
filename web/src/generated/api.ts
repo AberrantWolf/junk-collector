@@ -1284,22 +1284,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ingests/discover": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["discover_ingest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ingests/plan": {
         parameters: {
             query?: never;
@@ -3789,10 +3773,6 @@ export interface components {
             /** @description Selected browser directory, excluded only while determining package boundaries. */
             directory?: string | null;
             files: components["schemas"]["UploadFile"][];
-        };
-        DiscoveredIngestPlan: {
-            plan?: components["schemas"]["IngestPlan"] | null;
-            unassigned_files: string[];
         };
         DisposeSpecimen: {
             command: components["schemas"]["DisposeSpecimenCommand"];
@@ -10195,44 +10175,6 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    discover_ingest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DiscoverIngestCommand"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiscoveredIngestPlan"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
                 headers: {
                     [name: string]: unknown;
                 };

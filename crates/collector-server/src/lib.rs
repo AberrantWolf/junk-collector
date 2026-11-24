@@ -785,7 +785,6 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(start_intake))
         .routes(routes!(cancel_intake))
         .routes(routes!(plan_ingest))
-        .routes(routes!(discover_ingest))
         .routes(routes!(suggest_album_groups))
         .routes(routes!(start_ingest, list_ingests))
         .routes(routes!(ingest_detail))
@@ -3525,18 +3524,6 @@ struct NewUpload {
     item_id: ItemId,
     expected_revision: Revision,
     files: Vec<UploadFile>,
-}
-
-#[utoipa::path(post, path = "/api/v1/ingests/discover", request_body = collector_app::DiscoverIngestCommand, responses((status = 200, body = collector_app::DiscoveredIngestPlan), (status = 403), (status = 422)))]
-async fn discover_ingest(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(command): Json<collector_app::DiscoverIngestCommand>,
-) -> ApiResult<Json<collector_app::DiscoveredIngestPlan>> {
-    let actor = principal(&state, &headers).await?;
-    Ok(Json(
-        blocking(move || state.service.discover_ingest(&actor, command)).await?,
-    ))
 }
 
 #[derive(Deserialize)]

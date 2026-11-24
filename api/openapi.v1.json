@@ -4084,40 +4084,6 @@
         }
       }
     },
-    "/api/v1/ingests/discover": {
-      "post": {
-        "operationId": "discover_ingest",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiscoverIngestCommand"
-              }
-            }
-          },
-          "required": true,
-          "x-body-limit-bytes": 2097152
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveredIngestPlan"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "422": {
-            "description": "Unprocessable Entity"
-          }
-        }
-      }
-    },
     "/api/v1/ingests/plan": {
       "post": {
         "operationId": "plan_ingest",
@@ -13214,30 +13180,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "DiscoveredIngestPlan": {
-        "type": "object",
-        "required": [
-          "unassigned_files"
-        ],
-        "properties": {
-          "plan": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/IngestPlan"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "unassigned_files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
       },
       "DisposeSpecimen": {
         "type": "object",

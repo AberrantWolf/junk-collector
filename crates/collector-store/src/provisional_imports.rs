@@ -314,10 +314,12 @@ fn parse(row: StoredImport) -> Result<ImportRecord> {
     Ok(record)
 }
 
-/// An import that stopped and needs the curator: a failed step or Job, or a
-/// package waiting for review. Expects `imports` and its intent as `g`; reads
-/// only private import and Job rows, never payloads.
-pub(crate) const IMPORT_NEEDS_YOU: &str = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR imports.phase='awaiting_review' OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed'))";
+/// An import that stopped and needs the curator: a failed step or Job.
+/// Guided imports pass through `awaiting_review` on their own (publication is
+/// queued automatically), so that phase alone is not a stop. Expects `imports`
+/// and its intent as `g`; reads only private import and Job rows, never
+/// payloads.
+pub(crate) const IMPORT_NEEDS_YOU: &str = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed'))";
 const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at FROM private.imports";
 
 fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {

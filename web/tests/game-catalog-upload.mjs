@@ -40,13 +40,13 @@ try{
  },url);}
  async function importGame(){
   const previous=(await read(`/items?collection_id=${collection.id}&limit=50`)).items.filter(i=>i.captures?.length).length;
-  await page.goto(`${origin}/?collection=${collection.id}`);await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog',{name:'Add or import',exact:true});
-  await editor.locator('details').filter({has:page.getByLabel('Files',{exact:true})}).locator(':scope > summary').click();
-  await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'one.bin',mimeType:'application/octet-stream',buffer:one},{name:'two.bin',mimeType:'application/octet-stream',buffer:two}]);
-  await editor.getByRole('button',{name:'Preview import',exact:true}).click();await expect(editor.getByRole('button',{name:'Save 1 package',exact:true})).toBeEnabled();assert.equal(await editor.getByLabel('Audio preparation after import').count(),0);
-  await editor.getByRole('button',{name:'Save 1 package',exact:true}).click();
+  // The Library dialog hands imports to Add to library.
+  await page.goto(`${origin}/?collection=${collection.id}`);await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog',{name:'Add or import',exact:true});await editor.getByRole('button',{name:'Open Add to library',exact:true}).click();await editor.waitFor({state:'detached'});
+  const imports=page.getByRole('region',{name:'Imports workspace'});
+  await imports.getByLabel("Choose one package's files",{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'one.bin',mimeType:'application/octet-stream',buffer:one},{name:'two.bin',mimeType:'application/octet-stream',buffer:two}]);
+  await imports.locator('.intake-review-row').first().waitFor();await expect(imports.getByRole('button',{name:'Start import',exact:true})).toBeEnabled();assert.equal(await imports.getByLabel('Audio preparation after import').count(),0);
+  await imports.getByRole('button',{name:'Start import',exact:true}).click();
   await expect.poll(async()=>{const items=(await read(`/items?collection_id=${collection.id}&limit=50`)).items;return items.filter(i=>i.captures?.length).length;},{timeout:45000}).toBe(previous+1);
-  await page.getByRole('button',{name:'Close curator',exact:true}).click();
   return (await read(`/items?collection_id=${collection.id}&limit=50`)).items.filter(i=>i.captures?.length);
  }
  const items=await importGame();assert.equal(items.length,1);const item=items[0];

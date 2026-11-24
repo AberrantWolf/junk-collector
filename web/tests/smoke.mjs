@@ -1086,32 +1086,26 @@ try{
  await page.getByRole('searchbox',{name:'Search collection'}).fill('');
  await page.waitForTimeout(350);
  await page.locator('.collection-scope summary').click();await page.getByRole('button',{name:'Shelf & stereo',exact:true}).click();
- // Captures the server's accepted guided imports; resolves true once each has left upload staging.
- const acceptedIngests=()=>page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname==='/api/v1/ingests');
- const uploadedImports=async accepted=>{const {imports}=await accepted.json();assert.ok(imports.length>0,'no guided import was accepted');for(const value of imports)if((await getJson(`/ingests/${value.import_id}`)).import.phase==='staging')return false;return imports.length;};
+ // Leaves upload staging once every member of an Add to library import has.
+ const uploadedIntake=async(id,count)=>{const members=(await getJson(`/intakes/${id}/members?limit=32`)).items;if(members.length!==count||members.some(m=>!m.import_id))return false;for(const m of members)if((await getJson(`/ingests/${m.import_id}`)).import.phase==='staging')return false;return true;};
+ // A single package from the Library dialog runs through Add to library too.
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
- const guidedForm=page.getByRole('dialog',{name:/Add or import/});
- const guided=guidedForm.getByRole('region',{name:'Import original files'});
+ const guidedForm=page.getByRole('dialog',{name:/Add or import/});await guidedForm.getByRole('button',{name:'Open Add to library',exact:true}).click();await guidedForm.waitFor({state:'detached'});
+ const guided=page.getByRole('region',{name:'Imports workspace'});
  const guidedBytes=Buffer.alloc(2352*10);
  const guidedCue=Buffer.from('FILE \"guided-original.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');
- await guided.locator('details').filter({has:page.getByLabel('Files',{exact:true})}).locator(':scope > summary').click();
- await guided.getByLabel('Files').setInputFiles([{name:'guided-original.bin',mimeType:'application/octet-stream',buffer:guidedBytes},{name:'guided.cue',mimeType:'text/plain',buffer:guidedCue}]);
- await guided.getByLabel('Import name').fill('Guided smoke master');
- await guided.getByRole('button',{name:'Preview import',exact:true}).click();
- await guided.locator('details.ingest-preview > summary').click();
- assert.equal(await guided.getByLabel('Find metadata and artwork automatically').isChecked(),true);
+ await guided.getByLabel("Choose one package's files",{exact:true}).setInputFiles([{name:'Guided smoke master.cue',mimeType:'text/plain',buffer:guidedCue},{name:'guided-original.bin',mimeType:'application/octet-stream',buffer:guidedBytes}]);
+ await guided.locator('.intake-review-row').first().waitFor();
+ assert.equal(await guided.getByLabel('Automatic metadata and artwork').isChecked(),true);
  if(hasFlac){assert.equal(await guided.getByLabel('Audio preparation after import').locator('option[value=flac]').isDisabled(),false);await guided.getByLabel('Audio preparation after import').selectOption('flac');}
  let releaseGuided;const guidedHeld=new Promise(resolve=>{releaseGuided=resolve;});
  await page.route('**/api/v1/imports/*/files/*',async route=>{await guidedHeld;await route.continue();},{times:1});
- const guidedAccepted=acceptedIngests();
- await guided.getByRole('button',{name:'Save 1 package',exact:true}).click();
- const guidedResponse=await guidedAccepted;
+ await guided.getByRole('button',{name:'Start import',exact:true}).click();
  await guided.getByRole('progressbar',{name:'Uploading files',exact:true}).waitFor();
- assert.equal(await guided.getByRole('form',{name:'Resume guided package'}).count(),0);
+ const guidedIntake=new URL(page.url()).searchParams.get('item');assert.ok(guidedIntake);
  releaseGuided();
- await expect.poll(()=>uploadedImports(guidedResponse),{timeout:30000}).toBe(1);
- await expect(page.getByRole('region',{name:'Import original files'}).getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Close curator'}).click();
+ await expect.poll(()=>uploadedIntake(guidedIntake,1),{timeout:30000}).toBe(true);
+ await expect(guided.getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
  await page.getByRole('navigation',{name:'Collection tasks'}).getByRole('button',{name:'Activity',exact:true}).click();
  const guidedWork=page.getByRole('region',{name:'Work & history'});
  await guidedWork.getByLabel('Search work').fill('Guided smoke master');
@@ -1129,7 +1123,7 @@ try{
   const response=await fetch('/api/v1/work?search=Guided%20smoke%20master&limit=10');
   if(!response.ok)throw new Error(await response.text());
   const work=await response.json();
-  const id=work.items.find(value=>value.name==='Guided smoke master')?.item_id;
+  const id=work.items.find(value=>value.name.startsWith('Guided smoke master'))?.item_id;
   if(!id)throw new Error('guided import has no item');
   return id;
  });
@@ -1177,22 +1171,24 @@ try{
  const folderRoot=path.join(scratch,'Folder intake');
  for(const name of ['Disc A','Disc B']){await mkdir(path.join(folderRoot,name),{recursive:true});await writeFile(path.join(folderRoot,name,'disc.cue'),'FILE "disc.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n');await writeFile(path.join(folderRoot,name,'disc.bin'),guidedBytes);}
  await writeFile(path.join(folderRoot,'notes.txt'),'unassigned note');
+ // A folder from the Library dialog is checked and imported in Add to library.
  await page.getByRole('button',{name:'Add / import',exact:true}).click();
- const folderForm=page.getByRole('dialog',{name:/Add or import/});const folderImport=folderForm.getByRole('region',{name:'Import original files'});
+ const folderForm=page.getByRole('dialog',{name:/Add or import/});
  assert.equal(await folderForm.getByLabel('Title',{exact:true}).count(),0);
  assert.equal(await folderForm.getByRole('button',{name:'Add entry',exact:true}).count(),0);
- await chooseFolder(page,folderImport.getByLabel('Dump folder',{exact:true}),folderRoot);
- await folderImport.getByRole('button',{name:'Save 2 packages',exact:true}).waitFor();
- await expect(folderImport.locator('li').filter({hasText:/notes\.txt$/})).toHaveCount(1);
- await folderImport.locator('details.ingest-preview > summary').click();
- await folderImport.getByLabel('Find metadata and artwork automatically').uncheck();
- await folderForm.screenshot({path:path.join(root,'web/test-results/folder-import.png')});
- const folderAccepted=acceptedIngests();
- await folderImport.getByRole('button',{name:'Save 2 packages',exact:true}).click();
- const folderResponse=await folderAccepted;
- await expect.poll(()=>uploadedImports(folderResponse),{timeout:30000}).toBe(2);
- await expect(page.getByRole('region',{name:'Import original files'}).getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Close curator'}).click();
+ await folderForm.getByRole('button',{name:'Open Add to library',exact:true}).click();await folderForm.waitFor({state:'detached'});
+ const folderImport=page.getByRole('region',{name:'Imports workspace'});
+ await chooseFolder(page,folderImport.getByLabel('Choose folders',{exact:true}),folderRoot);
+ await folderImport.getByRole('button',{name:'Start import',exact:true}).waitFor();
+ await expect(folderImport.locator('.intake-review-row')).toHaveCount(2);
+ await expect(folderImport.locator('details').filter({hasText:'notes.txt'})).toHaveCount(1);
+ await folderImport.getByLabel('Automatic metadata and artwork').uncheck();
+ await page.screenshot({path:path.join(root,'web/test-results/folder-import.png'),fullPage:true});
+ await folderImport.getByRole('button',{name:'Start import',exact:true}).click();
+ await folderImport.getByRole('button',{name:'Follow this import in Review',exact:true}).waitFor();
+ const folderIntake=new URL(page.url()).searchParams.get('item');assert.ok(folderIntake);
+ await expect.poll(()=>uploadedIntake(folderIntake,2),{timeout:30000}).toBe(true);
+ await expect(folderImport.getByRole('progressbar',{name:'Uploading files',exact:true})).toHaveCount(0);
  const {sourceItem,targetItem}=await page.evaluate(async()=>{
   const read=async name=>{for(let attempt=0;attempt<300;attempt++){const result=await(await fetch(`/api/v1/work?search=${encodeURIComponent(name)}&limit=10`)).json();const row=result.items.find(value=>value.target.kind==='import'&&value.name===name&&value.item_id&&value.status==='completed');if(row)return row.item_id;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`No published work for ${name}`);};
   return {sourceItem:await read('Disc A'),targetItem:await read('Disc B')};

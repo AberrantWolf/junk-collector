@@ -2,6 +2,7 @@ import {waitForServer} from './support/runtime.mjs';
 import {stopProcess} from './support/runtime.mjs';
 // FX-04 review regressions against a temporary real server and browser profile.
 import {chromium,expect} from './support/browser.mjs';
+import {clickAction} from './actions.mjs';
 import {spawn,spawnSync} from './support/runtime.mjs';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -31,11 +32,15 @@ try{
   const item=await request('/items/'+id,{method:'PUT',body:JSON.stringify({expected_revision:0,edit:{collection_id:collection.id,title:'Existing album',subtitle:'First edition',identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{artist:'Existing artist'}},identity:'unidentified',translations:[],identifiers:[],wishlist:true}})});
   return {id:item.id,collectionId:collection.id};
  });
- await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');
- await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
+ // An entry's Files tab adds files through Add to library, with the entry chosen.
+ const editor=page.getByRole('dialog');
+ await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);await clickAction(page,'Edit / attach files');await editor.getByRole('button',{name:'Files',exact:true}).click();await editor.getByRole('button',{name:'Add files in Add to library'}).click();await editor.waitFor({state:'detached'});
+ const imports=page.getByRole('region',{name:'Imports workspace'});await imports.getByText('Adding files to').waitFor();
  const cue=Buffer.from('FILE "disc.bin" BINARY\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n');const pcm=Buffer.alloc(2352*10);
- await editor.locator('details:has(input[aria-label="Files"]) > summary').click();await editor.getByLabel('Files',{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await editor.getByRole('button',{name:'Preview import'}).click();await expect(editor.locator('.ingest-preview > div')).toHaveCount(1);await editor.getByLabel('Save originals only').check();await editor.locator('.guided-ingest form button.primary').click();
- await page.waitForFunction(async id=>{const response=await fetch('/api/v1/items/'+id);return response.ok&&(await response.json()).captures.length===1;},seeded.id);
+ await imports.getByLabel("Choose one package's files",{exact:true}).setInputFiles([{name:'disc.cue',mimeType:'text/plain',buffer:cue},{name:'disc.bin',mimeType:'application/octet-stream',buffer:pcm}]);await imports.locator('.intake-review-row').first().waitFor();
+ await expect(imports.locator('.intake-review-row').first()).toContainText('Destination: Existing album');await imports.getByLabel('Physical copy label').fill('Copy 1');await imports.getByRole('checkbox',{name:/Save originals only/}).check();await imports.getByRole('button',{name:'Start import',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async id=>{const response=await fetch('/api/v1/items/'+id);return response.ok?(await response.json()).captures.length:-1;},seeded.id),{timeout:60000}).toBe(1);
+ await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);await clickAction(page,'Edit / attach files');
  await editor.getByRole('button',{name:'Details',exact:true}).click();
  assert.equal(await editor.getByLabel('Title',{exact:true}).inputValue(),'Existing album');
  assert.equal(await editor.getByLabel('Edition / variant details').inputValue(),'First edition');

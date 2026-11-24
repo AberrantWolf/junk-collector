@@ -657,12 +657,6 @@ pub struct DiscoverIngestCommand {
     pub files: Vec<UploadFile>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct DiscoveredIngestPlan {
-    pub plan: Option<IngestPlan>,
-    pub unassigned_files: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlanIngestCommand {
     pub collection_id: CollectionId,

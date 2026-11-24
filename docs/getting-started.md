@@ -74,7 +74,7 @@ a missing or damaged one from the archive.
 | Prepare FLAC after import | Optional for supported CDs. FLAC/MP3 purchases play directly. |
 | Save originals only | Keep the files without analysis, lookups or audio preparation. |
 | Interrupted upload | Reopen the unfinished import and reselect the same folder/files to resume. |
-| Add / import → manual entry | Record inventory without files. |
+| Add / import → manual entry | Record inventory without files. Its **Import original files** and an entry's **Files** tab open Add to library, so every import takes the same path. |
 
 Keep dump packages complete: BIN/CUE sets need their BIN files, and Redumper CDs need
 the TOC, SCRAM, STATE and SUBCODE files. Files are preserved even when identification

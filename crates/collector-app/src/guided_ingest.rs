@@ -121,6 +121,22 @@ pub(crate) fn discovery_names(
         .collect()
 }
 
+/// The copy an import records on the entry it creates. Add to library names
+/// copies by their reviewed copy label; a single import uses one fixed copy.
+fn automatic_copy(intent: &GuidedIngestIntent) -> (SpecimenId, String) {
+    match &intent.bulk_context {
+        Some(context) => (context.copy_id, context.copy_label.clone()),
+        None => (
+            SpecimenId(super::deterministic_inventory_uuid(
+                intent.user_id,
+                "guided-import-copy",
+                &intent.import_id.to_string(),
+            )),
+            "Imported copy".into(),
+        ),
+    }
+}
+
 fn validate_plan_files(files: &[UploadFile]) -> Result<()> {
     validate_intake_files(files, 10_000)
 }
@@ -247,69 +263,6 @@ impl CollectionService {
                 "guided": true,
             }),
             frozen_input: None,
-        })
-    }
-
-    pub fn discover_ingest(
-        &self,
-        actor: &Principal,
-        mut command: DiscoverIngestCommand,
-    ) -> Result<DiscoveredIngestPlan> {
-        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
-        validate_plan_files(&command.files)?;
-        command
-            .files
-            .retain(|file| !is_intake_housekeeping(&file.name, false));
-        let names = discovery_names(&command.files, command.directory.as_deref())?;
-        let discovered = self.modules.discover_imports(&eligibility.owner, &names)?;
-        let mut used = BTreeSet::new();
-        let mut packages = Vec::new();
-        for package in discovered {
-            let mut files = Vec::new();
-            for index in package.file_indices {
-                let file = command.files.get(index).ok_or_else(|| {
-                    Error::Invalid("module returned an invalid package member".into())
-                })?;
-                if !used.insert(index) {
-                    return Err(Error::Invalid(
-                        "module returned overlapping packages".into(),
-                    ));
-                }
-                files.push(file.clone());
-            }
-            packages.push(IngestPackageSelection {
-                album_tracks: None,
-                purchase: None,
-                source: ImportSourceSummary {
-                    kind: ImportSourceKind::Browser,
-                    label: None,
-                    package_name: package.label,
-                },
-                files,
-                anchor_file_index: None,
-            });
-        }
-        let unassigned_files = command
-            .files
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !used.contains(index))
-            .map(|(_, file)| file.name.clone())
-            .collect();
-        let plan = if packages.is_empty() {
-            None
-        } else {
-            Some(self.plan_ingest(
-                actor,
-                PlanIngestCommand {
-                    collection_id: command.collection_id,
-                    packages,
-                },
-            )?)
-        };
-        Ok(DiscoveredIngestPlan {
-            plan,
-            unassigned_files,
         })
     }
 
@@ -924,22 +877,8 @@ impl CollectionService {
                     translations: vec![],
                     identifiers: vec![],
                     specimens: vec![Specimen {
-                        id: intent
-                            .bulk_context
-                            .as_ref()
-                            .map(|context| context.copy_id)
-                            .unwrap_or_else(|| {
-                                SpecimenId(super::deterministic_inventory_uuid(
-                                    intent.user_id,
-                                    "guided-import-copy",
-                                    &intent.import_id.to_string(),
-                                ))
-                            }),
-                        label: intent
-                            .bulk_context
-                            .as_ref()
-                            .map(|context| context.copy_label.clone())
-                            .unwrap_or_else(|| "Imported copy".into()),
+                        id: automatic_copy(intent).0,
+                        label: automatic_copy(intent).1,
                         condition: Condition::Unknown,
                         ownership: Ownership::Owned,
                         possession: Possession::Present,
@@ -1278,14 +1217,11 @@ impl CollectionService {
             return Ok(());
         }
         let item = self.reader.item(intent.target_item_id)?;
+        // The copy this import created, whichever importer started it.
+        let (copy_id, copy_label) = automatic_copy(intent);
         let automatic_copy = item.specimens.len() == 1
-            && item.specimens[0].id
-                == SpecimenId(super::deterministic_inventory_uuid(
-                    intent.user_id,
-                    "guided-import-copy",
-                    &intent.import_id.to_string(),
-                ))
-            && item.specimens[0].label == "Imported copy"
+            && item.specimens[0].id == copy_id
+            && item.specimens[0].label == copy_label
             && matches!(item.specimens[0].condition, Condition::Unknown)
             && matches!(item.specimens[0].ownership, Ownership::Owned)
             && item.specimens[0].possession == Possession::Present

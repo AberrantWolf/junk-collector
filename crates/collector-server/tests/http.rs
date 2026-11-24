@@ -318,7 +318,7 @@ async fn public_surface_matrix_ignores_spoofed_proxy_headers() {
                 );
             }
             let discovery = app.clone().oneshot(Request::builder()
-                .method("POST").uri("/api/v1/ingests/discover")
+                .method("POST").uri("/api/v1/intake-discoveries")
                 .header("origin", "https://collector.example")
                 .header("x-forwarded-for", "127.0.0.1")
                 .header("content-type", "application/json")

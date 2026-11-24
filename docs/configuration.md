@@ -173,7 +173,7 @@ one package; keep the relative paths that CUE sheets and sidecars reference.
     └── dump.subcode
 ```
 
-Curators pick packages under **Add / import → Configured inbox**. Files are copied into
+Curators pick packages in **Add to library** with **Source: Server inbox**. Files are copied into
 staging and the sources are left in place. Symlinks and special files are rejected. The
 browser only sees inbox and package names.
 

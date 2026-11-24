@@ -3,18 +3,18 @@
 Status: mostly implemented; not yet reviewed by the owner.
 
 Built: one reason policy for list rows and the fix panel, with levels and
-accept-as-is; game reasons; Review (tabs, counts, reasons on rows, lists that
-load as they scroll, the fix panel with import details and Next entry);
-Add to library with decision-first package review and Save originals only;
-Activity without import batches; the media dock; live-playable originals no
-longer flagged; Saved formats with origins, partial detection and removal;
-a game heading and Soundtrack label on entry pages.
+accept-as-is; game reasons, with catalog waits grouped per system; Review
+(tabs, counts, reasons on rows, blocked entries first, lists that load as they
+scroll, the fix panel with import details and Next entry); Add to library as
+the one importer (the Library dialog and an entry's Files tab hand off to it),
+with decision-first package review, album suggestions before import, Save
+originals only and a Needs you group per batch; Activity without import
+batches; the media dock; live-playable originals no longer flagged; Saved
+formats with origins, partial detection and removal that frees disk space; a
+game heading and Soundtrack label on entry pages.
 
 Not built yet:
 
-- The Library's **Add / import** dialog still has its own importer. Merging
-  it needs Add to library to gain game dump-folder discovery and attaching one
-  package to an existing entry, and several journeys rely on the dialog flow.
 - The player code still ships in the main bundle, because it shares the play
   queue's state with the rest of the app.
 

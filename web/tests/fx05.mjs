@@ -32,19 +32,20 @@ try{
   const item=await request('/items/'+id,{method:'PUT',body:JSON.stringify({expected_revision:0,edit:{collection_id:collection.id,title:'Existing album',subtitle:'First edition',identity_link:{kind:'none'},domain_edit:{module:'org.junk.music',fields:{artist:'Existing artist'}},identity:'unidentified',translations:[],identifiers:[],wishlist:true}})});
   return {id:item.id,collectionId:collection.id};
  });
- await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');
- await editor.getByRole('button',{name:'Search existing entries'}).click();await editor.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await editor.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
+ // The Library dialog sends imports to Add to library, the one import path.
+ await page.getByRole('button',{name:'Add / import',exact:true}).click();const editor=page.getByRole('dialog');await editor.getByRole('button',{name:'Open Add to library'}).click();await editor.waitFor({state:'detached'});const imports=page.getByRole('region',{name:'Imports workspace'});
 
  // Long enough to keep playing while reimport and availability polling complete.
  const pcm=Buffer.alloc(44100*4*90);const wav=Buffer.alloc(44+pcm.length);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(2,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(44100*4,28);wav.writeUInt16LE(4,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(pcm.length,40);
  const packageFiles=[{name:'original.wav',mimeType:'audio/wav',buffer:wav}];
- await editor.locator('details:has(input[aria-label="Files"]) > summary').click();await editor.getByLabel('Files',{exact:true}).setInputFiles(packageFiles);await editor.getByRole('button',{name:'Preview import'}).click();await expect(editor.locator('.ingest-preview > div')).toHaveCount(1);await editor.getByLabel('Save originals only').check();await editor.locator('.guided-ingest form button.primary').click();
+ await imports.getByLabel("Choose one package's files",{exact:true}).setInputFiles(packageFiles);await imports.locator('.intake-review-row').first().waitFor();
+ await imports.getByRole('button',{name:'Search existing entries'}).click();await imports.getByRole('searchbox',{name:'Search existing entries'}).fill('Existing album');await imports.locator('.destination-chooser .destination-results button').filter({hasText:'Existing album'}).click();
+ await imports.getByRole('button',{name:/^Attach to selected (album|entry)$/}).click();await imports.getByRole('checkbox',{name:/Save originals only/}).check();await imports.getByRole('button',{name:'Start import',exact:true}).click();
  const readItem=()=>page.evaluate(async id=>(await(await fetch('/api/v1/items/'+id)).json()),seeded.id);
- const waitItem=async predicate=>{for(let attempt=0;attempt<150;attempt++){const value=await readItem();if(predicate(value))return value;await page.waitForTimeout(200);}throw new Error('Item did not reach expected state: '+JSON.stringify(await readItem()));};
+ const waitItem=async predicate=>{for(let attempt=0;attempt<150;attempt++){const value=await readItem();if(value.captures&&predicate(value))return value;await page.waitForTimeout(200);}throw new Error('Item did not reach expected state: '+JSON.stringify(await readItem()));};
  await waitItem(item=>item.captures.length===1);
- await expect(editor.locator('.guided-ingest p.notice[role=status]')).toBeVisible();await expect(editor.locator('.guided-ingest')).toHaveAttribute('data-uploading','false');await expect(editor.getByRole('alert')).toHaveCount(0);
+ await expect(imports.getByRole('alert')).toHaveCount(0);
  const first=await readItem();assert.equal(first.captures.length,1);
- await editor.getByRole('button',{name:'Close curator'}).click();
  // Global Add/import does not promise an active detail after attachment. Open
  // the known entry explicitly before testing playback across replacement.
  await page.goto(`${origin}/?collection=${seeded.collectionId}&item=${seeded.id}`);

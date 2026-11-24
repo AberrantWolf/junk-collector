@@ -16177,14 +16177,20 @@ fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
         })
         .collect(),
     };
-    let discovered = service.discover_ingest(&actor, input.clone()).unwrap();
-    assert_eq!(discovered.unassigned_files, vec!["Dumps/readme.txt"]);
-    let plan = discovered.plan.unwrap();
-    assert_eq!(plan.packages.len(), 2);
-    assert_eq!(plan.packages[0].files.len(), 2);
-    assert_eq!(plan.packages[1].files.len(), 4);
+    // The one discovery path every importer uses.
+    let discovered = service
+        .discover_bulk_intake(&actor, input.clone(), &command())
+        .unwrap();
+    let page = service
+        .intake_discovery_page(&actor, discovered.id, None, None)
+        .unwrap();
+    assert_eq!(page.unassigned_files.items, vec!["Dumps/readme.txt"]);
+    assert_eq!(page.packages.items.len(), 2);
+    assert_eq!(page.packages.items[0].files.len(), 2);
+    assert_eq!(page.packages.items[1].files.len(), 4);
     assert!(
-        plan.packages
+        page.packages
+            .items
             .iter()
             .all(|package| package.anchors.len() == 1)
     );
@@ -16193,13 +16199,25 @@ fn folder_discovery_is_authorized_disjoint_and_validates_paths() {
         administrator: false,
         device_id: None,
     };
-    assert!(service.discover_ingest(&outsider, input.clone()).is_err());
+    assert!(
+        service
+            .discover_bulk_intake(&outsider, input.clone(), &command())
+            .is_err()
+    );
     let mut malicious = input.clone();
     malicious.files[0].name = "../outside.cue".into();
-    assert!(service.discover_ingest(&actor, malicious).is_err());
+    assert!(
+        service
+            .discover_bulk_intake(&actor, malicious, &command())
+            .is_err()
+    );
     let mut duplicate = input;
     duplicate.files[1].name = "Dumps/disc1/DISC.CUE".into();
-    assert!(service.discover_ingest(&actor, duplicate).is_err());
+    assert!(
+        service
+            .discover_bulk_intake(&actor, duplicate, &command())
+            .is_err()
+    );
 }
 
 #[test]
