@@ -408,10 +408,14 @@ pub fn game_identification_reasons(
     if !hashed {
         // Nothing was hashed: either a file's format stopped the check, or no
         // single main file (or CUE sheet) could be chosen automatically.
-        let format_stopped = identification
-            .inspections
-            .iter()
-            .any(|inspection| !matches!(inspection.status, GameDetectionStatus::Recognized));
+        let format_stopped = identification.inspections.iter().any(|inspection| {
+            // Only these stop the check; an unrecognized extra file (a
+            // readme, a save) leaves the package waiting for a main file.
+            matches!(
+                inspection.status,
+                GameDetectionStatus::Malformed | GameDetectionStatus::Unsupported
+            )
+        });
         return if format_stopped && !matches!(identification.status, GameDetectionStatus::Ambiguous)
         {
             vec![MetadataReviewReason::UnsupportedFormat]
@@ -536,15 +540,30 @@ pub fn metadata_health(input: MetadataHealthInput<'_>) -> Result<MetadataHealth>
                 .collect::<Vec<_>>(),
         )
     });
+    // A name typed by hand is part of what was accepted: typing a different one
+    // asks again.
+    let mut typed = input
+        .authority
+        .field_overrides
+        .iter()
+        .map(|field| {
+            (
+                serde_json::to_string(&field.field).unwrap_or_default(),
+                &field.value,
+            )
+        })
+        .collect::<Vec<_>>();
+    typed.sort();
     let state = hex::encode(
         &Sha256::digest(
             serde_json::to_vec(&(
-                "review-state-v1",
+                "review-state-v2",
                 &evidence,
                 &input.display.candidate,
                 input.last_lookup_no_match,
                 &identification,
                 input.partial_saved_format,
+                &typed,
             ))
             .map_err(|error| Error::Storage(error.to_string()))?,
         )[..16],
@@ -4483,6 +4502,19 @@ mod review_health_tests {
             reasons(&unsupported),
             vec![MetadataReviewReason::UnsupportedFormat]
         );
+        // An unrecognized extra file (a readme) doesn't make the format unsupported.
+        let with_readme = GameIdentification {
+            inspections: vec![GameFormatInspection {
+                file_id: collector_core::PackageFileId::new(),
+                status: GameDetectionStatus::Unrecognized,
+                reason: "no known header".into(),
+            }],
+            ..identification(GameDetectionStatus::Unrecognized)
+        };
+        assert_eq!(
+            reasons(&with_readme),
+            vec![MetadataReviewReason::NeedsMainFile]
+        );
         // Several CUE sheets: nothing is hashed until one is chosen.
         assert_eq!(
             reasons(&identification(GameDetectionStatus::Ambiguous)),
@@ -4511,6 +4543,18 @@ mod review_health_tests {
         let accepted = health("org.junk.music", &authority, None, true);
         assert!(!accepted.reasons.contains(&MetadataReviewReason::NoMatch));
         assert_eq!(accepted.accepted, vec![MetadataReviewReason::NoMatch]);
+        // Typing a name by hand is new evidence too.
+        let mut renamed = authority.clone();
+        renamed.field_overrides.push(MetadataFieldOverride {
+            field: MetadataField::Title,
+            value: "Typed name".into(),
+            language: None,
+        });
+        assert!(
+            health("org.junk.music", &renamed, None, true)
+                .reasons
+                .contains(&MetadataReviewReason::NoMatch)
+        );
         // A new lookup outcome changes the evidence, so the acceptance no
         // longer applies; a later no-match brings the reason back.
         let changed = health("org.junk.music", &authority, None, false);
