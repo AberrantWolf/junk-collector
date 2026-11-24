@@ -920,6 +920,45 @@ impl CollectionService {
         Ok(())
     }
 }
+/// Package names to check for discs of one album before an import starts.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestAlbumGroups {
+    pub collection_id: CollectionId,
+    pub names: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct AlbumGroupSuggestions {
+    pub groups: Vec<collector_modules::music::AlbumGroupSuggestion>,
+}
+
+impl CollectionService {
+    /// Suggest album groups from package names alone, before anything is
+    /// uploaded. Only music collections group discs into albums.
+    pub fn suggest_album_groups(
+        &self,
+        actor: &Principal,
+        command: SuggestAlbumGroups,
+    ) -> Result<AlbumGroupSuggestions> {
+        let eligibility = self.content_write_eligibility(actor, command.collection_id)?;
+        if command.names.len() > INTAKE_PACKAGE_LIMIT as usize
+            || command.names.iter().any(|name| name.len() > 4096)
+        {
+            return Err(Error::Invalid(
+                "Suggest album groups for at most 10,000 package names.".into(),
+            ));
+        }
+        if eligibility.owner.0 != "org.junk.music" {
+            return Ok(AlbumGroupSuggestions { groups: vec![] });
+        }
+        let names = command.names.iter().map(String::as_str).collect::<Vec<_>>();
+        Ok(AlbumGroupSuggestions {
+            groups: collector_modules::music::suggest_album_groups(&names),
+        })
+    }
+}
+
 fn validate_intake_label(value: &str) -> Result<()> {
     if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
         return Err(Error::Invalid("Names must be 1–512 characters.".into()));

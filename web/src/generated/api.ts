@@ -276,6 +276,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/album-group-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["suggest_album_groups"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/album-groups": {
         parameters: {
             query?: never;
@@ -3109,6 +3125,26 @@ export interface components {
             destination: components["schemas"]["ItemId"];
             group_id: components["schemas"]["TransactionId"];
             sources: components["schemas"]["ItemId"][];
+        };
+        /** @description Packages whose names differ only by a disc number. */
+        AlbumGroupSuggestion: {
+            /** @description Stable grouping key derived from the shared name. */
+            key: string;
+            members: components["schemas"]["AlbumGroupSuggestionMember"][];
+            /** @description The shared name, as written in the first package. */
+            title: string;
+        };
+        AlbumGroupSuggestionMember: {
+            /** Format: int32 */
+            disc: number;
+            /**
+             * Format: int32
+             * @description Index into the names that were passed in.
+             */
+            index: number;
+        };
+        AlbumGroupSuggestions: {
+            groups: components["schemas"]["AlbumGroupSuggestion"][];
         };
         AlbumGroupUndo: {
             can_undo: boolean;
@@ -6366,6 +6402,11 @@ export interface components {
             track_assignments: components["schemas"]["DigitalTrackAssignment"][];
             user_key: string;
         };
+        /** @description Package names to check for discs of one album before an import starts. */
+        SuggestAlbumGroups: {
+            collection_id: components["schemas"]["CollectionId"];
+            names: string[];
+        };
         TrackPage: {
             items: components["schemas"]["MusicTrackAvailability"][];
             /** Format: int32 */
@@ -7351,6 +7392,44 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    suggest_album_groups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestAlbumGroups"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumGroupSuggestions"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

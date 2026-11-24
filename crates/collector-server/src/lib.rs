@@ -786,6 +786,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_intake))
         .routes(routes!(plan_ingest))
         .routes(routes!(discover_ingest))
+        .routes(routes!(suggest_album_groups))
         .routes(routes!(start_ingest, list_ingests))
         .routes(routes!(ingest_detail))
         .routes(routes!(cleanup_ingest_inbox))
@@ -3846,6 +3847,18 @@ async fn append_intake(
         .await?,
     ))
 }
+#[utoipa::path(post,path="/api/v1/album-group-suggestions",request_body=collector_app::SuggestAlbumGroups,responses((status=200,body=collector_app::AlbumGroupSuggestions),(status=403),(status=422)))]
+async fn suggest_album_groups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(command): Json<collector_app::SuggestAlbumGroups>,
+) -> ApiResult<Json<collector_app::AlbumGroupSuggestions>> {
+    let actor = principal(&state, &headers).await?;
+    Ok(Json(
+        blocking(move || state.service.suggest_album_groups(&actor, command)).await?,
+    ))
+}
+
 #[derive(Deserialize)]
 struct IntakeMemberQuery {
     cursor: Option<String>,

@@ -1,5 +1,7 @@
 use crate::disc_audio::{ConversionPcmSource, ConversionPcmTrack};
 use collector_core::PackageFileName;
+mod album_suggestions;
+pub use album_suggestions::*;
 pub mod catalog;
 pub mod digital_matching;
 mod discovery;

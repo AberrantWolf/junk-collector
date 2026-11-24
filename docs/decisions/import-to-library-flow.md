@@ -15,8 +15,6 @@ Not built yet:
 - The Library's **Add / import** dialog still has its own importer. Merging
   it needs Add to library to gain game dump-folder discovery and attaching one
   package to an existing entry, and several journeys rely on the dialog flow.
-- Suggested album groups before an import starts (they appear in Review
-  afterwards as possible album groups).
 - The player code still ships in the main bundle, because it shares the play
   queue's state with the rest of the app.
 

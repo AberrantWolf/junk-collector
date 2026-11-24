@@ -872,6 +872,40 @@
         }
       }
     },
+    "/api/v1/album-group-suggestions": {
+      "post": {
+        "operationId": "suggest_album_groups",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestAlbumGroups"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumGroupSuggestions"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
     "/api/v1/album-groups": {
       "post": {
         "operationId": "confirm_album_group",
@@ -10426,6 +10460,65 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        }
+      },
+      "AlbumGroupSuggestion": {
+        "type": "object",
+        "description": "Packages whose names differ only by a disc number.",
+        "required": [
+          "key",
+          "title",
+          "members"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Stable grouping key derived from the shared name."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlbumGroupSuggestionMember"
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "The shared name, as written in the first package."
+          }
+        }
+      },
+      "AlbumGroupSuggestionMember": {
+        "type": "object",
+        "required": [
+          "index",
+          "disc"
+        ],
+        "properties": {
+          "disc": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Index into the names that were passed in.",
+            "minimum": 0
+          }
+        }
+      },
+      "AlbumGroupSuggestions": {
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlbumGroupSuggestion"
             }
           }
         }
@@ -24115,6 +24208,26 @@
           "user_key": {
             "type": "string",
             "writeOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SuggestAlbumGroups": {
+        "type": "object",
+        "description": "Package names to check for discs of one album before an import starts.",
+        "required": [
+          "collection_id",
+          "names"
+        ],
+        "properties": {
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false

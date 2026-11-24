@@ -69,7 +69,7 @@ a missing or damaged one from the archive.
 | Individual files | Assemble one package. Unassigned files are listed separately. |
 | Analysis anchor | Pick the intended CUE or Redumper file when there are several. |
 | Digital album playback | Choose tracks or a format, set the disc count and assign tracks to discs. All originals are kept. |
-| Album group | Give related discs the same label. Leave the title empty to use automatic metadata. |
+| Album group | Give related discs the same label. Leave the title empty to use automatic metadata. Packages named like `Album (Disc 1)` and `Album (Disc 2)` are suggested as one album; choose **Group as one album** or **Keep separate**. |
 | Physical copy label | The same label within an album means one purchased copy; different labels mean separate copies. |
 | Prepare FLAC after import | Optional for supported CDs. FLAC/MP3 purchases play directly. |
 | Save originals only | Keep the files without analysis, lookups or audio preparation. |

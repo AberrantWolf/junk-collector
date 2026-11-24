@@ -32484,3 +32484,55 @@ fn review_lists_blocked_entries_first_across_pages() {
         vec![waiting]
     );
 }
+
+#[test]
+fn album_groups_are_suggested_from_package_names_for_music_only() {
+    let (_root, _store, actor, service, collection) = setup();
+    let names = vec![
+        "Harbour Lights (Disc 1)".to_string(),
+        "Harbour Lights (Disc 2)".to_string(),
+        "Other Album".to_string(),
+    ];
+    let suggested = service
+        .suggest_album_groups(
+            &actor,
+            collector_app::SuggestAlbumGroups {
+                collection_id: collection.id,
+                names: names.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(suggested.groups.len(), 1);
+    assert_eq!(suggested.groups[0].title, "Harbour Lights");
+    assert_eq!(
+        suggested.groups[0]
+            .members
+            .iter()
+            .map(|m| (m.index, m.disc))
+            .collect::<Vec<_>>(),
+        vec![(0, 1), (1, 2)]
+    );
+    let games = service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Suggestion games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(
+        service
+            .suggest_album_groups(
+                &actor,
+                collector_app::SuggestAlbumGroups {
+                    collection_id: games.id,
+                    names,
+                },
+            )
+            .unwrap()
+            .groups
+            .is_empty()
+    );
+}
