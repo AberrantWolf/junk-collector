@@ -17,7 +17,17 @@ npm --prefix web run build && git diff --exit-code -- web/dist
 ```
 
 The server embeds `web/dist`, so commit the rebuilt assets with any web change and
-rebuild the server binary afterwards. Some Rust tests use real encoders when
+rebuild the server binary afterwards.
+
+The music preparation tests call real command-line encoders: `opusenc` (from the
+`opus-tools` package), `flac` and `ffmpeg`. Install them once:
+
+```sh
+brew install opus-tools flac ffmpeg                  # macOS
+sudo apt-get install -y opus-tools flac ffmpeg       # Debian or Ubuntu
+```
+
+Some Rust tests use real encoders when
 `COLLECTOR_TEST_FLAC=/usr/bin/flac` and `COLLECTOR_TEST_FFMPEG=1` are set.
 
 Documentation-only changes need only the architecture check (it validates relative
