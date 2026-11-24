@@ -29,6 +29,11 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
  const [starting,setStarting]=useState(false);
  const [reload,setReload]=useState(0);
  const [mode,setMode]=useState<'saved'|'add'>('saved');
+ // An album opened from Saved formats returns there once it closes, by any
+ // route including the browser's Back button.
+ const [openedFromSaved,setOpenedFromSaved]=useState(false);
+ const albumShown=useRef(false);
+ useEffect(()=>{if(itemId){albumShown.current=true;return;}if(albumShown.current&&openedFromSaved){setMode('saved');setOpenedFromSaved(false);}albumShown.current=false;},[itemId,openedFromSaved]);
  const lastRevision=useRef('');
  const startRequest=useRef<AbortController|null>(null);
  const startReceipt=useRef<{body:string;key:string}|undefined>(undefined);
@@ -129,7 +134,7 @@ export default function Preparation({restore,navigationRevision,pages,onMore,use
   updateSelection(value=>value.all?{...value,exclusions:on?value.exclusions.filter(x=>x!==id):[...value.exclusions,id]}:{...value,selected:on?[...value.selected,id]:value.selected.filter(x=>x!==id)});
  }
  // Saved formats is the default view; the preparation tools are one action in it.
- if(mode==='saved'&&!itemId&&!batchId)return <SavedFormats collection={collection} search={search} onOpenAlbum={item=>{setMode('add');onQuery({item});}} onAddFormat={()=>setMode('add')} onSessionExpired={onSessionExpired}/>;
+ if(mode==='saved'&&!itemId&&!batchId)return <SavedFormats collection={collection} search={search} onOpenAlbum={item=>{setMode('add');setOpenedFromSaved(true);onQuery({item});}} onAddFormat={()=>{setOpenedFromSaved(false);setMode('add');}} onSessionExpired={onSessionExpired}/>;
  return <section className={`care-workspace ${itemId||batchId?'care-review-open':''}`} aria-label="Prepare audio workspace"><button className="care-return" onClick={()=>{setMode('saved');onQuery({item:'',batch:''});}}>Back to saved formats</button>
   <div className="care-list">
    {!itemId&&<PreparationFormat value={preset} disabled={starting} onChange={preparationPreset=>onQuery({preparationPreset,item:'',batch:''})}/>}

@@ -69,7 +69,7 @@ function SavedImports({collection,onOpen,onReview,onSessionExpired}:{collection:
  const unfinished=page?.items.filter(session=>!['completed','cancelled'].includes(session.state));
  return <section aria-label="Unfinished imports">
   <h2>Unfinished imports</h2>
-  {page&&!unfinished?.length&&<p className="muted">No imports are still running. <button onClick={onReview}>See finished imports in Review</button></p>}
+  {page&&!unfinished?.length&&<p className="muted">{page.next_cursor?'None of the newest imports are still running; older ones may be.':'No imports are still running.'} <button onClick={onReview}>See finished imports in Review</button></p>}
   <div className="striped-imports" aria-busy={loading}>{unfinished?.map(session=><button className="collection-row" key={session.id} onClick={()=>onOpen(session)}>
    <span className="row-text"><strong>{new Date(session.created_at).toLocaleString()} · {session.package_count} packages</strong>
    <small>{presentationLabel(session.state)} · {session.preserved} originals saved · {session.needs_attention} need attention</small></span>
@@ -164,9 +164,9 @@ function ImportedMembers({id,members,cursor,loading,busy,onMore,onChanged,onSess
 export default function Imports({userId,collection,itemId,attach='',collections,onQuery,onReview,onChanged,onSessionExpired}:Props){
  const [session,setSession]=useState<Session>(),[admissionJob,setAdmissionJob]=useState<S['JobView']>(),[members,setMembers]=useState<Member[]>([]),[cursor,setCursor]=useState<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tick,setTick]=useState(0),[files,setFiles]=useState<File[]>([]),[packages,setPackages]=useState<Package[]>([]),[plans,setPlans]=useState<Plan[]>([]),[unassigned,setUnassigned]=useState<string[]>([]),[unassignedPage,setUnassignedPage]=useState(0),[automatic,setAutomatic]=useState(true),[audioChoice,setAudioChoice]=useState<ImportPreparationChoice>('default'),[opusReview,setOpusReview]=useState<{collection:string;userId:string;plans:Plan[];settings:S['OpusImportDefault']}>(),[source,setSource]=useState<'browser'|'inbox'>('browser'),[inboxes,setInboxes]=useState<S['InboxSourceView'][]>([]),[label,setLabel]=useState(''),[selectedInbox,setSelectedInbox]=useState<string[]>([]),[pageCount,setPageCount]=useState(1),[hydrated,setHydrated]=useState(''),[pending,setPending]=useState<PendingManifest>(),[destination,setDestination]=useState<Item|null>(null),[transfer,setTransfer]=useState<{running:boolean;progress?:UploadProgress;error?:string}>();
  const [problems,setProblems]=useState<{items:Member[];more:boolean}>({items:[],more:false});
- const [suggestions,setSuggestions]=useState<S['AlbumGroupSuggestion'][]>([]);const suggestionBox=useRef<HTMLElement>(null);
+ const [suggestions,setSuggestions]=useState<S['AlbumGroupSuggestion'][]>([]);const suggestionBox=useRef<HTMLElement>(null);const suggestionList=useRef(0);
  // Opened from an entry's Files tab: that entry is the destination.
- useEffect(()=>{if(!attach){return;}let current=true;void api<Item>(`/items/${attach}`).then(value=>{if(current&&value.collection_id===collection)setDestination(value);}).catch(error=>{if(current)fail(error);});return()=>{current=false;};},[attach,collection]);
+ useEffect(()=>{if(!attach){return;}let current=true;void api<Item>(`/items/${attach}`).then(value=>{if(!current)return;if(value.collection_id===collection)setDestination(value);else{onQuery({attach:''});fail(new Error(`${value.title} is in another collection. Choose that collection to add files to it.`));}}).catch(error=>{if(current)fail(error);});return()=>{current=false;};},[attach,collection]);
  const [folderLayout,setFolderLayout]=useState<FolderLayout>('auto');
  // Packages that need a decision are shown open; the rest stay compact until
  // the curator chooses to change one.
@@ -238,8 +238,11 @@ export default function Imports({userId,collection,itemId,attach='',collections,
   setFiles(selected);
   originalFiles.set(draftKey,selected);
   setSuggestions([]);
+  // Suggestions point at packages by position, so an answer for an earlier
+  // file list is dropped.
+  const list=++suggestionList.current;
   // Names only: nothing is uploaded or read to suggest discs of one album.
-  if(found.length>1&&found.every(plan=>plan.music_actions_available))void api<S['AlbumGroupSuggestions']>('/album-group-suggestions',{method:'POST',signal:scope.current.signal,body:JSON.stringify({collection_id:collection,names:found.map(plan=>plan.source.package_name)})}).then(value=>{if(!scope.current.signal.aborted)setSuggestions(value.groups);}).catch(error=>{if(!scope.current.signal.aborted)fail(error);});
+  if(found.length>1&&found.every(plan=>plan.music_actions_available))void api<S['AlbumGroupSuggestions']>('/album-group-suggestions',{method:'POST',signal:scope.current.signal,body:JSON.stringify({collection_id:collection,names:found.map(plan=>plan.source.package_name)})}).then(value=>{if(!scope.current.signal.aborted&&list===suggestionList.current)setSuggestions(value.groups);}).catch(error=>{if(!scope.current.signal.aborted&&list===suggestionList.current)fail(error);});
  }
  function applySuggestion(group:S['AlbumGroupSuggestion']){
   const positions=new Set(group.members.map(member=>member.index));

@@ -31,7 +31,7 @@ function usePagedList<T>(key:string,path:(cursor:string|null)=>string,poll:numbe
  const latestItems=useRef<T[]>([]);latestItems.current=items;
  const delay=()=>typeof poll==='function'?poll(latestItems.current):poll;
  useEffect(()=>{setItems([]);setCursor(null);setPages(1);},[key]);
- useEffect(()=>{const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
+ useEffect(()=>{if(key==='off'){setLoading(false);return;}const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
   // A catalog that changed or was busy mid-read is read again once at once,
   // rather than showing an error for a normal concurrent update.
   async function read(cursor:string|null,retried=false):Promise<Page<T>>{try{return await api<Page<T>>(path(cursor),{signal:controller.signal});}catch(error){if(!retried&&isApiRequestError(error)&&['revision_conflict','catalog_busy'].includes(error.code))return read(cursor,true);throw error;}}
@@ -91,6 +91,8 @@ export default function Review({restore,navigationRevision,userId,collection,sea
  // Rows still updating or being identified refresh quickly; settled lists slowly.
  const entries=usePagedList<Row>(entryTabs.includes(tab)?entryKey:'off',entryQuery,rows=>rows.some(row=>row.summary_state!=='ready'||row.matching&&['queued','running','cancel_requested'].includes(row.matching.state))?2000:10000,fail);
  useEffect(()=>{setAll(undefined);setExclusions([]);},[entryKey]);
+ // A selection belongs to the list it was made in; leaving that list drops it.
+ useEffect(()=>{if(!groupIds)setSelection([]);},[userId,collection,search,reason,system,tab]);
  const problems=usePagedList<Ingest>(tab==='needs'?JSON.stringify([userId,collection,intake,'attention',revision]):'off',ingestQuery('attention'),5000,fail);
  const running=usePagedList<Ingest>(tab==='progress'?JSON.stringify([userId,collection,intake,'active',revision]):'off',ingestQuery('active'),2000,fail);
  const added=usePagedList<Ingest>(tab==='added'?JSON.stringify([userId,collection,intake,'added',revision]):'off',ingestQuery('added'),10000,fail);

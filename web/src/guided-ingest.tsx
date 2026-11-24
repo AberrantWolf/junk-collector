@@ -24,6 +24,8 @@ export default function GuidedIngest({initialImportId,collectionId,busy,setBusy,
  const [notice,setNotice]=useState('');const [failure,setFailure]=useState('');
  const lifecycle=useRef(new AbortController());const reads=useOperationScope(collectionId);const reading=useRef(false);const mutating=useRef(false);
 const detailId=useRef<string|undefined>(undefined);
+ // Under "All collections" the page has none, so the import's own is used.
+ const destinationCollection=detail?.summary.collection_id||collectionId;
  const targetEdited=useRef(false);
  const associationChanged=!!detail&&target!==undefined&&(target?.id??null)!==(detail.import.association.item_id??null);
  const callbacks=useRef({onPublished,onError,setBusy});callbacks.current={onPublished,onError,setBusy};
@@ -78,7 +80,7 @@ const detailId=useRef<string|undefined>(undefined);
  });}
  async function correct(){if(!detail||!associationChanged||detail.summary.capture_revision===null)return;await mutate(async()=>{
   const selected=target?await request<Item>(`/items/${target.id}`):null;
-  if(selected&&selected.collection_id!==collectionId)throw new Error('The destination is outside this collection.');
+  if(selected&&selected.collection_id!==destinationCollection)throw new Error('The destination is outside this collection.');
   if(selected&&selected.revision!==target?.revision)throw new Error('The destination changed elsewhere. Search for it again.');
   const value=await request<Detail>(`/ingests/${detail.summary.import_id}/association`,{method:'PUT',body:JSON.stringify({expected_capture_revision:detail.summary.capture_revision,association:{item_id:selected?.id||null,specimen_id:null,component_id:null,carrier_id:null},expected_item_revision:selected?.revision||null})});setDetail(value);targetEdited.current=false;setTarget(selected);setNotice(selected?`Dump attached to ${selected.title}.`:'Import detached from the entry. Original files are kept.');if(selected)callbacks.current.onPublished(await request<Item>(`/items/${selected.id}`),detail.import.association.item_id||undefined);await open(detail.summary.import_id);
  });}
@@ -116,7 +118,7 @@ const detailId=useRef<string|undefined>(undefined);
    {!uploadProgress&&detail.summary.permissions.can_resume_upload&&<form aria-label="Resume guided package" onSubmit={event=>{event.preventDefault();void resume();}}><p>Select the same folder or files to continue the upload.</p><label>Original folder<input type="file" multiple {...{webkitdirectory:''}} disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><label>Original files<input aria-label="Resume original package files" type="file" multiple disabled={busy} onChange={event=>setResumeFiles(Array.from(event.target.files||[]))}/></label><button disabled={busy||!resumeFiles.length}>Resume upload</button></form>}
    {detail.summary.permissions.can_cancel&&<button disabled={busy} onClick={()=>void cancel()}>Cancel remaining work</button>}{detail.summary.permissions.can_discard&&<button disabled={busy} onClick={()=>void discard()}>Discard unfinished import</button>}
    {detail.summary.outcome==='failed'&&!detail.steps.some(step=>step.retryable)&&<button disabled={busy} onClick={()=>void retry(null)}>Retry optional processing</button>}
-   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary>{target===undefined?<p role="status">Loading saved destination…</p>:<><DestinationChooser collectionId={collectionId} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/>{associationChanged?<><p className="muted">This moves only this import.</p><button disabled={busy} onClick={()=>void correct()}>Save destination</button></>:<p role="status">{detail.import.association.item_id?'Already attached to this entry.':'Not attached to an entry.'}</p>}</>}</details>}
+   {detail.summary.permissions.can_correct_association&&<details><summary>Correct destination</summary>{target===undefined?<p role="status">Loading saved destination…</p>:<><DestinationChooser collectionId={destinationCollection} selected={target} disabled={busy} onSelect={value=>{targetEdited.current=true;setTarget(value);}}/>{associationChanged?<><p className="muted">This moves only this import.</p><button disabled={busy} onClick={()=>void correct()}>Save destination</button></>:<p role="status">{detail.import.association.item_id?'Already attached to this entry.':'Not attached to an entry.'}</p>}</>}</details>}
   </details>}
  </section>;
 }
