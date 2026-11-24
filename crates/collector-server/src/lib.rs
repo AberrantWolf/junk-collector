@@ -490,6 +490,11 @@ impl IntoResponse for ApiError {
                 "catalog_busy",
                 self.0.to_string(),
             ),
+            Error::ArchiveCheckOverdue => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                self.0.to_string(),
+            ),
             Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m.clone()),
             Error::Storage(_) => {
                 tracing::error!(error=%self.0,"storage operation failed");

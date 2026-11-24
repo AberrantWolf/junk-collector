@@ -93,7 +93,9 @@ impl CollectionService {
                 Ok(_) => {
                     failures.push(Error::Conflict);
                 }
-                Err(error @ (Error::Storage(_) | Error::CatalogBusy)) => return Err(error),
+                Err(
+                    error @ (Error::Storage(_) | Error::CatalogBusy | Error::ArchiveCheckOverdue),
+                ) => return Err(error),
                 Err(error) => {
                     failures.push(error);
                 }

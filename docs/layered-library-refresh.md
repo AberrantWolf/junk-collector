@@ -133,4 +133,6 @@ Catalog queries use bounded read-only SQLite connections; catalog and private da
 use WAL so reads see committed rows during imports. Reads do not hold writer or
 publication locks while serializing responses. On a remote archive, local-state
 requests use the cached mount-health result and fail promptly when the probe is
-overdue or failed; archive access still checks the live mount.
+overdue or failed; archive access still checks the live mount. An overdue probe
+(for example, a network mount slowed by large copies) is temporary: background
+jobs return to the queue and retry instead of failing.

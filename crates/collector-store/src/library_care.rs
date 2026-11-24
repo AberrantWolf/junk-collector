@@ -922,6 +922,7 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
                 .as_ref()
                 .map_or("en", LanguageTag::as_str),
         );
+        let uncertain = collector_app::unresolved_match_reason(&authority, &display, uncertain);
         ambiguity = uncertain == Some(collector_app::MetadataReviewReason::AlbumAmbiguity);
         incomplete =
             uncertain == Some(collector_app::MetadataReviewReason::IncompleteProviderInformation);
@@ -994,4 +995,46 @@ fn preparation_summary_state(state: i64) -> collector_app::LibrarySummaryState {
         1 => Retrying,
         _ => Pending,
     }
+}
+
+/// Recompute review flags that older releases kept after the user picked a
+/// match. Only rows still flagged for match doubt can change, so this reads a
+/// handful of items instead of rebuilding the catalog, and runs once.
+pub(crate) fn refresh_picked_match_flags(db: &Connection) -> Result<()> {
+    const DONE: &str = "metadata_health_picked_matches";
+    let done: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM private.settings WHERE key=?)",
+            [DONE],
+            |row| row.get(0),
+        )
+        .map_err(storage)?;
+    if done {
+        return Ok(());
+    }
+    let tx = db.unchecked_transaction().map_err(storage)?;
+    let records = {
+        let mut statement = tx
+            .prepare(
+                "SELECT i.record FROM metadata_health h JOIN items i ON i.id=h.item_id
+                 WHERE h.album_ambiguity=1 OR h.incomplete_provider_information=1",
+            )
+            .map_err(storage)?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(storage)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(storage)?
+    };
+    for record in records {
+        let mut item: Item = serde_json::from_str(&record).map_err(storage)?;
+        crate::hydrate_captures(&tx, &mut item)?;
+        project_health(&tx, &item)?;
+    }
+    tx.execute(
+        "INSERT INTO private.settings(key,value) VALUES(?,'1')",
+        [DONE],
+    )
+    .map_err(storage)?;
+    tx.commit().map_err(storage)
 }

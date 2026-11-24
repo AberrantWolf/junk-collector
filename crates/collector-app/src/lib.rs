@@ -5864,7 +5864,9 @@ impl CollectionService {
                     .job_record(claim.id, claim.user_id)?
                     .phase
                     .starts_with("waiting_") => {}
-            Err(Error::CatalogBusy) => {
+            // A slow archive probe is temporary: requeue without a failed
+            // attempt, so imports finish once the archive is confirmed again.
+            Err(Error::CatalogBusy | Error::ArchiveCheckOverdue) => {
                 self.jobs.defer_busy_job(claim.id, &claim.claim_token)?;
                 return Ok(false);
             }

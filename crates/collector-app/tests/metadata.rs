@@ -344,11 +344,27 @@ fn shared_disc_id_on_different_albums_needs_review_even_in_different_languages()
         "ja",
         "Album B",
     );
-    let values = [first.clone(), other];
+    let values = [first.clone(), other.clone()];
     let display =
         resolve_metadata_display(&item(), &MetadataAuthority::default(), &values, "en").unwrap();
     assert_eq!(display.resolution, MetadataResolutionKind::Tentative);
     assert_eq!(display.candidate, None);
+    let (_, uncertain) = collector_app::automatic_metadata_candidate(&values, "en");
+    assert_eq!(
+        collector_app::unresolved_match_reason(&MetadataAuthority::default(), &display, uncertain),
+        Some(collector_app::MetadataReviewReason::AlbumAmbiguity)
+    );
+    // The provider still lists both albums, but the user answered the question.
+    let picked = MetadataAuthority {
+        selected_candidate: Some(other.identity.clone()),
+        ..Default::default()
+    };
+    let display = resolve_metadata_display(&item(), &picked, &values, "en").unwrap();
+    assert_eq!(display.candidate, Some(other.identity.clone()));
+    assert_eq!(
+        collector_app::unresolved_match_reason(&picked, &display, uncertain),
+        None
+    );
     let authority = MetadataAuthority {
         automatic_candidate: Some(first.identity.clone()),
         ..Default::default()

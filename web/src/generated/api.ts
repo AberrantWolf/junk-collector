@@ -3429,10 +3429,7 @@ export interface components {
             name: string;
         };
         Collection: {
-            /**
-             * @description Absent in pre-CT.2 creation manifests. Deserialization classifies those
-             *     archives without rewriting their immutable original metadata.
-             */
+            /** @description Absent in older creation manifests, which deserialize as `LegacyUnassigned`. */
             binding?: components["schemas"]["CollectionBinding"];
             /** Format: date-time */
             created_at: string;
@@ -3584,11 +3581,7 @@ export interface components {
             expected_capture_revision: components["schemas"]["Revision"];
             expected_item_revision?: components["schemas"]["Revision"] | null;
         };
-        /**
-         * @description Typed creation input reserved for CT.2 runtime integration. Keeping the
-         *     module mandatory here prevents `LegacyUnassigned` from becoming a valid new
-         *     collection request while CT.1 leaves persisted Collection unchanged.
-         */
+        /** @description The module is required so new collections are never `LegacyUnassigned`. */
         CreateCollectionCommand: {
             module: components["schemas"]["ModuleId"];
             name: string;
@@ -5674,10 +5667,7 @@ export interface components {
             updated_at: string;
             visibility?: components["schemas"]["Visibility"] | null;
         };
-        /**
-         * @description Recorded checks for visible, currently associated originals. This is not an
-         *     album-coverage claim: missing discs and unchecked originals remain distinct.
-         */
+        /** @description Recorded checks for visible, currently associated originals. */
         PresentedAudioCheck: {
             source_id: components["schemas"]["RepresentationId"];
             status?: components["schemas"]["AudioVerificationStatus"] | null;
@@ -5725,10 +5715,6 @@ export interface components {
             name: string;
             visibility: components["schemas"]["Visibility"];
         };
-        /**
-         * @description Explicit response shape: unrestricted stored Item records are never
-         *     flattened into a transport response.
-         */
         PresentedItem: {
             accuraterip?: components["schemas"]["PresentedAudioCheck"][] | null;
             album_playback?: components["schemas"]["AlbumPlaybackReadiness"] | null;

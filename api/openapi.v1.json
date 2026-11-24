@@ -11782,7 +11782,7 @@
         "properties": {
           "binding": {
             "$ref": "#/components/schemas/CollectionBinding",
-            "description": "Absent in pre-CT.2 creation manifests. Deserialization classifies those\narchives without rewriting their immutable original metadata."
+            "description": "Absent in older creation manifests, which deserialize as `LegacyUnassigned`."
           },
           "created_at": {
             "type": "string",
@@ -12412,7 +12412,7 @@
       },
       "CreateCollectionCommand": {
         "type": "object",
-        "description": "Typed creation input reserved for CT.2 runtime integration. Keeping the\nmodule mandatory here prevents `LegacyUnassigned` from becoming a valid new\ncollection request while CT.1 leaves persisted Collection unchanged.",
+        "description": "The module is required so new collections are never `LegacyUnassigned`.",
         "required": [
           "name",
           "module"
@@ -20264,7 +20264,6 @@
             "type": "array",
             "items": {
               "type": "object",
-              "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
               "required": [
                 "import_in_progress",
                 "supports_listening",
@@ -21288,7 +21287,7 @@
       },
       "PresentedAudioCheck": {
         "type": "object",
-        "description": "Recorded checks for visible, currently associated originals. This is not an\nalbum-coverage claim: missing discs and unchecked originals remain distinct.",
+        "description": "Recorded checks for visible, currently associated originals.",
         "required": [
           "source_id"
         ],
@@ -21493,7 +21492,6 @@
       },
       "PresentedItem": {
         "type": "object",
-        "description": "Explicit response shape: unrestricted stored Item records are never\nflattened into a transport response.",
         "required": [
           "import_in_progress",
           "supports_listening",

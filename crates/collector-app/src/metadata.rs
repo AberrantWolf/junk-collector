@@ -1378,7 +1378,7 @@ impl CollectionService {
         if view.display.artwork.is_none() {
             review_reasons.push(MetadataReviewReason::MissingArtwork);
         }
-        if let Some(reason) = uncertain {
+        if let Some(reason) = unresolved_match_reason(&view.authority, &view.display, uncertain) {
             review_reasons.push(reason);
         }
         if self
@@ -3288,7 +3288,11 @@ pub(crate) fn resolve_metadata_fields_with_policy(
         subtitle,
         artwork: authority
             .artwork_choice
-            .or_else(|| candidate.and_then(|value| value.artwork)),
+            .or_else(|| candidate.and_then(|value| value.artwork))
+            .or_else(|| {
+                candidate
+                    .and_then(|value| same_album_artwork(value, candidates, preferred_language))
+            }),
         candidate: candidate.map(|value| value.identity.clone()),
         resolution: if ambiguous {
             MetadataResolutionKind::Tentative
@@ -3430,6 +3434,71 @@ pub fn same_metadata_album(
     }
     left.identity.provider_record_id == right.identity.provider_record_id
         || collector_modules::games::equivalent_game_candidates(left, right)
+}
+
+/// A cover saved for another release of the same album, for a match whose own
+/// release has none (for example, the Cover Art Archive has no scan of that
+/// pressing). Album identity comes from the provider's own album grouping,
+/// not from how well each release matched this disc. The cover stays linked
+/// to the release it really came from.
+fn same_album_artwork(
+    candidate: &MetadataCandidateObservation,
+    candidates: &[MetadataCandidateObservation],
+    language: &str,
+) -> Option<AssetId> {
+    candidates
+        .iter()
+        .filter(|other| {
+            other.artwork.is_some()
+                && other.identity.provider == candidate.identity.provider
+                && same_metadata_album(candidate, other)
+        })
+        .max_by(|left, right| compare_candidate(left, right, language))
+        .and_then(|other| other.artwork)
+}
+
+/// Releases whose covers may stand in for `chosen`: the chosen release first,
+/// then other releases of the same album, best match first, at most `limit`.
+pub(crate) fn artwork_releases(
+    chosen: &MetadataCandidateIdentity,
+    candidates: &[MetadataCandidateObservation],
+    language: &str,
+    limit: usize,
+) -> Vec<String> {
+    let mut releases = vec![chosen.provider_record_id.clone()];
+    let Some(chosen) = candidates.iter().find(|value| &value.identity == chosen) else {
+        return releases;
+    };
+    let mut siblings = candidates
+        .iter()
+        .filter(|other| {
+            other.identity.provider == chosen.identity.provider
+                && same_metadata_album(chosen, other)
+        })
+        .collect::<Vec<_>>();
+    siblings.sort_by(|left, right| compare_candidate(right, left, language));
+    for sibling in siblings {
+        if releases.len() >= limit {
+            break;
+        }
+        if !releases.contains(&sibling.identity.provider_record_id) {
+            releases.push(sibling.identity.provider_record_id.clone());
+        }
+    }
+    releases
+}
+
+/// The automatic-match doubt (several albums, or incomplete provider data)
+/// that still needs review. Once the user has picked the match being shown,
+/// that doubt is answered, even though the provider still lists alternatives.
+pub fn unresolved_match_reason(
+    authority: &MetadataAuthority,
+    display: &ResolvedMetadataDisplay,
+    uncertain: Option<MetadataReviewReason>,
+) -> Option<MetadataReviewReason> {
+    let user_picked =
+        authority.selected_candidate.is_some() && display.candidate == authority.selected_candidate;
+    uncertain.filter(|_| !user_picked)
 }
 
 pub fn automatic_metadata_candidate<'a>(

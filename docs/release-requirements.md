@@ -68,6 +68,9 @@ purchases, synchronized listening, PriceCharting exchange and an iOS app.
   uncertainty visibly, and keep manual corrections across refreshes and provider
   outages. Identity strength outranks language; the account's metadata language
   (English by default) picks between variants, and original text is kept.
+  Choosing a match answers the ambiguity; it no longer needs attention.
+- When the matched release has no front cover, use one from another release of
+  the same album, linked to the release it came from.
 - Multi-disc albums show a per-disc checklist: which originals are attached,
   recorded versus release-listed disc IDs, missing discs, uncertain assignments,
   and how to complete structure and audio checks. Detailed processing history is

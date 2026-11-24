@@ -31734,3 +31734,324 @@ fn large_reviewed_music_package_admits_analysis_without_copying_its_inventory() 
         }
     ));
 }
+
+struct ArchiveCheckOverdueOnce {
+    point: collector_store::PublicationFaultPoint,
+    failed: AtomicBool,
+}
+
+impl collector_store::PublicationFaultInjector for ArchiveCheckOverdueOnce {
+    fn check(&self, point: collector_store::PublicationFaultPoint) -> Result<()> {
+        if point == self.point && !self.failed.swap(true, Ordering::SeqCst) {
+            Err(Error::ArchiveCheckOverdue)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn guided_publication_waits_out_an_overdue_archive_check() {
+    use collector_app::JobLane;
+    let (root, store, actor, service, collection) = setup();
+    disable_automatic_cd_checks(&service, &actor, collection.id);
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n";
+    let pcm = vec![0_u8; 2352 * 10];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    album_tracks: None,
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Slow_archive.cue".into(),
+                    },
+                    files: vec![
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.cue".into(),
+                            bytes: ByteLength(cue.len() as u64),
+                            sha256: None,
+                        },
+                        UploadFile {
+                            visibility: Default::default(),
+                            name: "disc.bin".into(),
+                            bytes: ByteLength(pcm.len() as u64),
+                            sha256: None,
+                        },
+                    ],
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                audio_preparation: None,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let id = accepted.imports[0].import_id;
+    service
+        .stage_provisional_import_chunk(&actor, id, 0, 0, cue)
+        .unwrap();
+    service
+        .stage_provisional_import_chunk(&actor, id, 1, 0, &pcm)
+        .unwrap();
+    drop(service);
+    drop(store);
+
+    // The archive probe falls behind once, exactly when the disc is saved.
+    let store = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(ArchiveCheckOverdueOnce {
+                point: collector_store::PublicationFaultPoint::Prepared,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
+    service.resume_guided_ingests().unwrap();
+    let mut published = false;
+    for _ in 0..16 {
+        let detail = service.ingest_detail(&actor, id).unwrap();
+        if detail.import.phase == ImportPhase::Published {
+            published = true;
+            break;
+        }
+        for lane in [JobLane::Publication, JobLane::Background] {
+            service.run_next_job_in_lane("slow-archive", lane).unwrap();
+        }
+    }
+    let jobs = store.job_records(actor.user_id, None, 100).unwrap().items;
+    assert!(
+        jobs.iter().all(|job| job.state != JobState::Failed),
+        "an overdue archive check must requeue the save, not fail it: {jobs:?}"
+    );
+    assert!(published, "the save finishes once the archive is confirmed");
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert!(store.capture(detail.summary.capture_id).is_ok());
+}
+
+#[test]
+fn automatic_cover_falls_back_to_another_release_of_the_same_album() {
+    use collector_modules::music::{COVER_ART_ARCHIVE_PROVIDER_ID, MUSICBRAINZ_PROVIDER_ID};
+    let scanless = "22222222-2222-4222-8222-222222222222";
+    let scanned = "33333333-3333-4333-8333-333333333333";
+    let other_album = "55555555-5555-4555-8555-555555555555";
+    let group = "44444444-4444-4444-8444-444444444444";
+    let (_root, _store, actor, service, collection) = setup();
+    let saved = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let musicbrainz = metadata_fixture_server(vec![(
+        "200 OK\r\nContent-Type: application/json",
+        format!(
+            r#"{{"releases":[
+              {{"id":"{scanless}","title":"Shared album","release-group":{{"id":"{group}"}}}},
+              {{"id":"{scanned}","title":"Shared album","release-group":{{"id":"{group}"}}}},
+              {{"id":"{other_album}","title":"Shared album","release-group":{{"id":"66666666-6666-4666-8666-666666666666"}}}}
+            ]}}"#
+        )
+        .into_bytes(),
+    )]);
+    let artwork = metadata_fixture_server(vec![
+        // The chosen pressing has no scan at all.
+        ("404 Not Found\r\nContent-Type: text/plain", b"not found".to_vec()),
+        (
+            "200 OK\r\nContent-Type: application/json",
+            format!(
+                r#"{{"release":"https://musicbrainz.org/release/{scanned}","images":[{{"id":"9001","front":true,"back":false,"approved":true,"types":["Front"]}}]}}"#
+            )
+            .into_bytes(),
+        ),
+        ("200 OK\r\nContent-Type: image/png", review_cover_image()),
+    ]);
+    let mb = Arc::new(
+        MusicBrainzProvider::with_test_origin(
+            "collector-test/0.1 (test@example.invalid)",
+            &musicbrainz.origin,
+            Duration::from_secs(1),
+            Duration::ZERO,
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .unwrap(),
+    );
+    let caa = Arc::new(
+        CoverArtArchiveProvider::with_test_origins(
+            "collector-test/0.1 (test@example.invalid)",
+            &artwork.origin,
+            &[artwork.origin.as_str()],
+            Duration::from_secs(1),
+        )
+        .unwrap(),
+    );
+    let service = service
+        .with_streaming_provider(
+            ModuleId(MUSICBRAINZ_PROVIDER_ID.into()),
+            Arc::new(collector_app::BoundedProviderAdapter(mb.clone())),
+        )
+        .unwrap()
+        .with_catalog_parser(ModuleId(MUSICBRAINZ_PROVIDER_ID.into()), mb)
+        .unwrap()
+        .with_streaming_provider(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa.clone())
+        .unwrap()
+        .with_catalog_parser(ModuleId(COVER_ART_ARCHIVE_PROVIDER_ID.into()), caa)
+        .unwrap();
+    let lookup = |acquire_artwork| collector_app::ResolveMetadataCommand {
+        lookup: collector_app::AcquireMetadataCommand::MusicBrainzSearch {
+            query: "shared album".into(),
+            refresh: false,
+        },
+        acquire_artwork,
+    };
+    service
+        .resolve_metadata(&actor, saved.id, lookup(false), &command())
+        .unwrap();
+    provider_drain(&service);
+    let view = service.metadata_view(&actor, saved.id).unwrap();
+    let release = |id: &str| {
+        view.candidates
+            .iter()
+            .find(|candidate| candidate.identity.provider_record_id == id)
+            .unwrap()
+            .identity
+            .clone()
+    };
+    service
+        .update_metadata_authority(
+            &actor,
+            saved.id,
+            UpdateMetadataAuthorityCommand {
+                expected_revision: view.revision,
+                change: MetadataAuthorityChange::SelectCandidate {
+                    candidate: release(scanless),
+                },
+            },
+            &command(),
+        )
+        .unwrap();
+    let job = service
+        .resolve_metadata(&actor, saved.id, lookup(true), &command())
+        .unwrap();
+    provider_drain(&service);
+    let resolution = service
+        .metadata_resolutions(&actor, saved.id)
+        .unwrap()
+        .into_iter()
+        .find(|value| value.job.id == job)
+        .unwrap();
+    assert_eq!(resolution.job.state, JobState::Completed);
+    assert_eq!(resolution.result.unwrap().artwork_error, None);
+
+    let review = service.metadata_review(&actor, saved.id).unwrap();
+    // History keeps every observed version of a release; any of them may hold the cover.
+    let cover = |id: &str| {
+        review
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.identity.provider_record_id == id)
+            .find_map(|candidate| candidate.artwork)
+    };
+    assert_eq!(
+        review.display.candidate.unwrap().provider_record_id,
+        scanless
+    );
+    assert!(
+        cover(scanned).is_some(),
+        "the cover stays linked to its own release"
+    );
+    assert_eq!(
+        cover(scanless),
+        None,
+        "no scan is invented for the chosen release"
+    );
+    assert_eq!(cover(other_album), None, "a different album is never asked");
+    assert_eq!(review.display.artwork, cover(scanned));
+    assert!(
+        !review
+            .review_reasons
+            .contains(&collector_app::MetadataReviewReason::MissingArtwork)
+    );
+    let requests = artwork.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    assert!(requests[0].contains(scanless));
+    assert!(requests[1].contains(scanned));
+}
+
+#[test]
+fn a_finished_inbox_copy_is_not_reported_failed_or_repeated_after_a_lost_claim() {
+    let (root, store, actor, service, id) = {
+        let (root, store, actor, service, id, _source) = inbox_cleanup_fixture();
+        (root, store, actor, service, id)
+    };
+    let detail = service.ingest_detail(&actor, id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published);
+    let staging = detail
+        .steps
+        .iter()
+        .find(|step| step.step == "staging")
+        .unwrap()
+        .job_id
+        .unwrap();
+    // The copy finished, but its job lost the claim before recording that and a
+    // later attempt failed. Meanwhile the inbox copy was cleaned up.
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    private
+        .execute(
+            "UPDATE jobs SET state='failed',phase='failed',error='inbox package changed while staging' WHERE id=?",
+            [staging.to_string()],
+        )
+        .unwrap();
+    drop(private);
+    let _ = std::fs::remove_dir_all(root.path().join("inbox/package"));
+
+    let step = |service: &CollectionService| {
+        service
+            .ingest_detail(&actor, id)
+            .unwrap()
+            .steps
+            .into_iter()
+            .find(|step| step.step == "staging")
+            .unwrap()
+    };
+    let shown = step(&service);
+    assert_eq!(shown.state, collector_app::IngestStepState::Succeeded);
+    assert!(!shown.retryable, "a finished copy offers no retry");
+
+    // A retry already queued by an older release must finish without the inbox.
+    store.retry_failed_job(staging, actor.user_id).unwrap();
+    for _ in 0..8 {
+        if !service.run_next_job("finished-copy").unwrap() {
+            break;
+        }
+    }
+    assert_eq!(
+        store.job_record(staging, actor.user_id).unwrap().state,
+        JobState::Completed
+    );
+    assert_eq!(
+        step(&service).state,
+        collector_app::IngestStepState::Succeeded
+    );
+    assert_eq!(
+        store.import_record(id).unwrap().view.phase,
+        ImportPhase::Published
+    );
+}

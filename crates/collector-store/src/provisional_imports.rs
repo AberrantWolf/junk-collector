@@ -645,6 +645,22 @@ impl ProvisionalImportPort for Store {
         claim_token: &str,
         source_locator: &str,
     ) -> Result<ImportRecord> {
+        let mut record = self.import_record(id)?;
+        // A copy that already finished is not repeated. This happens when the
+        // job lost its claim after copying (for example, while the archive
+        // check was overdue) and was picked up again after the import moved
+        // on. The inbox copy may be gone by then, so decide before reading it.
+        if !matches!(
+            record.view.phase,
+            ImportPhase::Staging | ImportPhase::Cancelled
+        ) && record
+            .view
+            .files
+            .iter()
+            .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
+        {
+            return Ok(record);
+        }
         let source = Path::new(source_locator);
         let source_metadata = fs::symlink_metadata(source).map_err(storage)?;
         if source_metadata.file_type().is_symlink()
@@ -653,7 +669,6 @@ impl ProvisionalImportPort for Store {
             return Err(Error::Invalid("inbox package changed while staging".into()));
         }
         let root = fs::canonicalize(source).map_err(storage)?;
-        let mut record = self.import_record(id)?;
         let retained = record
             .view
             .files
@@ -661,15 +676,6 @@ impl ProvisionalImportPort for Store {
             .map(|file| file.name.clone())
             .collect::<Vec<_>>();
         let initial_inventory = Self::inventory_directory_retaining(&root, &retained)?;
-        if record.view.phase == ImportPhase::Analyzing
-            && record
-                .view
-                .files
-                .iter()
-                .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
-        {
-            return Ok(record);
-        }
         let initial_sizes = initial_inventory
             .iter()
             .map(|file| (file.name.as_str(), file.bytes))

@@ -602,6 +602,10 @@ impl Store {
             elapsed_ms = startup.elapsed().as_millis(),
             "startup catalog ready"
         );
+        {
+            let db = lock(&store.db)?;
+            library_care::refresh_picked_match_flags(&db)?;
+        }
         store.convert_active_game_catalogs()?;
         store.rebuild_scan_admissions()?;
         store.recover_private_publications()?;

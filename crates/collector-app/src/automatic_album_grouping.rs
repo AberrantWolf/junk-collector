@@ -146,13 +146,19 @@ impl CollectionService {
             if let Some(record) = &metadata {
                 match music_membership_album_keys(&item, record, &history) {
                     Ok(keys) => groups.extend(keys),
-                    Err(error @ (Error::Storage(_) | Error::CatalogBusy)) => return Err(error),
+                    Err(
+                        error @ (Error::Storage(_)
+                        | Error::CatalogBusy
+                        | Error::ArchiveCheckOverdue),
+                    ) => return Err(error),
                     Err(_) => continue,
                 }
             }
             match self.album_membership(&actor, item, metadata, &history) {
                 Ok(Some(profile)) => profiles.push(profile),
-                Err(error @ (Error::Storage(_) | Error::CatalogBusy)) => return Err(error),
+                Err(
+                    error @ (Error::Storage(_) | Error::CatalogBusy | Error::ArchiveCheckOverdue),
+                ) => return Err(error),
                 Ok(None) | Err(_) => {}
             }
         }

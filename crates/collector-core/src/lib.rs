@@ -1575,6 +1575,11 @@ pub enum Error {
     RateLimited(u64),
     #[error("catalog is busy; retry shortly")]
     CatalogBusy,
+    /// The background archive probe has not confirmed the archive recently
+    /// (for example, a network mount is slow under heavy writes). Writes are
+    /// refused until it does, but the work should wait and retry, not fail.
+    #[error("archive health check is overdue; retry shortly")]
+    ArchiveCheckOverdue,
     #[error("{0}")]
     Unavailable(String),
     #[error("storage failure: {0}")]

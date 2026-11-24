@@ -295,7 +295,10 @@ impl Store {
         // revisions stay authoritative even if a continuation was interrupted.
         if matches!(
             result,
-            Err(Error::JobCancelled | Error::CommandInProgress | Error::CatalogBusy)
+            Err(Error::JobCancelled
+                | Error::CommandInProgress
+                | Error::CatalogBusy
+                | Error::ArchiveCheckOverdue)
         ) {
             let journals = publication::PublicationJournalStore::new(&self.archive);
             if journals

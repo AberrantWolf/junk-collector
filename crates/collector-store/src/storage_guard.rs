@@ -160,7 +160,7 @@ impl ArchiveGuard {
         if self.mount.is_some()
             && self.last_healthy.lock().map_err(storage)?.elapsed() > Duration::from_secs(2)
         {
-            return Err(Error::Unavailable("archive health check is overdue".into()));
+            return Err(Error::ArchiveCheckOverdue);
         }
         Ok(())
     }

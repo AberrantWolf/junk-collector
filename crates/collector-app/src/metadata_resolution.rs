@@ -3,6 +3,8 @@
 use crate::*;
 
 const MAX_ARCHIVED_COVER_RESTORES: usize = 4096;
+/// The chosen release plus up to three other releases of the same album.
+const MAX_ARTWORK_RELEASES: usize = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -631,114 +633,163 @@ impl CollectionService {
         candidate: MetadataCandidateIdentity,
     ) -> Result<()> {
         use collector_modules::music::CoverArtArchiveQuery;
-        let listing = self.artwork_acquisition(
-            claim,
-            frozen,
-            CoverArtArchiveQuery::Listing {
-                release_id: candidate.provider_record_id.clone(),
-            },
-            "listing",
-        )?;
-        let options = self.resolution_artwork_options(claim, frozen, listing)?;
-        let query = if let Some(query) = self.jobs.metadata_artwork_selection(claim, None)? {
-            query.parse::<CoverArtArchiveQuery>()?
-        } else {
-            // Only standalone front covers are interchangeable. A booklet spread,
-            // rear scan or medium must never win just because it is smaller.
-            let mut fronts: Vec<_> = options
-                .iter()
-                .filter(|option| option.front && option.types.iter().all(|kind| kind == "Front"))
-                .collect();
-            fronts.sort_by_key(|value| (!value.approved, value.image_id.clone()));
-            fronts.truncate(16);
-            let compare_sizes = fronts.len() > 1;
-            let mut choices = Vec::new();
-            for option in fronts {
-                self.resolution_item(claim, frozen)?;
-                if option.release_id != candidate.provider_record_id {
-                    return Err(Error::Invalid(
-                        "artwork belongs to a different album release".into(),
-                    ));
-                }
-                let size = if compare_sizes && let Some(source) = &self.artwork_source {
-                    self.report_processing_phase(claim, "inspecting_artwork")?;
-                    match source.original_size(&option.release_id, &option.image_id, &|| {
-                        self.jobs
-                            .renew_job_lease(claim.id, &claim.claim_token, 30)?;
-                        self.jobs
-                            .cancellation_requested(claim.id, &claim.claim_token)
-                    }) {
-                        Ok(size) => size,
-                        Err(Error::NotFound) => continue,
-                        Err(error) => return Err(error),
-                    }
-                } else {
-                    None
-                };
-                choices.push((option, size));
+        // Many pressings have no scan of their own. Other releases of the same
+        // album are tried next, and the cover is linked to the release it came
+        // from, never relabelled as the chosen one.
+        let item = self.resolution_item(claim, frozen)?;
+        let releases = crate::metadata::artwork_releases(
+            &candidate,
+            &self
+                .processing
+                .metadata_candidates(item.collection_id, item.id)?,
+            frozen.language.as_str(),
+            MAX_ARTWORK_RELEASES,
+        );
+        // A retried job reuses the cover it already chose.
+        let retained = self
+            .jobs
+            .metadata_artwork_selection(claim, None)?
+            .map(|query| query.parse::<CoverArtArchiveQuery>())
+            .transpose()?;
+        for (index, release) in releases.iter().enumerate() {
+            if let Some(CoverArtArchiveQuery::Image { release_id, .. }) = &retained
+                && release_id != release
+            {
+                continue;
             }
-            // Prefer approved originals within the acquisition bound, then the
-            // smallest advertised original; unknown sizes are tried after known
-            // usable sizes. The transfer independently enforces actual bytes.
-            choices.sort_by_key(|(option, size)| {
-                (
-                    size.is_some_and(|n| n > MAX_PROVIDER_ARTWORK_BYTES as u64),
-                    !option.approved,
-                    size.is_none(),
-                    size.unwrap_or(u64::MAX),
-                    option.image_id.clone(),
-                )
-            });
-            let Some((option, _)) = choices.into_iter().next() else {
-                return Ok(());
+            // The first listing keeps its original stage name, so jobs admitted
+            // by an earlier release resume with the same stored response.
+            let stage = if index == 0 {
+                "listing".to_string()
+            } else {
+                format!("listing:{release}")
             };
-            let proposed = CoverArtArchiveQuery::Image {
+            let listing = self.artwork_acquisition(
+                claim,
+                frozen,
+                CoverArtArchiveQuery::Listing {
+                    release_id: release.clone(),
+                },
+                &stage,
+            )?;
+            let options = self.resolution_artwork_options(claim, frozen, listing)?;
+            let query = match &retained {
+                Some(query) => query.clone(),
+                None => match self.choose_front_cover(claim, frozen, release, &options)? {
+                    Some(query) => query,
+                    None => continue,
+                },
+            };
+            let CoverArtArchiveQuery::Image {
+                ref release_id,
+                ref image_id,
+            } = query
+            else {
+                return Err(Error::Invalid(
+                    "automatic artwork selection is not an image".into(),
+                ));
+            };
+            if release_id != release
+                || !options.iter().any(|option| {
+                    option.release_id == *release_id
+                        && option.image_id == *image_id
+                        && option.front
+                        && option.types.iter().all(|kind| kind == "Front")
+                })
+            {
+                return Err(Error::Invalid(
+                    "automatic artwork selection disagrees with its listing".into(),
+                ));
+            }
+            let image = self.artwork_acquisition(claim, frozen, query, "image")?;
+            let asset = self.publish_resolution_artwork(claim, frozen, image)?;
+            self.refresh_resolution_metadata(
+                claim,
+                frozen,
+                text_snapshot,
+                vec![ProviderArtworkLink {
+                    provider_record_id: release.clone(),
+                    asset_id: asset,
+                }],
+                "artwork",
+            )?;
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    /// Picks one standalone front cover of `release` and records the choice on
+    /// the job, or returns `None` when the release has no usable front cover.
+    fn choose_front_cover(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenMetadataResolution,
+        release: &str,
+        options: &[MetadataArtworkOption],
+    ) -> Result<Option<collector_modules::music::CoverArtArchiveQuery>> {
+        use collector_modules::music::CoverArtArchiveQuery;
+        // Only standalone front covers are interchangeable. A booklet spread,
+        // rear scan or medium must never win just because it is smaller.
+        let mut fronts: Vec<_> = options
+            .iter()
+            .filter(|option| option.front && option.types.iter().all(|kind| kind == "Front"))
+            .collect();
+        fronts.sort_by_key(|value| (!value.approved, value.image_id.clone()));
+        fronts.truncate(16);
+        let compare_sizes = fronts.len() > 1;
+        let mut choices = Vec::new();
+        for option in fronts {
+            self.resolution_item(claim, frozen)?;
+            if option.release_id != release {
+                return Err(Error::Invalid(
+                    "artwork belongs to a different album release".into(),
+                ));
+            }
+            let size = if compare_sizes && let Some(source) = &self.artwork_source {
+                self.report_processing_phase(claim, "inspecting_artwork")?;
+                match source.original_size(&option.release_id, &option.image_id, &|| {
+                    self.jobs
+                        .renew_job_lease(claim.id, &claim.claim_token, 30)?;
+                    self.jobs
+                        .cancellation_requested(claim.id, &claim.claim_token)
+                }) {
+                    Ok(size) => size,
+                    Err(Error::NotFound) => continue,
+                    Err(error) => return Err(error),
+                }
+            } else {
+                None
+            };
+            choices.push((option, size));
+        }
+        // Prefer approved originals within the acquisition bound, then the
+        // smallest advertised original; unknown sizes are tried after known
+        // usable sizes. The transfer independently enforces actual bytes.
+        choices.sort_by_key(|(option, size)| {
+            (
+                size.is_some_and(|n| n > MAX_PROVIDER_ARTWORK_BYTES as u64),
+                !option.approved,
+                size.is_none(),
+                size.unwrap_or(u64::MAX),
+                option.image_id.clone(),
+            )
+        });
+        let Some((option, _)) = choices.into_iter().next() else {
+            return Ok(None);
+        };
+        let proposed = RawJson::from_value(
+            serde_json::to_value(CoverArtArchiveQuery::Image {
                 release_id: option.release_id.clone(),
                 image_id: option.image_id.clone(),
-            };
-            let proposed = RawJson::from_value(
-                serde_json::to_value(proposed)
-                    .map_err(|error| Error::Storage(error.to_string()))?,
-            );
+            })
+            .map_err(|error| Error::Storage(error.to_string()))?,
+        );
+        Ok(Some(
             self.jobs
                 .metadata_artwork_selection(claim, Some(&proposed))?
                 .ok_or_else(|| Error::Storage("artwork selection was not retained".into()))?
-                .parse::<CoverArtArchiveQuery>()?
-        };
-        let CoverArtArchiveQuery::Image {
-            ref release_id,
-            ref image_id,
-        } = query
-        else {
-            return Err(Error::Invalid(
-                "automatic artwork selection is not an image".into(),
-            ));
-        };
-        if release_id != &candidate.provider_record_id
-            || !options.iter().any(|option| {
-                option.release_id == *release_id
-                    && option.image_id == *image_id
-                    && option.front
-                    && option.types.iter().all(|kind| kind == "Front")
-            })
-        {
-            return Err(Error::Invalid(
-                "automatic artwork selection disagrees with its listing".into(),
-            ));
-        }
-        let image = self.artwork_acquisition(claim, frozen, query, "image")?;
-        let asset = self.publish_resolution_artwork(claim, frozen, image)?;
-        self.refresh_resolution_metadata(
-            claim,
-            frozen,
-            text_snapshot,
-            vec![ProviderArtworkLink {
-                provider_record_id: candidate.provider_record_id,
-                asset_id: asset,
-            }],
-            "artwork",
-        )?;
-        Ok(())
+                .parse::<CoverArtArchiveQuery>()?,
+        ))
     }
 
     fn publish_resolution_artwork(

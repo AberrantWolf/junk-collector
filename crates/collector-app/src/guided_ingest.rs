@@ -1236,7 +1236,10 @@ impl CollectionService {
 
     pub(crate) fn reconcile_guided_ingest(&self, id: ImportId) -> Result<()> {
         let advancement = self.advance_guided_ingest(id);
-        if matches!(advancement, Err(Error::CatalogBusy)) {
+        if matches!(
+            advancement,
+            Err(Error::CatalogBusy | Error::ArchiveCheckOverdue)
+        ) {
             return advancement;
         }
         if let Err(error) = advancement
@@ -1520,7 +1523,7 @@ impl CollectionService {
                     if let Err(error) =
                         self.apply_import_album_selection(&intent, &record, &current_item)
                     {
-                        if matches!(error, Error::CatalogBusy) {
+                        if matches!(error, Error::CatalogBusy | Error::ArchiveCheckOverdue) {
                             return Err(error);
                         }
                         intent.enrichment_error =
@@ -2139,8 +2142,24 @@ impl CollectionService {
         } else {
             job_step("preparation", None, false, None)
         };
+        // Every file arrived and was hashed, and the import moved on: the copy
+        // is done even if a later attempt of its job failed after losing its claim.
+        let copied = !matches!(
+            record.view.phase,
+            ImportPhase::Staging | ImportPhase::Cancelled
+        ) && record
+            .view
+            .files
+            .iter()
+            .all(|file| file.received_bytes == file.bytes && file.digest.is_some());
         let staging_step = if let Some(job) = by_kind.get("import_staging") {
-            job_step("staging", Some(job), false, None)
+            let mut step = job_step("staging", Some(job), false, None);
+            if copied && step.state == IngestStepState::Failed {
+                step.state = IngestStepState::Succeeded;
+                step.message = None;
+                step.retryable = false;
+            }
+            step
         } else {
             IngestStepView {
                 step: "staging".into(),
