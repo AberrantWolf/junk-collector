@@ -200,7 +200,8 @@ class ArgumentOrderTests(unittest.TestCase):
         root = Path(temporary.name)
         dumps = str(root / "dumps")
         for old_style in (["Album", dumps, "disk7"], ["Album", dumps], ["--auto", dumps, "disk7"],
-                          ["--auto", dumps], [dumps, "disk7s1", "Album"]):
+                          ["--auto", dumps], [dumps, "disk7s1", "Album"], [dumps, "disk7"],
+                          [dumps, "/dev/sg2"]):
             with self.subTest(args=old_style):
                 result = subprocess.run(["bash", str(SCRIPT), *old_style], cwd=root,
                                         env=dict(os.environ, REDUMPER="true"),

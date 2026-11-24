@@ -75,6 +75,11 @@ order_hint='Arguments are DESTINATION [DRIVE] NAME (or --auto last); see --help.
 case "$name" in
     ''|.|..|*/*|*$'\n'*|*$'\r'*) die "NAME must be a single nonempty folder name. $order_hint" ;;
 esac
+# A forgotten NAME would otherwise rip from the first drive into a folder
+# named after the drive.
+if (( $# == 2 )) && [[ $name =~ ^(/dev/.+|r?disk[0-9]+)$ ]]; then
+    die "NAME looks like a drive: $name. Put NAME (or --auto) after DRIVE. $order_hint"
+fi
 [[ -n $destination ]] || die 'DESTINATION must not be empty.'
 [[ $destination == -* ]] && die "DESTINATION must not start with '-'. $order_hint"
 if [[ -n $drive && ! $drive =~ ^(/dev/.+|r?disk[0-9]+)$ ]]; then
