@@ -4508,7 +4508,7 @@ fn project_evidence_record(tx: &Connection, evidence: &archive_v3::EvidenceRecor
     }
 }
 
-fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
+pub(crate) fn hydrate_captures(db: &Connection, item: &mut Item) -> Result<()> {
     let mut statement = db
         .prepare("SELECT record FROM captures WHERE item_id=? AND collection_id=? ORDER BY id")
         .map_err(storage)?;

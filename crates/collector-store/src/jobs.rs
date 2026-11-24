@@ -855,6 +855,8 @@ impl Store {
                     return Err(Error::IdempotencyConflict);
                 };
                 proposed.created_at = original.created_at;
+                // Shared work keeps the reason of whoever asked first.
+                proposed.requested_by = original.requested_by;
                 frozen_input = Some(
                     serde_json::to_string(&FrozenJobInput::Derivative(proposed))
                         .map_err(storage)?,

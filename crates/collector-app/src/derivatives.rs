@@ -607,6 +607,9 @@ pub struct FrozenDerivativeJob {
     pub recipe: ConversionRecipe,
     pub representation_id: RepresentationId,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Who asked for this copy; older durable jobs have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_by: Option<collector_core::FormatRequest>,
 }
 
 impl FrozenDerivativeJob {
@@ -814,8 +817,12 @@ impl CollectionService {
             "music.derivative.prepare",
             &(capture_id, &command),
             |effects| {
-                let frozen =
-                    self.freeze_music_derivative(&capture, eligibility.binding.clone(), &command)?;
+                let frozen = self.freeze_music_derivative(
+                    &capture,
+                    eligibility.binding.clone(),
+                    &command,
+                    collector_core::FormatRequest::Track,
+                )?;
                 let id = crate::deterministic_job_id(
                     actor.user_id,
                     "music.derivative.prepare",
@@ -831,6 +838,7 @@ impl CollectionService {
         capture: &collector_core::Capture,
         binding: CollectionBinding,
         command: &PrepareMusicDerivative,
+        requested_by: collector_core::FormatRequest,
     ) -> Result<FrozenDerivativeJob> {
         if matches!(&binding, CollectionBinding::Assigned { module } if module.0 == "org.junk.games")
             != (command.selection.package_kind
@@ -948,6 +956,7 @@ impl CollectionService {
             recipe,
             representation_id: RepresentationId(identity),
             created_at: self.authentication.now(),
+            requested_by: Some(requested_by),
         };
         frozen.validate()?;
         Ok(frozen)
@@ -1049,6 +1058,7 @@ impl CollectionService {
                         profile: command.profile.clone(),
                         encoder_version: version,
                     },
+                    collector_core::FormatRequest::Track,
                 )?;
                 // A user's identical track/profile requests converge even when
                 // they arrive from an album batch, an import, or the track button.

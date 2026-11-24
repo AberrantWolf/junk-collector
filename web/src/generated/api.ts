@@ -1956,6 +1956,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/saved-formats/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["remove_saved_format"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/specimens": {
         parameters: {
             query?: never;
@@ -2700,6 +2716,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["review_counts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/saved-formats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["saved_formats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3842,6 +3874,11 @@ export interface components {
             extended?: boolean;
             refresh?: boolean;
         };
+        /**
+         * @description Who asked for a saved (non-original) format.
+         * @enum {string}
+         */
+        FormatRequest: "track" | "album" | "batch" | "import_setting";
         GameCatalogIdentification: {
             byte_domain: string;
             catalog: components["schemas"]["CatalogMatchResult"];
@@ -4831,7 +4868,7 @@ export interface components {
             stage: components["schemas"]["MetadataResolutionStage"];
         };
         /** @enum {string} */
-        MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal" | "catalog_ambiguity" | "weak_catalog_match" | "unsupported_format" | "needs_main_file" | "no_catalog";
+        MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal" | "catalog_ambiguity" | "weak_catalog_match" | "unsupported_format" | "needs_main_file" | "no_catalog" | "partial_saved_format";
         MetadataReviewView: {
             /** @description Reasons accepted as they are for the entry's current state. */
             accepted_reasons: components["schemas"]["MetadataReviewReason"][];
@@ -5957,6 +5994,11 @@ export interface components {
             grant: components["schemas"]["RemoteMediaGrant"];
             samples: components["schemas"]["RemoteMediaSample"][];
         };
+        RemoveSavedFormat: {
+            capture_id: components["schemas"]["CaptureId"];
+            expected_revision: components["schemas"]["Revision"];
+            profile: components["schemas"]["ConversionProfile"];
+        };
         ReopenPurchase: {
             accepted_item: components["schemas"]["ItemId"];
             expected_item_revision: components["schemas"]["Revision"];
@@ -5977,6 +6019,7 @@ export interface components {
             format: string;
             id: components["schemas"]["RepresentationId"];
             profile?: components["schemas"]["ConversionProfile"] | null;
+            requested_by?: components["schemas"]["FormatRequest"] | null;
             role: components["schemas"]["RepresentationRole"];
             source?: components["schemas"]["RepresentationId"] | null;
         };
@@ -6105,6 +6148,53 @@ export interface components {
             expected_revision: components["schemas"]["Revision"];
         };
         SaveItemEnvelope: components["schemas"]["SaveItemCommandEnvelope"] | components["schemas"]["SaveItemEditCommandEnvelope"] | components["schemas"]["Wave1SaveItemEnvelope"];
+        SavedFormatAlbum: {
+            /**
+             * Format: int32
+             * @description Tracks the album plays, for spotting partial formats.
+             */
+            album_tracks: number;
+            artwork?: components["schemas"]["LibraryArtwork"] | null;
+            collection_id: components["schemas"]["CollectionId"];
+            formats: components["schemas"]["SavedFormatSummary"][];
+            item_id: components["schemas"]["ItemId"];
+            subtitle: string;
+            title: string;
+        };
+        SavedFormatCapture: {
+            capture_id: components["schemas"]["CaptureId"];
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description One saved format of one album. */
+        SavedFormatSummary: {
+            /** Format: int64 */
+            bytes: number;
+            /** @description Captures holding this format, with the revision each was listed at. */
+            captures: components["schemas"]["SavedFormatCapture"][];
+            profile: components["schemas"]["ConversionProfile"];
+            /** @description Who asked for it; empty when every copy predates this record. */
+            requested_by: components["schemas"]["FormatRequest"][];
+            /**
+             * Format: int32
+             * @description Tracks saved in this format.
+             */
+            tracks: number;
+            /** @description Some copies were made before the reason was recorded. */
+            unknown_origin: boolean;
+        };
+        SavedFormatTotal: {
+            /** Format: int64 */
+            albums: number;
+            /** Format: int64 */
+            bytes: number;
+            profile: components["schemas"]["ConversionProfile"];
+        };
+        SavedFormatsPage: {
+            items: components["schemas"]["SavedFormatAlbum"][];
+            next_cursor?: string | null;
+            /** @description Totals across every album the query matches, not just this page. */
+            totals: components["schemas"]["SavedFormatTotal"][];
+        };
         ScanPlan: {
             accuraterip_query?: components["schemas"]["DbarQuery"] | null;
             accuraterip_structure_observation_id?: components["schemas"]["ObservationId"] | null;
@@ -12214,6 +12304,55 @@ export interface operations {
             };
         };
     };
+    remove_saved_format: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveSavedFormat"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedFormatAlbum"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     create_specimen: {
         parameters: {
             query?: never;
@@ -14390,6 +14529,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewCounts"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    saved_formats: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+                search?: string;
+                /** @description flac or opus:<kbps> */
+                format?: string;
+                /** @description track, album, batch or import_setting */
+                requested_by?: string;
+                partial_only?: boolean;
+                several_opus?: boolean;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedFormatsPage"];
                 };
             };
             /** @description Unauthorized */

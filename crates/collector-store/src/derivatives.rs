@@ -223,6 +223,7 @@ impl Store {
             }],
             source: Some(source),
             profile: Some(profile),
+            requested_by: frozen.requested_by,
         });
         let expected = capture.revision;
         capture.revision = Revision(expected.0.checked_add(1).ok_or(Error::Conflict)?);

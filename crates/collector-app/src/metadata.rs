@@ -292,6 +292,9 @@ pub enum MetadataReviewReason {
     /// No game catalog is loaded for this system yet. Not a problem with the
     /// entry itself; it is checked again when a catalog is activated.
     NoCatalog,
+    /// A saved format (FLAC, Opus) someone asked for covers only some tracks.
+    /// The rest play from the originals; accepting keeps what worked.
+    PartialSavedFormat,
 }
 
 /// How urgent a review reason is. The Review queue shows Blocked and Decision
@@ -308,7 +311,7 @@ pub enum ReviewLevel {
 }
 
 impl MetadataReviewReason {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::MissingName,
         Self::MissingArtwork,
         Self::AlbumAmbiguity,
@@ -322,6 +325,7 @@ impl MetadataReviewReason {
         Self::UnsupportedFormat,
         Self::NeedsMainFile,
         Self::NoCatalog,
+        Self::PartialSavedFormat,
     ];
     pub fn key(self) -> &'static str {
         match self {
@@ -338,6 +342,7 @@ impl MetadataReviewReason {
             Self::UnsupportedFormat => "unsupported_format",
             Self::NeedsMainFile => "needs_main_file",
             Self::NoCatalog => "no_catalog",
+            Self::PartialSavedFormat => "partial_saved_format",
         }
     }
     pub fn level(self) -> ReviewLevel {
@@ -369,6 +374,8 @@ pub struct MetadataHealthInput<'a> {
     pub has_cover: bool,
     pub last_lookup_no_match: bool,
     pub identification: Option<&'a collector_modules::games::GameIdentification>,
+    /// A saved format covers fewer tracks than the album plays.
+    pub partial_saved_format: bool,
 }
 
 pub struct MetadataHealth {
@@ -472,6 +479,9 @@ pub fn metadata_health(input: MetadataHealthInput<'_>) -> Result<MetadataHealth>
     {
         reasons.push(MetadataReviewReason::ManualConflict);
     }
+    if input.partial_saved_format {
+        reasons.push(MetadataReviewReason::PartialSavedFormat);
+    }
     let mut evidence = input
         .current_candidates
         .iter()
@@ -496,6 +506,7 @@ pub fn metadata_health(input: MetadataHealthInput<'_>) -> Result<MetadataHealth>
                 &input.display.candidate,
                 input.last_lookup_no_match,
                 &identification,
+                input.partial_saved_format,
             ))
             .map_err(|error| Error::Storage(error.to_string()))?,
         )[..16],
@@ -1715,6 +1726,7 @@ impl CollectionService {
                 .any(|asset| asset.kind == AssetKind::Cover),
             last_lookup_no_match,
             identification: identification.as_ref(),
+            partial_saved_format: self.care.partial_saved_format(item.id)?,
         })?;
         let mut review_reasons = health.reasons;
         if lookup_failed {
@@ -4297,6 +4309,7 @@ mod review_health_tests {
             has_cover: false,
             last_lookup_no_match: no_match,
             identification,
+            partial_saved_format: false,
         })
         .unwrap()
     }

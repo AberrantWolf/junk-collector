@@ -724,6 +724,7 @@ impl Store {
                         files,
                         source: None,
                         profile: None,
+                        requested_by: None,
                     }],
                 };
                 self.publish_capture_payloads(

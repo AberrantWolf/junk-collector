@@ -32122,3 +32122,122 @@ fn a_finished_inbox_copy_is_not_reported_failed_or_repeated_after_a_lost_claim()
         ImportPhase::Published
     );
 }
+
+#[test]
+fn saved_formats_list_their_origin_and_can_be_removed_without_touching_originals() {
+    let (_root, store, actor, service, collection) = setup();
+    let album = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let imported = derivative_import(&service, &actor, collection.id);
+    let mut capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    let revision = capture.revision;
+    capture.association.item_id = Some(album.id);
+    Catalog::save_capture(store.as_ref(), capture, revision).unwrap();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    service
+        .prepare_music_derivative(
+            &actor,
+            imported.capture_id,
+            derivative_command(&imported, 1),
+            &command(),
+        )
+        .unwrap();
+    while service.run_next_job("saved-formats").unwrap() {}
+    let query = collector_app::SavedFormatsQuery {
+        collection_id: Some(collection.id),
+        ..Default::default()
+    };
+    let page = service.saved_formats(&actor, query.clone()).unwrap();
+    assert_eq!(page.items.len(), 1);
+    let listed = &page.items[0];
+    assert_eq!(listed.item_id, album.id);
+    let flac = &listed.formats[0];
+    assert_eq!(flac.profile, ConversionProfile::Flac);
+    assert_eq!(flac.tracks, 1);
+    assert_eq!(
+        flac.requested_by,
+        vec![collector_core::FormatRequest::Track]
+    );
+    assert!(!flac.unknown_origin);
+    // One of the album's tracks is saved, so the format is partial.
+    assert!(listed.album_tracks > flac.tracks);
+    assert_eq!(
+        service
+            .saved_formats(
+                &actor,
+                collector_app::SavedFormatsQuery {
+                    partial_only: true,
+                    ..query.clone()
+                }
+            )
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(page.totals.len(), 1);
+    assert_eq!(page.totals[0].albums, 1);
+    assert_eq!(page.totals[0].bytes, flac.bytes);
+    let stranger = Principal {
+        user_id: store
+            .create_user("formats-stranger", "a long stranger password", false)
+            .unwrap(),
+        administrator: false,
+        device_id: None,
+    };
+    assert!(matches!(
+        service.saved_formats(&stranger, query.clone()),
+        Err(Error::Forbidden)
+    ));
+    let target = &flac.captures[0];
+    let removed = service
+        .remove_saved_format(
+            &actor,
+            album.id,
+            collector_app::RemoveSavedFormat {
+                capture_id: target.capture_id,
+                expected_revision: target.revision,
+                profile: ConversionProfile::Flac,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert!(removed.formats.is_empty());
+    let capture = Catalog::capture(store.as_ref(), imported.capture_id).unwrap();
+    assert!(
+        capture
+            .representations
+            .iter()
+            .any(|r| r.role == RepresentationRole::PreservationMaster)
+    );
+    assert!(capture.representations.iter().all(|r| r.profile.is_none()));
+    assert!(
+        service
+            .saved_formats(&actor, query)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    // The original still plays through live conversion.
+    assert!(matches!(
+        service
+            .item_presented(&actor, album.id)
+            .unwrap()
+            .album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::Ready)
+    ));
+    // A stale revision is refused rather than removing from a newer capture.
+    assert!(
+        service
+            .remove_saved_format(
+                &actor,
+                album.id,
+                collector_app::RemoveSavedFormat {
+                    capture_id: target.capture_id,
+                    expected_revision: target.revision,
+                    profile: ConversionProfile::Flac,
+                },
+                &command(),
+            )
+            .is_err()
+    );
+}

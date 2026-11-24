@@ -945,6 +945,24 @@ pub struct Representation {
     pub files: Vec<StoredFile>,
     pub source: Option<RepresentationId>,
     pub profile: Option<ConversionProfile>,
+    /// Why a saved format exists. Absent on originals and on copies made
+    /// before this was recorded; it is never guessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_by: Option<FormatRequest>,
+}
+
+/// Who asked for a saved (non-original) format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FormatRequest {
+    /// One track, from the album's track list.
+    Track,
+    /// One album, from its preparation tools.
+    Album,
+    /// Several albums at once, from a bulk selection.
+    Batch,
+    /// The collection's "prepare on import" setting.
+    ImportSetting,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1728,6 +1746,7 @@ mod tests {
                 files: vec![],
                 source: Some(representation),
                 profile: None,
+                requested_by: None,
             }],
         };
         assert!(capture.validate().is_err());

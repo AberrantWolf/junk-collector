@@ -386,6 +386,181 @@ impl LibraryCarePort for Store {
         .map_err(storage)
     }
 
+    fn partial_saved_format(&self, item: ItemId) -> Result<bool> {
+        partial_saved_format(&*self.read_db()?, item)
+    }
+
+    fn saved_format_albums(
+        &self,
+        user: UserId,
+        query: &collector_app::SavedFormatsQuery,
+    ) -> Result<collector_app::SavedFormatsPage> {
+        let limit = usize::from(query.limit.unwrap_or(50).clamp(1, 100));
+        let (codec, bitrate): (Option<String>, Option<i64>) = match query.format.as_deref() {
+            None | Some("") => (None, None),
+            Some("flac") => (Some("flac".into()), None),
+            Some(value) => match value.strip_prefix("opus:").and_then(|v| v.parse().ok()) {
+                Some(kbps) => (Some("opus".into()), Some(kbps)),
+                None => return Err(Error::Invalid("unknown saved format".into())),
+            },
+        };
+        let requested = query
+            .requested_by
+            .map(|value| serde_json::to_value(value).map_err(storage))
+            .transpose()?
+            .and_then(|value| value.as_str().map(String::from));
+        let cursor = match &query.cursor {
+            Some(raw) if raw.len() <= 4096 => Some(
+                serde_json::from_slice::<(String, String)>(
+                    &hex::decode(raw).map_err(|_| Error::Invalid("invalid cursor".into()))?,
+                )
+                .map_err(|_| Error::Invalid("invalid cursor".into()))?,
+            ),
+            Some(_) => return Err(Error::Invalid("invalid cursor".into())),
+            None => None,
+        };
+        // Saved formats are representations derived from an original. Filters
+        // read catalog rows only; no payload is opened.
+        let saved = "json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL AND (?4 IS NULL OR json_extract(r.value,'$.profile.codec')=?4) AND (?5 IS NULL OR json_extract(r.value,'$.profile.bitrate_kbps')=?5) AND (?6 IS NULL OR json_extract(r.value,'$.requested_by')=?6)";
+        let scope = "i.deleted=0 AND (?2 IS NULL OR i.collection_id=?2) AND (?3='' OR instr(lower(i.title||' '||i.subtitle),lower(?3))>0)";
+        let grants = "JOIN private.grants g ON g.collection_id=i.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1";
+        let db = self.read_db()?;
+        let mut items = Vec::new();
+        let mut after = cursor.clone();
+        let mut more = false;
+        'pages: loop {
+            let sql = format!(
+                "SELECT i.record FROM items i {grants} WHERE {scope} AND EXISTS(SELECT 1 FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=i.id AND {saved}) AND (?7 IS NULL OR (lower(i.title),i.id)>(?7,?8)) ORDER BY lower(i.title),i.id LIMIT 101"
+            );
+            let mut statement = db.prepare(&sql).map_err(storage)?;
+            let rows = statement
+                .query_map(
+                    params![
+                        user.to_string(),
+                        query.collection_id.map(|id| id.to_string()),
+                        query.search,
+                        codec,
+                        bitrate,
+                        requested,
+                        after.as_ref().map(|v| v.0.clone()),
+                        after.as_ref().map(|v| v.1.clone()),
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(storage)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(storage)?;
+            let exhausted = rows.len() < 101;
+            for raw in rows.into_iter().take(100) {
+                let mut item: Item = serde_json::from_str(&raw).map_err(storage)?;
+                after = Some((item.title.to_lowercase(), item.id.to_string()));
+                crate::hydrate_captures(&db, &mut item)?;
+                let formats = collector_app::saved_formats_of(&item.captures);
+                let album_tracks: i64 = db
+                    .query_row(
+                        "SELECT count(*) FROM music_search WHERE item_id=?",
+                        [item.id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(storage)?;
+                let album_tracks = album_tracks.max(0) as u32;
+                if query.partial_only
+                    && !formats
+                        .iter()
+                        .any(|f| album_tracks > 0 && f.tracks < album_tracks)
+                {
+                    continue;
+                }
+                if query.several_opus
+                    && formats
+                        .iter()
+                        .filter(|f| matches!(f.profile, ConversionProfile::Opus { .. }))
+                        .count()
+                        < 2
+                {
+                    continue;
+                }
+                if items.len() == limit {
+                    more = true;
+                    break 'pages;
+                }
+                let artwork = db
+                    .query_row(
+                        "SELECT record FROM library_entry_basics WHERE item_id=?",
+                        [item.id.to_string()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(storage)?
+                    .and_then(|raw| serde_json::from_str::<collector_app::LibraryEntry>(&raw).ok())
+                    .and_then(|entry| entry.artwork);
+                items.push(collector_app::SavedFormatAlbum {
+                    item_id: item.id,
+                    collection_id: item.collection_id,
+                    title: item.title.clone(),
+                    subtitle: item.subtitle.clone(),
+                    artwork,
+                    album_tracks,
+                    formats,
+                });
+            }
+            if exhausted {
+                break;
+            }
+        }
+        let next_cursor = if more {
+            items
+                .last()
+                .map(|album| {
+                    serde_json::to_vec(&(album.title.to_lowercase(), album.item_id.to_string()))
+                        .map(hex::encode)
+                        .map_err(storage)
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let sql = format!(
+            "SELECT json_extract(r.value,'$.profile'),count(DISTINCT i.id),COALESCE(sum((SELECT sum(json_extract(f.value,'$.bytes')) FROM json_each(r.value,'$.files') f)),0) FROM items i {grants} JOIN captures c ON c.item_id=i.id, json_each(c.record,'$.representations') r WHERE {scope} AND {saved} GROUP BY 1 ORDER BY 1"
+        );
+        let mut statement = db.prepare(&sql).map_err(storage)?;
+        let totals = statement
+            .query_map(
+                params![
+                    user.to_string(),
+                    query.collection_id.map(|id| id.to_string()),
+                    query.search,
+                    codec,
+                    bitrate,
+                    requested
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .map_err(storage)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(storage)?
+            .into_iter()
+            .map(|(profile, albums, bytes)| {
+                Ok(collector_app::SavedFormatTotal {
+                    profile: serde_json::from_str(&profile).map_err(storage)?,
+                    albums: albums.max(0) as u64,
+                    bytes: bytes.max(0) as u64,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(collector_app::SavedFormatsPage {
+            items,
+            next_cursor,
+            totals,
+        })
+    }
+
     fn metadata_care_entries(
         &self,
         user: UserId,
@@ -848,6 +1023,17 @@ fn reason_filter(
     }
 }
 
+/// A saved format with fewer tracks than the album plays. Reads catalog rows
+/// only.
+pub(crate) fn partial_saved_format(db: &Connection, item: ItemId) -> Result<bool> {
+    db.query_row(
+        "WITH saved AS (SELECT json_extract(r.value,'$.profile') AS profile,count(*) AS tracks FROM captures c, json_each(c.record,'$.representations') r WHERE c.item_id=?1 AND json_extract(r.value,'$.source') IS NOT NULL AND json_extract(r.value,'$.profile') IS NOT NULL GROUP BY 1) SELECT EXISTS(SELECT 1 FROM saved WHERE tracks<(SELECT count(*) FROM music_search WHERE item_id=?1))",
+        [item.to_string()],
+        |row| row.get(0),
+    )
+    .map_err(storage)
+}
+
 /// Latest game identification for the entry's current originals, if any.
 fn current_game_identification(
     db: &Connection,
@@ -917,6 +1103,7 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
         [item.id.to_string()],
     )
     .map_err(storage)?;
+    let had_record = record.is_some();
     if let Some(record) = record {
         let authority = collector_app::metadata_authority_for_inventory(item, &record)?;
         let mut statement = db.prepare("SELECT record FROM metadata_candidates WHERE item_id=? ORDER BY candidate_key LIMIT 4097").map_err(storage)?;
@@ -1011,6 +1198,7 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
                 .last()
                 .is_some_and(|value| value.outcome == MetadataRefreshOutcome::NoMatch),
             identification: identification.as_ref(),
+            partial_saved_format: partial_saved_format(db, item.id)?,
         })?
         .reasons;
     } else if let Some(identification) = &identification {
@@ -1021,6 +1209,11 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
         if reasons.len() > 1 {
             reasons.retain(|reason| *reason != Reason::MissingName);
         }
+    }
+    // Without a metadata record the shared policy did not run; add the one
+    // reason that does not depend on metadata.
+    if !had_record && partial_saved_format(db, item.id)? {
+        reasons.push(Reason::PartialSavedFormat);
     }
     let level = |wanted: &[ReviewLevel]| {
         reasons

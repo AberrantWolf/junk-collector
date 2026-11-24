@@ -839,6 +839,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         )
         .routes(routes!(metadata_care))
         .routes(routes!(review_counts))
+        .routes(routes!(saved_formats))
+        .routes(routes!(remove_saved_format))
         .routes(routes!(preparation_care))
         .routes(routes!(preparation_revision))
         .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
@@ -1941,6 +1943,37 @@ async fn undo_album_group(
     let context = command_context(&headers)?;
     Ok(Json(
         blocking(move || state.service.undo_album_group(&actor, id, &context)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/saved-formats", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("format" = Option<String>, Query, description = "flac or opus:<kbps>"), ("requested_by" = Option<String>, Query, description = "track, album, batch or import_setting"), ("partial_only" = Option<bool>, Query), ("several_opus" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = collector_app::SavedFormatsPage), (status = 401), (status = 403)))]
+async fn saved_formats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<collector_app::SavedFormatsQuery>,
+) -> ApiResult<Json<collector_app::SavedFormatsPage>> {
+    let actor = principal(&state, &headers).await?;
+    Ok(Json(
+        blocking(move || state.service.saved_formats(&actor, query)).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/saved-formats/remove", params(("id" = ItemId, Path), ("Idempotency-Key" = String, Header)), request_body = collector_app::RemoveSavedFormat, responses((status = 200, body = collector_app::SavedFormatAlbum), (status = 403), (status = 409), (status = 422)))]
+async fn remove_saved_format(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(command): Json<collector_app::RemoveSavedFormat>,
+) -> ApiResult<Json<collector_app::SavedFormatAlbum>> {
+    let actor = principal(&state, &headers).await?;
+    let context = command_context(&headers)?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .remove_saved_format(&actor, id, command, &context)
+        })
+        .await?,
     ))
 }
 

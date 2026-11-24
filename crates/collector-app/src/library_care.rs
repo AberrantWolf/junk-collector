@@ -90,6 +90,14 @@ pub trait LibraryCarePort: Send + Sync {
         language: &str,
     ) -> Result<Page<MetadataCareRow>>;
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>>;
+    /// Whether a saved format covers fewer tracks than the album plays.
+    fn partial_saved_format(&self, item: ItemId) -> Result<bool>;
+    /// Albums with saved (non-original) formats, with totals per format.
+    fn saved_format_albums(
+        &self,
+        user: UserId,
+        query: &crate::SavedFormatsQuery,
+    ) -> Result<crate::SavedFormatsPage>;
     /// Entry counts per review level across collections the user curates.
     fn review_counts(&self, user: UserId, collection: Option<CollectionId>)
     -> Result<ReviewCounts>;

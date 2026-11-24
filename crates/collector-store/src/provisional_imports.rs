@@ -1947,6 +1947,7 @@ impl Store {
                 files: files.clone(),
                 source: None,
                 profile: None,
+                requested_by: None,
             }],
         };
         capture.validate()?;

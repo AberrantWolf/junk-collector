@@ -282,9 +282,14 @@ impl CollectionService {
         profile: &ConversionProfile,
         batch_id: JobId,
     ) -> Result<FrozenDerivativeBatchJob> {
-        self.freeze_music_album_batch_with_selection(user_id, item, profile, batch_id, |_| {
-            Ok(selected_sources.to_vec())
-        })
+        self.freeze_music_album_batch_with_selection(
+            user_id,
+            item,
+            profile,
+            batch_id,
+            collector_core::FormatRequest::Album,
+            |_| Ok(selected_sources.to_vec()),
+        )
     }
 
     pub(crate) fn freeze_music_album_batch_with_selection(
@@ -293,6 +298,7 @@ impl CollectionService {
         item: &collector_core::Item,
         profile: &ConversionProfile,
         batch_id: JobId,
+        requested_by: collector_core::FormatRequest,
         select: impl FnOnce(&MusicAlbumPreparationPlan) -> Result<Vec<RepresentationId>>,
     ) -> Result<FrozenDerivativeBatchJob> {
         let eligibility = self.content_write_eligibility_for_job(
@@ -481,6 +487,7 @@ impl CollectionService {
                             profile: profile.clone(),
                             encoder_version: version,
                         },
+                        requested_by,
                     )?;
                     let job_id = crate::deterministic_job_id(
                         user_id,
@@ -583,6 +590,7 @@ impl CollectionService {
             &item,
             profile,
             batch_id,
+            collector_core::FormatRequest::ImportSetting,
             |plan| {
                 let disc = plan
                     .discs

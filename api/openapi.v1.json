@@ -6543,6 +6543,61 @@
         }
       }
     },
+    "/api/v1/items/{id}/saved-formats/remove": {
+      "post": {
+        "operationId": "remove_saved_format",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveSavedFormat"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFormatAlbum"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/specimens": {
       "post": {
         "operationId": "create_specimen",
@@ -8945,6 +9000,99 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReviewCounts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/saved-formats": {
+      "get": {
+        "operationId": "saved_formats",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "flac or opus:<kbps>",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requested_by",
+            "in": "query",
+            "description": "track, album, batch or import_setting",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partial_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "several_opus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFormatsPage"
                 }
               }
             }
@@ -13423,6 +13571,16 @@
         },
         "additionalProperties": false
       },
+      "FormatRequest": {
+        "type": "string",
+        "description": "Who asked for a saved (non-original) format.",
+        "enum": [
+          "track",
+          "album",
+          "batch",
+          "import_setting"
+        ]
+      },
       "GameCatalogIdentification": {
         "type": "object",
         "required": [
@@ -17641,7 +17799,8 @@
           "weak_catalog_match",
           "unsupported_format",
           "needs_main_file",
-          "no_catalog"
+          "no_catalog",
+          "partial_saved_format"
         ]
       },
       "MetadataReviewView": {
@@ -22515,6 +22674,26 @@
           }
         }
       },
+      "RemoveSavedFormat": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "expected_revision",
+          "profile"
+        ],
+        "properties": {
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          }
+        },
+        "additionalProperties": false
+      },
       "ReopenPurchase": {
         "type": "object",
         "required": [
@@ -22600,6 +22779,17 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ConversionProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requested_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FormatRequest",
+                "description": "Why a saved format exists. Absent on originals and on copies made\nbefore this was recorded; it is never guessed."
               },
               {
                 "type": "null"
@@ -23062,6 +23252,165 @@
             "$ref": "#/components/schemas/Wave1SaveItemEnvelope"
           }
         ]
+      },
+      "SavedFormatAlbum": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "collection_id",
+          "title",
+          "subtitle",
+          "album_tracks",
+          "formats"
+        ],
+        "properties": {
+          "album_tracks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks the album plays, for spotting partial formats.",
+            "minimum": 0
+          },
+          "artwork": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LibraryArtwork"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "collection_id": {
+            "$ref": "#/components/schemas/CollectionId"
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedFormatSummary"
+            }
+          },
+          "item_id": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "SavedFormatCapture": {
+        "type": "object",
+        "required": [
+          "capture_id",
+          "revision"
+        ],
+        "properties": {
+          "capture_id": {
+            "$ref": "#/components/schemas/CaptureId"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "SavedFormatSummary": {
+        "type": "object",
+        "description": "One saved format of one album.",
+        "required": [
+          "profile",
+          "tracks",
+          "bytes",
+          "requested_by",
+          "unknown_origin",
+          "captures"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "captures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedFormatCapture"
+            },
+            "description": "Captures holding this format, with the revision each was listed at."
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          },
+          "requested_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormatRequest"
+            },
+            "description": "Who asked for it; empty when every copy predates this record."
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks saved in this format.",
+            "minimum": 0
+          },
+          "unknown_origin": {
+            "type": "boolean",
+            "description": "Some copies were made before the reason was recorded."
+          }
+        }
+      },
+      "SavedFormatTotal": {
+        "type": "object",
+        "required": [
+          "profile",
+          "albums",
+          "bytes"
+        ],
+        "properties": {
+          "albums": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ConversionProfile"
+          }
+        }
+      },
+      "SavedFormatsPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "totals"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedFormatAlbum"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedFormatTotal"
+            },
+            "description": "Totals across every album the query matches, not just this page."
+          }
+        }
       },
       "ScanPlan": {
         "type": "object",

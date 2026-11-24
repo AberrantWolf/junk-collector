@@ -368,6 +368,7 @@ impl CollectionService {
                     item,
                     &command.profile,
                     child,
+                    collector_core::FormatRequest::Batch,
                     |plan| {
                         select_bulk_sources(
                             plan,
@@ -548,6 +549,7 @@ impl CollectionService {
                         &item,
                         &record.summary.profile,
                         child,
+                        collector_core::FormatRequest::Batch,
                         |plan| select_bulk_sources(plan, &selection.sources),
                     )?)
                 } else {
