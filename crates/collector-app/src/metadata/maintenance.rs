@@ -201,7 +201,7 @@ impl CollectionService {
             &current_metadata_candidates(&authority, &history, Some(&current))?,
             &language,
         )?;
-        if old.resolution_policy == 4
+        if old.resolution_policy == crate::METADATA_RESOLUTION_POLICY
             && old.current_candidates.as_ref() == Some(&current)
             && serde_json::to_value(&old.authority).map_err(|e| Error::Storage(e.to_string()))?
                 == serde_json::to_value(&authority).map_err(|e| Error::Storage(e.to_string()))?
@@ -212,7 +212,7 @@ impl CollectionService {
         self.processing.publish_metadata_maintenance(
             actor.user_id,
             MetadataAuthorityRecord {
-                resolution_policy: 4,
+                resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                 current_candidates: Some(current),
                 inventory: Some((&item).into()),
                 collection_id: item.collection_id,

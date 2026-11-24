@@ -807,7 +807,7 @@ impl CollectionService {
                 .map_or("en", LanguageTag::as_str),
         )?;
         let record = MetadataAuthorityRecord {
-            resolution_policy: 4,
+            resolution_policy: crate::METADATA_RESOLUTION_POLICY,
             current_candidates,
             inventory: Some(item.into()),
             collection_id: item.collection_id,
@@ -908,7 +908,7 @@ impl CollectionService {
                         .metadata_before
                         .clone()
                         .unwrap_or_else(|| MetadataAuthorityRecord {
-                            resolution_policy: 4,
+                            resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                             current_candidates: Some(vec![]),
                             inventory: Some((&entry.after).into()),
                             collection_id: entry.after.collection_id,

@@ -2243,7 +2243,7 @@ impl CollectionService {
                 let active =
                     current_metadata_candidates(&authority, &candidates, current.as_deref())?;
                 let record = MetadataAuthorityRecord {
-                    resolution_policy: 4,
+                    resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
                     item_id: item.id,
@@ -2400,7 +2400,7 @@ impl CollectionService {
                     &self.metadata_language(actor.user_id)?,
                 )?;
                 let record = MetadataAuthorityRecord {
-                    resolution_policy: 4,
+                    resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,
                     item_id,
@@ -2581,7 +2581,7 @@ impl CollectionService {
             .validate_metadata_authority(owner, &authority)
             .map_err(Error::from)?;
         let record = MetadataAuthorityRecord {
-            resolution_policy: 4,
+            resolution_policy: crate::METADATA_RESOLUTION_POLICY,
             inventory: Some(item.into()),
             collection_id: item.collection_id,
             item_id: item.id,
@@ -2920,7 +2920,7 @@ impl CollectionService {
         let published = self.processing.publish_metadata_for_job(
             claim,
             MetadataAuthorityRecord {
-                resolution_policy: 4,
+                resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                 inventory: Some((&item).into()),
                 collection_id: item.collection_id,
                 item_id: item.id,
@@ -3451,7 +3451,7 @@ pub(crate) fn resolve_metadata_fields(
         authority,
         candidates,
         preferred_language,
-        4,
+        crate::METADATA_RESOLUTION_POLICY,
     )
 }
 
@@ -3599,6 +3599,7 @@ pub(crate) fn resolve_metadata_fields_with_policy(
             .or_else(|| candidate.and_then(|value| value.artwork))
             .or_else(|| {
                 candidate
+                    .filter(|_| resolution_policy >= 5)
                     .and_then(|value| same_album_artwork(value, candidates, preferred_language))
             }),
         candidate: candidate.map(|value| value.identity.clone()),
@@ -4254,7 +4255,7 @@ impl CollectionService {
         self.validate_listening_track_edits(&item, &authority, &[])?;
         let active = current_metadata_candidates(&authority, &candidates, current.as_deref())?;
         let record = MetadataAuthorityRecord {
-            resolution_policy: 4,
+            resolution_policy: crate::METADATA_RESOLUTION_POLICY,
             inventory: Some((&item).into()),
             collection_id: item.collection_id,
             item_id: item.id,

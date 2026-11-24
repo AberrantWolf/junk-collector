@@ -626,6 +626,12 @@ fn legacy_metadata_policy() -> u32 {
     1
 }
 
+/// The decision algorithm new metadata records use. A change to how displays
+/// are resolved needs a new version: records keep the one they were saved
+/// with, and startup checks each display against its own version.
+/// 5: a match without a cover may use another release of the same album's.
+pub const METADATA_RESOLUTION_POLICY: u32 = 5;
+
 impl MetadataAuthorityRecord {
     /// Check the materialized projection against its frozen inventory inputs and
     /// the candidate history available at this revision, including during reindex.
@@ -677,7 +683,7 @@ impl MetadataAuthorityRecord {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.resolution_policy, 1..=4) {
+        if !matches!(self.resolution_policy, 1..=METADATA_RESOLUTION_POLICY) {
             return Err(collector_core::Error::Unavailable(
                 "unknown metadata resolution policy".into(),
             ));

@@ -27912,6 +27912,79 @@ fn equivalent_metadata_versions_consolidate_without_losing_selected_sources_or_a
 }
 
 #[test]
+fn records_saved_before_same_album_covers_still_pass_the_rebuild_check() {
+    // beta.35 saved version-4 displays without borrowed covers. Rebuilding the
+    // catalog checks each display against its own version, so a later cover
+    // rule must not make those records fail and stop startup.
+    let (_root, store, actor, service, collection) = setup();
+    let entry = save_inventory(&service, &actor, item(collection.id), Revision(0)).unwrap();
+    let release = |id: &str, artwork: Option<AssetId>| MetadataCandidateObservation {
+        identity: MetadataCandidateIdentity {
+            provider: ModuleId(collector_modules::music::MUSICBRAINZ_PROVIDER_ID.into()),
+            provider_record_id: id.into(),
+            provider_record_version: Some("one".into()),
+        },
+        title: MetadataText {
+            value: "Album".into(),
+            language: None,
+        },
+        subtitle: None,
+        artwork,
+        complete_identity: true,
+        strength: MatchStrength::Identifier,
+        provider_priority: 20,
+        observation: RawJson::from_value(serde_json::json!({
+            "release_id": id, "title": "Album", "disambiguation": null, "language": "eng",
+            "script": null, "artist_credit": "Artist", "artist_ids": [],
+            "release_group_id": "33333333-3333-3333-3333-333333333333",
+            "disc_ids": [], "media": []
+        })),
+    };
+    let chosen = release("11111111-1111-1111-1111-111111111111", None);
+    let other = release(
+        "22222222-2222-2222-2222-222222222222",
+        Some(AssetId(uuid::Uuid::from_u128(0x4444))),
+    );
+    let authority = MetadataAuthority {
+        automatic_candidate: Some(chosen.identity.clone()),
+        ..Default::default()
+    };
+    let candidates = vec![chosen.clone(), other.clone()];
+    let mut display =
+        collector_app::resolve_metadata_display(&entry, &authority, &candidates, "en").unwrap();
+    assert_eq!(
+        display.artwork, other.artwork,
+        "new records borrow the cover"
+    );
+    display.artwork = None;
+    store
+        .publish_metadata_authority(
+            TransactionId::new(),
+            MetadataAuthorityRecord {
+                resolution_policy: 4,
+                inventory: Some((&entry).into()),
+                collection_id: collection.id,
+                item_id: entry.id,
+                revision: Revision(1),
+                authority,
+                current_candidates: Some(vec![chosen.identity.clone(), other.identity.clone()]),
+                display: Some(display),
+                updated_at: chrono::Utc::now(),
+                observations: vec![MetadataRefreshObservation {
+                    id: ObservationId::new(),
+                    outcome: MetadataRefreshOutcome::Candidates,
+                    candidates,
+                    raw_observation: RawJson::from_value(serde_json::json!({"fixture":"beta.35"})),
+                    observed_at: chrono::Utc::now(),
+                }],
+            },
+            None,
+        )
+        .unwrap();
+    store.reindex().unwrap();
+}
+
+#[test]
 fn music_metadata_maintenance_recovers_all_pages_of_legacy_duplicate_choices() {
     let (_root, store, actor, service, collection) = setup();
     let (items, release) = automatic_group_sources(&store, &actor, &service, collection.id, &[5]);
@@ -27969,7 +28042,10 @@ fn music_metadata_maintenance_recovers_all_pages_of_legacy_duplicate_choices() {
             .metadata_authority(collection.id, id)
             .unwrap()
             .unwrap();
-        assert_eq!(record.resolution_policy, 4);
+        assert_eq!(
+            record.resolution_policy,
+            collector_app::METADATA_RESOLUTION_POLICY
+        );
         assert_eq!(record.current_candidates.unwrap().len(), 1);
         assert_eq!(
             store.metadata_candidates(collection.id, id).unwrap().len(),

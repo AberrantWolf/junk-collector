@@ -1015,7 +1015,7 @@ impl CollectionService {
                     &intent.import_id.to_string(),
                 )),
                 MetadataAuthorityRecord {
-                    resolution_policy: 4,
+                    resolution_policy: crate::METADATA_RESOLUTION_POLICY,
                     current_candidates: Some(vec![]),
                     inventory: Some((&item).into()),
                     collection_id: item.collection_id,

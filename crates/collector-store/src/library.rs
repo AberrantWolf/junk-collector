@@ -485,7 +485,7 @@ mod tests {
             .publish_metadata_authority(
                 TransactionId::new(),
                 MetadataAuthorityRecord {
-                    resolution_policy: 4,
+                    resolution_policy: collector_app::METADATA_RESOLUTION_POLICY,
                     current_candidates: Some(
                         candidates.iter().map(|c| c.identity.clone()).collect(),
                     ),
