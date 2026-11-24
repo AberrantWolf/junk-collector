@@ -3615,6 +3615,7 @@ export interface components {
             name: string;
         };
         CreateIntake: {
+            analysis?: components["schemas"]["IngestAnalysisPolicy"];
             audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
             automatic_metadata?: boolean;
             collection_id: components["schemas"]["CollectionId"];
@@ -4252,6 +4253,8 @@ export interface components {
         IntakeSession: {
             /** Format: int32 */
             admitted: number;
+            /** @description Save originals only skips analysis, lookups and audio preparation. */
+            analysis?: components["schemas"]["IngestAnalysisPolicy"];
             audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
             automatic_metadata: boolean;
             collection_id: components["schemas"]["CollectionId"];
@@ -5372,6 +5375,8 @@ export interface components {
             items: {
                 /** Format: int32 */
                 admitted: number;
+                /** @description Save originals only skips analysis, lookups and audio preparation. */
+                analysis?: components["schemas"]["IngestAnalysisPolicy"];
                 audio_preparation?: components["schemas"]["ImportAudioPreparation"] | null;
                 automatic_metadata: boolean;
                 collection_id: components["schemas"]["CollectionId"];
@@ -9922,6 +9927,7 @@ export interface operations {
                 collection_id?: components["schemas"]["CollectionId"];
                 /** @description active, attention or added */
                 status?: string;
+                intake_id?: components["schemas"]["JobId"];
                 cursor?: string;
                 limit?: number;
             };

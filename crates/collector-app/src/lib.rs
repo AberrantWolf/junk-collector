@@ -612,6 +612,15 @@ pub enum IngestListStatus {
     Added,
 }
 
+/// Filters for listing guided imports. Each is optional.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IngestListFilter {
+    pub collection: Option<CollectionId>,
+    pub status: Option<IngestListStatus>,
+    /// Only packages from this batch import.
+    pub intake: Option<JobId>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -969,8 +978,7 @@ pub trait ProvisionalImportPort: Send + Sync {
     fn guided_import_records(
         &self,
         user: UserId,
-        collection: Option<CollectionId>,
-        status: Option<IngestListStatus>,
+        filter: &IngestListFilter,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<ImportRecord>>;

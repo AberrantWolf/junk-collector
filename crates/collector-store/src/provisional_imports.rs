@@ -1088,12 +1088,13 @@ impl ProvisionalImportPort for Store {
     fn guided_import_records(
         &self,
         user: UserId,
-        collection: Option<CollectionId>,
-        status: Option<collector_app::IngestListStatus>,
+        filter: &collector_app::IngestListFilter,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<ImportRecord>> {
         use collector_app::IngestListStatus as Status;
+        let collection = filter.collection;
+        let status = filter.status;
         if !(1..=100).contains(&limit) {
             return Err(Error::Invalid("Import page limit must be 1..=100".into()));
         }
@@ -1103,6 +1104,9 @@ impl ProvisionalImportPort for Store {
         );
         if collection.is_some() {
             sql.push_str(" AND collection_id=?");
+        }
+        if filter.intake.is_some() {
+            sql.push_str(" AND EXISTS(SELECT 1 FROM private.intake_members m WHERE m.import_id=imports.id AND m.intake_id=?)");
         }
         // These read only private import and Job rows, never payloads.
         let failed = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR imports.phase='awaiting_review' OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed'))";
@@ -1129,6 +1133,9 @@ impl ProvisionalImportPort for Store {
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(user.to_string())];
         if let Some(collection) = collection {
             values.push(Box::new(collection.to_string()));
+        }
+        if let Some(intake) = filter.intake {
+            values.push(Box::new(intake.to_string()));
         }
         if let Some(cursor) = cursor {
             values.push(Box::new(cursor.to_string()));

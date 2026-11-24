@@ -3955,11 +3955,12 @@ async fn start_ingest(
 struct IngestPageQuery {
     collection_id: Option<CollectionId>,
     status: Option<collector_app::IngestListStatus>,
+    intake_id: Option<JobId>,
     cursor: Option<String>,
     limit: Option<u16>,
 }
 
-#[utoipa::path(get, path = "/api/v1/ingests", params(("collection_id" = Option<CollectionId>, Query), ("status" = Option<String>, Query, description = "active, attention or added"), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<IngestSummary>), (status = 403), (status = 422)))]
+#[utoipa::path(get, path = "/api/v1/ingests", params(("collection_id" = Option<CollectionId>, Query), ("status" = Option<String>, Query, description = "active, attention or added"), ("intake_id" = Option<JobId>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<IngestSummary>), (status = 403), (status = 422)))]
 async fn list_ingests(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3975,8 +3976,11 @@ async fn list_ingests(
         blocking(move || {
             state.service.ingest_page(
                 &actor,
-                query.collection_id,
-                query.status,
+                collector_app::IngestListFilter {
+                    collection: query.collection_id,
+                    status: query.status,
+                    intake: query.intake_id,
+                },
                 cursor,
                 query.limit.unwrap_or(50),
             )

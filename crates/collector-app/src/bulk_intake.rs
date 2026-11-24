@@ -69,6 +69,9 @@ pub struct IntakeSession {
     pub preserved: u32,
     pub needs_attention: u32,
     pub automatic_metadata: bool,
+    /// Save originals only skips analysis, lookups and audio preparation.
+    #[serde(default)]
+    pub analysis: IngestAnalysisPolicy,
     pub prepare_music: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_preparation: Option<ImportAudioPreparation>,
@@ -85,6 +88,8 @@ pub struct CreateIntake {
     pub expected_files: u32,
     #[serde(default = "automatic_metadata_default")]
     pub automatic_metadata: bool,
+    #[serde(default)]
+    pub analysis: IngestAnalysisPolicy,
     #[serde(default)]
     pub prepare_music: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -414,6 +419,7 @@ impl CollectionService {
                     preserved: 0,
                     needs_attention: 0,
                     automatic_metadata: command.automatic_metadata,
+                    analysis: command.analysis,
                     prepare_music: command.prepare_music,
                     audio_preparation: command.audio_preparation,
                     opus_import,
@@ -698,17 +704,22 @@ impl CollectionService {
                         packages: vec![package],
                         opus_import: None,
                     },
-                    analysis: IngestAnalysisPolicy::Automatic,
-                    enrichment: if intake.session.automatic_metadata {
+                    analysis: intake.session.analysis,
+                    enrichment: if intake.session.automatic_metadata
+                        && intake.session.analysis == IngestAnalysisPolicy::Automatic
+                    {
                         IngestEnrichmentPolicy::Automatic
                     } else {
                         IngestEnrichmentPolicy::None
                     },
                     prepare_music: intake.session.prepare_music
+                        && intake.session.analysis == IngestAnalysisPolicy::Automatic
                         && member.plan.preparation_available,
-                    audio_preparation: if intake.session.prepare_music
-                        && member.plan.preparation_available
+                    audio_preparation: if intake.session.analysis
+                        == IngestAnalysisPolicy::PreserveOnly
                     {
+                        Some(ImportAudioPreparation::None)
+                    } else if intake.session.prepare_music && member.plan.preparation_available {
                         None
                     } else {
                         Some(match intake.session.audio_preparation {

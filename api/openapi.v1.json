@@ -3959,6 +3959,14 @@
             }
           },
           {
+            "name": "intake_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobId"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -12524,6 +12532,9 @@
           "expected_files"
         ],
         "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/IngestAnalysisPolicy"
+          },
           "audio_preparation": {
             "oneOf": [
               {
@@ -15215,6 +15226,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "analysis": {
+            "$ref": "#/components/schemas/IngestAnalysisPolicy",
+            "description": "Save originals only skips analysis, lookups and audio preparation."
           },
           "audio_preparation": {
             "oneOf": [
@@ -19915,6 +19930,10 @@
                   "type": "integer",
                   "format": "int32",
                   "minimum": 0
+                },
+                "analysis": {
+                  "$ref": "#/components/schemas/IngestAnalysisPolicy",
+                  "description": "Save originals only skips analysis, lookups and audio preparation."
                 },
                 "audio_preparation": {
                   "oneOf": [

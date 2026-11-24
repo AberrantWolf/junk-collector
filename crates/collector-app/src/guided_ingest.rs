@@ -2266,18 +2266,16 @@ impl CollectionService {
     pub fn ingest_page(
         &self,
         actor: &Principal,
-        collection: Option<CollectionId>,
-        status: Option<crate::IngestListStatus>,
+        filter: crate::IngestListFilter,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<IngestSummary>> {
-        if let Some(collection) = collection {
+        if let Some(collection) = filter.collection {
             self.authorize(actor, collection, Action::Curate)?;
         }
         let page = self.provisional_imports.guided_import_records(
             actor.user_id,
-            collection,
-            status,
+            &filter,
             cursor,
             limit,
         )?;

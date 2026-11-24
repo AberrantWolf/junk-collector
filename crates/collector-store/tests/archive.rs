@@ -8754,7 +8754,16 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
     // cleanly added or still running.
     let listed = |status| {
         service
-            .ingest_page(&actor, Some(collection.id), Some(status), None, 50)
+            .ingest_page(
+                &actor,
+                collector_app::IngestListFilter {
+                    collection: Some(collection.id),
+                    status: Some(status),
+                    intake: None,
+                },
+                None,
+                50,
+            )
             .unwrap()
             .items
             .iter()
@@ -19091,6 +19100,7 @@ fn grouped_disc_publication_case(
                 expected_packages: 2,
                 expected_files: 2,
                 automatic_metadata: false,
+                analysis: Default::default(),
                 prepare_music: false,
                 audio_preparation: None,
                 reviewed_opus_import: None,
@@ -19323,6 +19333,7 @@ fn intake_group_rejects_mixed_automatic_and_manual_title_authority_before_admiss
                 expected_packages: 2,
                 expected_files: 2,
                 automatic_metadata: true,
+                analysis: Default::default(),
                 prepare_music: false,
                 audio_preparation: None,
                 reviewed_opus_import: None,
@@ -19409,6 +19420,7 @@ fn saved_intakes_page_by_creation_time_with_a_stable_tie_breaker() {
                     preserved: 0,
                     needs_attention: 0,
                     automatic_metadata: true,
+                    analysis: Default::default(),
                     prepare_music: false,
                     audio_preparation: None,
                     opus_import: None,
@@ -19478,6 +19490,7 @@ fn bulk_intake_is_paged_durable_and_preconfirmed_groups_share_one_album() {
                 expected_packages: 70,
                 expected_files: 70,
                 automatic_metadata: false,
+                analysis: Default::default(),
                 prepare_music: false,
                 audio_preparation: None,
                 reviewed_opus_import: None,
@@ -19950,6 +19963,7 @@ fn interrupted_intake_manifest_cannot_start_a_partial_batch() {
                 expected_packages: 2,
                 expected_files: 2,
                 automatic_metadata: false,
+                analysis: Default::default(),
                 prepare_music: false,
                 audio_preparation: None,
                 reviewed_opus_import: None,
@@ -20388,6 +20402,7 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
                 expected_packages: 2,
                 expected_files: 2,
                 automatic_metadata: false,
+                analysis: Default::default(),
                 prepare_music: false,
                 audio_preparation: None,
                 reviewed_opus_import: None,
