@@ -637,7 +637,7 @@ impl CollectionService {
         // album are tried next, and the cover is linked to the release it came
         // from, never relabelled as the chosen one.
         let item = self.resolution_item(claim, frozen)?;
-        let releases = crate::metadata::artwork_releases(
+        let mut releases = crate::metadata::artwork_releases(
             &candidate,
             &self
                 .processing
@@ -651,6 +651,13 @@ impl CollectionService {
             .metadata_artwork_selection(claim, None)?
             .map(|query| query.parse::<CoverArtArchiveQuery>())
             .transpose()?;
+        // The candidates may have changed since the cover was chosen; its
+        // release is still tried rather than ending without a cover.
+        if let Some(CoverArtArchiveQuery::Image { release_id, .. }) = &retained
+            && !releases.contains(release_id)
+        {
+            releases.push(release_id.clone());
+        }
         for (index, release) in releases.iter().enumerate() {
             if let Some(CoverArtArchiveQuery::Image { release_id, .. }) = &retained
                 && release_id != release

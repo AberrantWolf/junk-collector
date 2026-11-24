@@ -301,11 +301,21 @@ impl Store {
                 | Error::ArchiveCheckOverdue)
         ) {
             let journals = publication::PublicationJournalStore::new(&self.archive);
-            if journals
-                .phase(transaction_id)?
-                .is_some_and(|phase| phase < publication::PublicationPhase::RevisionCommitted)
+            let cleanup = journals.phase(transaction_id).and_then(|phase| {
+                if phase
+                    .is_some_and(|phase| phase < publication::PublicationPhase::RevisionCommitted)
+                {
+                    journals.abort(transaction_id)?;
+                }
+                Ok(())
+            });
+            // A slow archive check is retried later; a cleanup that the same
+            // slow archive also failed must not turn that into a job failure.
+            // The journal stays for startup recovery, as before.
+            if let Err(error) = cleanup
+                && !matches!(result, Err(Error::ArchiveCheckOverdue))
             {
-                journals.abort(transaction_id)?;
+                return Err(error);
             }
         }
         result
