@@ -4713,6 +4713,14 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "problems",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

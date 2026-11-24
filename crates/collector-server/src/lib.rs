@@ -3845,12 +3845,20 @@ async fn append_intake(
         .await?,
     ))
 }
-#[utoipa::path(get,path="/api/v1/intakes/{id}/members",params(("id"=JobId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query)),responses((status=200,body=Page<collector_app::IntakeMemberView>),(status=403)))]
+#[derive(Deserialize)]
+struct IntakeMemberQuery {
+    cursor: Option<String>,
+    limit: Option<u16>,
+    /// Only members that were refused or whose import needs the curator.
+    #[serde(default)]
+    problems: bool,
+}
+#[utoipa::path(get,path="/api/v1/intakes/{id}/members",params(("id"=JobId,Path),("cursor"=Option<String>,Query),("limit"=Option<u16>,Query),("problems"=Option<bool>,Query)),responses((status=200,body=Page<collector_app::IntakeMemberView>),(status=403)))]
 async fn intake_members(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<JobId>,
-    Query(query): Query<IntakePageQuery>,
+    Query(query): Query<IntakeMemberQuery>,
 ) -> ApiResult<Json<Page<collector_app::IntakeMemberView>>> {
     let actor = principal(&state, &headers).await?;
     let after = query
@@ -3860,9 +3868,13 @@ async fn intake_members(
         .map_err(|_| Error::Invalid("invalid member cursor".into()))?;
     Ok(Json(
         blocking(move || {
-            state
-                .service
-                .intake_members(&actor, id, after, query.limit.unwrap_or(32))
+            state.service.intake_member_page(
+                &actor,
+                id,
+                after,
+                query.limit.unwrap_or(32),
+                query.problems,
+            )
         })
         .await?,
     ))

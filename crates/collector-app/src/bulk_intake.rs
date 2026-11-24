@@ -229,6 +229,14 @@ pub trait BulkIntakePort: Send + Sync {
     ) -> Result<Page<IntakePackageRecord>>;
     /// Frozen packages sharing this child's reviewed destination, including
     /// members not yet admitted on later pages. Separate destinations return self.
+    /// Members that were refused or whose import stopped and needs the curator.
+    fn intake_problem_members(
+        &self,
+        user: UserId,
+        id: JobId,
+        after: Option<u32>,
+        limit: u16,
+    ) -> Result<Page<IntakePackageRecord>>;
     fn intake_destination_members(
         &self,
         user: UserId,
@@ -622,10 +630,38 @@ impl CollectionService {
         after: Option<u32>,
         limit: u16,
     ) -> Result<Page<IntakeMemberView>> {
+        self.intake_member_views(actor, id, after, limit, false)
+    }
+
+    /// With `problems`, only the members that need the curator, so the batch
+    /// view can list them first whatever page they fall on.
+    pub fn intake_member_page(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        after: Option<u32>,
+        limit: u16,
+        problems: bool,
+    ) -> Result<Page<IntakeMemberView>> {
+        self.intake_member_views(actor, id, after, limit, problems)
+    }
+
+    fn intake_member_views(
+        &self,
+        actor: &Principal,
+        id: JobId,
+        after: Option<u32>,
+        limit: u16,
+        problems: bool,
+    ) -> Result<Page<IntakeMemberView>> {
         self.intake(actor, id)?;
-        let page = self
-            .intake_port
-            .intake_members(actor.user_id, id, after, limit, false)?;
+        let page = if problems {
+            self.intake_port
+                .intake_problem_members(actor.user_id, id, after, limit)?
+        } else {
+            self.intake_port
+                .intake_members(actor.user_id, id, after, limit, false)?
+        };
         let items = page
             .items
             .into_iter()

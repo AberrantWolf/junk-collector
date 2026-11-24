@@ -20474,6 +20474,18 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
     assert!(members.items[0].error.is_some());
     assert!(members.items[0].import_id.is_none());
     assert!(members.items[1].import_id.is_some());
+    // The problems view lists only the refused member.
+    let problems = service
+        .intake_member_page(&actor, session.id, None, 32, true)
+        .unwrap();
+    assert_eq!(
+        problems
+            .items
+            .iter()
+            .map(|m| m.position)
+            .collect::<Vec<_>>(),
+        vec![0]
+    );
     let receipt = command();
     let repair = RepairIntakeDestination {
         expected_revision: session.revision,
@@ -20485,6 +20497,14 @@ fn intake_destination_conflict_is_revisitable_and_does_not_stop_other_packages()
     service.run_next_job("repaired-destination").unwrap();
     assert_eq!(service.intake(&actor, session.id).unwrap().admitted, 2);
     assert_eq!(service.intake(&actor, session.id).unwrap().rejected, 0);
+    assert!(
+        service
+            .intake_member_page(&actor, session.id, None, 32, true)
+            .unwrap()
+            .items
+            .iter()
+            .all(|m| m.error.is_none())
+    );
     assert_eq!(
         service
             .repair_intake_destination(&actor, session.id, 0, repair, &receipt)
@@ -32301,4 +32321,129 @@ fn walkdir_find(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf
         }
     }
     None
+}
+
+/// Import one browser package into a games collection and identify it.
+fn import_identified_game(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+    name: &str,
+    files: &[(&str, &[u8])],
+) -> ItemId {
+    let plan = service
+        .plan_ingest(
+            actor,
+            PlanIngestCommand {
+                collection_id: collection,
+                packages: vec![IngestPackageSelection {
+                    album_tracks: None,
+                    purchase: None,
+                    anchor_file_index: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: name.into(),
+                    },
+                    files: files
+                        .iter()
+                        .map(|(file, bytes)| UploadFile {
+                            visibility: Default::default(),
+                            name: (*file).into(),
+                            bytes: ByteLength(bytes.len() as u64),
+                            sha256: None,
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: false,
+                audio_preparation: None,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import_id = accepted.imports[0].import_id;
+    for (index, (_, bytes)) in files.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(actor, import_id, index, 0, bytes)
+            .unwrap();
+    }
+    provider_drain(service);
+    let detail = service.ingest_detail(actor, import_id).unwrap();
+    assert_eq!(detail.import.phase, ImportPhase::Published, "{detail:?}");
+    let item = detail.summary.target_item_id.unwrap();
+    service
+        .identify_game_entry(actor, item, &command())
+        .unwrap();
+    provider_drain(service);
+    item
+}
+
+#[test]
+fn review_lists_blocked_entries_first_across_pages() {
+    let (_root, _store, actor, service, _collection) = setup();
+    let collection = service
+        .create_collection(
+            &test_authentication(&actor),
+            CreateCollectionCommand {
+                name: "Review order games".into(),
+                module: ModuleId("org.junk.games".into()),
+            },
+            &command(),
+        )
+        .unwrap();
+    // Alphabetically first, but only needs a decision (unrecognized format).
+    let decision = import_identified_game(
+        &service,
+        &actor,
+        collection.id,
+        "Alpha.rom",
+        &[("Alpha.rom", b"owned fixture")],
+    );
+    // Two CUE sheets: the main file must be chosen before anything else.
+    let cue = b"FILE \"disc.bin\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n";
+    let blocked = import_identified_game(
+        &service,
+        &actor,
+        collection.id,
+        "Zeta",
+        &[
+            ("Zeta/one.cue", cue),
+            ("Zeta/two.cue", cue),
+            ("Zeta/disc.bin", &[0_u8; 2352]),
+        ],
+    );
+    let query = |cursor: Option<String>| collector_app::MetadataCareQuery {
+        collection_id: Some(collection.id),
+        needs_attention: true,
+        search: String::new(),
+        reason: None,
+        level: None,
+        cursor,
+        limit: Some(1),
+    };
+    let first = service.metadata_care(&actor, query(None)).unwrap();
+    assert_eq!(first.items[0].id, blocked, "{:?}", first.items[0].reasons);
+    assert!(
+        first.items[0]
+            .reasons
+            .contains(&collector_app::MetadataReviewReason::NeedsMainFile)
+    );
+    let second = service
+        .metadata_care(&actor, query(first.next_cursor.clone()))
+        .unwrap();
+    assert_eq!(second.items[0].id, decision);
+    assert!(second.next_cursor.is_none());
 }

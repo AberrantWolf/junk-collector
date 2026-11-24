@@ -10687,6 +10687,7 @@ export interface operations {
             query?: {
                 cursor?: string;
                 limit?: number;
+                problems?: boolean;
             };
             header?: never;
             path: {
