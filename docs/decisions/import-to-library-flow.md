@@ -113,12 +113,12 @@ list feels endless.
 | Level | Reasons | Shown by default |
 | --- | --- | --- |
 | **Blocked** | Package refused, upload stopped, an import step failed | Yes, at the top |
-| **Identity** | No match, several possible matches, lookup failed, unconfirmed names, your name differs from the match, possible album group | Yes |
+| **Decision** | No match, several possible matches, lookup failed, unconfirmed names, your name differs from the match, possible album group, a saved format you asked for only partly worked | Yes |
 | **Polish** | No artwork, incomplete online info | Only when you pick the "Polish" filter |
 
 ### "This is fine" is a real choice that's remembered
 
-Each Identity or Polish reason can be accepted as it is: "no cover exists",
+Each Decision or Polish reason can be accepted as it is: "no cover exists",
 "my name is correct", "these are separate albums". This is saved as one of your
 manual choices, so a later automatic refresh keeps it, like manual names do now.
 It is tied to what the entry looked like when you accepted it: if a new disc is
@@ -134,7 +134,7 @@ Organize
   Add to library        (the one importer)
   Review            12  (count of entries that need you)
   Purchase inbox
-  Prepare audio
+  Saved formats         (music collections only; replaces Prepare audio)
   Activity              (technical job history only)
 ```
 
@@ -155,7 +155,7 @@ From: [All imports ▾]   Reason: [Any ▾]   Search: [            ]
  ▢ [art] Live at the Hall (disc 2)    ⚠ Upload stopped     [Resume upload]
  ▢ [art] mystery_dump_07           ✕ Couldn't import · originals saved
                                      Not a recognised disc image [Open]
-■ IDENTITY
+■ NEEDS A DECISION
  ▢ [art] Harbour Lights                ? 3 possible releases [Choose]
  ▢ [art] Untitled (track01.flac…)  ? No match found      [Search]
  ▢ [art] Night Songs / Night Songs… ⧉ Possibly one album  [Compare]
@@ -272,9 +272,9 @@ another round of "album" wording leaking into it.
 | Reason | Level | Notes |
 | --- | --- | --- |
 | No main file, or several CUE sheets | Blocked | Needs a choice before analysis can run |
-| Several catalog entries match | Identity | Choose one; show region and version side by side |
-| Only a weaker match (CRC only, or partial) | Identity | Choose it or accept as is; never applied automatically |
-| Format recognised but not supported (CHD, UNIF, compressed) | Identity | Originals are saved; name it manually and accept |
+| Several catalog entries match | Decision | Choose one; show region and version side by side |
+| Only a weaker match (CRC only, or partial) | Decision | Choose it or accept as is; never applied automatically |
+| Format recognised but not supported (CHD, UNIF, compressed) | Decision | Originals are saved; name it manually and accept |
 | No catalog loaded for this system | Setup | Not a problem with the game. See below |
 | No cover | Polish | Upload a scan or photo of your copy |
 
@@ -334,6 +334,95 @@ while it has something to show.
 - An emulator would be a full-screen view rather than a dock. The dock would
   only show "Running: *game*" with a way back to it.
 
+## Saved audio formats
+
+### Not having FLAC or Opus is no longer a problem
+
+The server now converts WAV, CD audio and the other supported originals to FLAC
+or Opus while it streams, without saving anything. So every supported original
+already plays. But several screens still treat "no saved copy in format X" as
+something wrong:
+
+- **Prepare audio** marks an album as needing attention whenever any track
+  lacks the chosen format. Its sidebar description is "Make albums ready to
+  play", which suggests albums can't play without it.
+- The Library's **Album playback needs attention** filter and badge say "Some
+  tracks aren't prepared for playback yet." That check counts only tracks with a
+  saved file. CD tracks with no saved copy are recorded as "not prepared", so CD
+  albums that play fine through live conversion probably still get flagged.
+  (Worth confirming on a real CD album.)
+
+**Proposed:** a missing saved format is a neutral fact used for filtering
+("albums without FLAC"), never a problem. Only two situations are problems:
+
+1. **The original can't be played at all** (an unsupported or damaged file).
+   This is a Blocked or Decision reason in Review.
+2. **A saved format you asked for only partly worked.** For example, FLAC was
+   made for 10 of 12 tracks.
+
+### When a requested format only partly worked
+
+The reason appears in Review and on the album, saying in plain words what
+happened, which tracks, why, and that playback still works:
+
+> **FLAC made for 10 of 12 tracks.** Tracks 4 and 9 are 32-bit float WAV. FLAC
+> can't store float audio without changing it, so a saved FLAC copy isn't
+> possible for them. They still play, converted live.
+
+Then it offers the ways out that make sense for that cause:
+
+| Choice | What happens |
+| --- | --- |
+| **Keep what worked** | The 10 FLAC tracks stay; the other 2 play from the original WAV. The reason is marked accepted and doesn't come back. |
+| **Remove this FLAC copy** | Deletes the partial FLAC files for this album. Originals are untouched; everything plays from the originals. |
+| **Use another format for those tracks** | For example, a saved Opus copy for the float WAV tracks. |
+| **Retry** | Only offered when the cause can change: encoder missing, disk full, server restarted mid-run. Never offered for float WAV → FLAC, which will always fail. |
+
+The same check should run **before** starting. When you ask for FLAC, the
+confirmation already says "2 tracks are float WAV and will be skipped." Today
+single tracks are checked like this, but a partial result after a batch or an
+import still shows up only as "needs attention".
+
+### A "Saved formats" view
+
+This replaces **Prepare audio** in the sidebar (still shown only for music
+collections). It lists albums that have extra saved formats besides their
+originals, and lets you add, finish, swap or remove them.
+
+```
+Saved formats                                  Collection: Shelf & stereo ▾
+FLAC 120 GB · 340 albums     Opus 128 18 GB · 410 albums     Opus 96 2 GB · 31
+Show: [All ▾]  Format: [Any ▾]  Made by: [Anyone ▾]  Search: [          ]
+
+ ▢ [art] Harbour Lights     FLAC ✓ 512 MB    Opus 128 ✓ 84 MB        [⋯]
+ ▢ [art] Night Songs        FLAC ⚠ 10/12 · 2 float WAV               [Fix]
+ ▢ [art] Live at the Hall   Opus 96 ✓ 40 MB  Opus 128 ✓ 61 MB        [⋯]
+
+ 3 selected · 637 MB    [Remove a format ▾]  [Add a format ▾]
+```
+
+- **What's listed:** formats saved in the archive because someone asked for
+  them: one album, a batch, or the "Opus on import" setting, with a filter for
+  each. Not listed: copies that clients keep for offline listening (Trash Amp,
+  the browser), and the temporary output of live conversion. Those are caches
+  their owners manage.
+- **Filters:** format; status (complete, partial, failed); who made it (you, a
+  batch, the import setting); albums with more than one Opus bitrate.
+- **Totals** per format at the top, so you can see what is using space.
+- **Actions**, for one album or a selection:
+  - **Remove a format**: deletes that saved format, after a confirmation that
+    shows the size and says the originals stay and it can be made again later.
+  - **Finish**: make the missing tracks, if the cause allows it.
+  - **Replace**: for example, swap Opus 96 for Opus 128. The old one is removed
+    only after the new one is complete.
+  - **Add a format**: the old Prepare audio action, now one action among others.
+  - **Keep only one Opus bitrate**: clean up albums that have several.
+- **What removal can never do:** touch originals. The server refuses to remove
+  an original from this view.
+- **Things that point at a removed format** must keep working. Play queues and
+  playlists that named the FLAC copy fall back to the original. Trash Amp is
+  told the copy is gone and switches to the original or another saved format.
+
 ## What the server would need
 
 None of this changes how files or originals are stored.
@@ -359,6 +448,20 @@ None of this changes how files or originals are stored.
    collection types that say so.
 6. **Setup gaps are grouped**: a count of entries waiting on the same missing
    catalog, per system, so Review can show one notice.
+7. **Why each saved format exists.** Saved formats record their role, format,
+   source and settings, but not who asked for them or why. Record that (one
+   album, a batch, the import setting) for new copies. Existing copies show
+   "made before this was recorded"; the server must not guess.
+8. **A per-album summary of saved formats**: format, size, tracks made vs
+   tracks wanted, and the per-track reason when a track can't be made. Read from
+   the catalog, without reading audio files.
+9. **A "remove saved format" command.** It writes a new revision of the
+   album without that format and refuses if asked to remove an original. Space
+   is freed by the existing cleanup. Play queues, playlists and Trash Amp offline
+   copies that named the removed format move to the original.
+10. **"Playable" means "the original or a saved copy can be played"**,
+   including live conversion. Album playback readiness and the preparation
+   list stop treating a missing saved format as a problem.
 
 ## Suggested order
 
@@ -375,12 +478,19 @@ None of this changes how files or originals are stored.
    something plays, and stop showing music filters in game collections. This
    doesn't depend on the other steps and can happen any time.
 7. Game detail layout, and game reasons from the module.
+8. Stop flagging missing saved formats (readiness and Prepare audio). This is
+   small and can go first.
+9. The **Saved formats** view, with partial-result choices and format removal.
 
 ## Open questions for the owner
 
 - Should **No artwork** count as Polish (hidden by default) for every type, or
-  as Identity for music only? For games it should not be a problem at all
+  as Decision for music only? For games it should not be a problem at all
   unless you opt in.
+- Do copies made by the **Opus on import** setting count as "asked for" (listed
+  in Saved formats, with a filter), or as automatic and left out?
+- When a format is removed, should its files go at once (after the
+  confirmation), or wait in a recoverable state for a while first?
 - Should multi-disc games be grouped like multi-disc albums, using the same
   grouping step with game wording?
 - Should an accepted reason be stored with the collection (it travels with an
