@@ -8750,6 +8750,19 @@ fn guided_optional_provider_failure_preserves_master_and_manual_title_authority(
     assert!(detail.steps.iter().any(|step| step.step == "workflow"
         && step.message.is_some()
         && step.state == collector_app::IngestStepState::Failed));
+    // A published import with a failed step is listed for attention, not as
+    // cleanly added or still running.
+    let listed = |status| {
+        service
+            .ingest_page(&actor, Some(collection.id), Some(status), None, 50)
+            .unwrap()
+            .items
+            .iter()
+            .any(|summary| summary.import_id == id)
+    };
+    assert!(listed(collector_app::IngestListStatus::Attention));
+    assert!(!listed(collector_app::IngestListStatus::Added));
+    assert!(!listed(collector_app::IngestListStatus::Active));
     let presented = service.item_presented(&actor, target).unwrap();
     assert_eq!(presented.title, "My manual album title");
     assert_eq!(
@@ -14382,6 +14395,7 @@ fn preparation_readiness_requires_recorded_coverage_for_a_partially_prepared_cd(
                     collection_id: Some(collection.id),
                     search: String::new(),
                     reason: None,
+                    level: None,
                     needs_attention: true,
                     cursor: None,
                     limit: Some(1),
@@ -18686,6 +18700,7 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
         collection_id: Some(collection.id),
         search: String::new(),
         reason: None,
+        level: None,
         needs_attention: true,
         cursor: None,
         limit: Some(1),
@@ -18698,6 +18713,39 @@ fn durable_metadata_resolution_preserves_language_receipts_manual_fields_and_reo
             .len(),
         1
     );
+    // List rows and the detail panel share one reason policy, and the Review
+    // counts agree with the rows the list returns.
+    let row = service.metadata_care(&actor, query.clone()).unwrap().items[0].clone();
+    let mut listed = row.reasons.clone();
+    listed.sort_by_key(|reason| reason.key());
+    let mut detailed = service
+        .metadata_review(&actor, row.id)
+        .unwrap()
+        .review_reasons;
+    detailed.sort_by_key(|reason| reason.key());
+    assert_eq!(listed, detailed);
+    let all = service
+        .metadata_care(
+            &actor,
+            collector_app::MetadataCareQuery {
+                limit: Some(200),
+                ..query.clone()
+            },
+        )
+        .unwrap()
+        .items
+        .len() as u64;
+    assert_eq!(
+        service
+            .review_counts(&actor, Some(collection.id))
+            .unwrap()
+            .needs_you,
+        all
+    );
+    assert!(matches!(
+        service.review_counts(&stranger, Some(collection.id)),
+        Err(Error::Forbidden)
+    ));
     assert!(matches!(
         service.metadata_care(&stranger, query),
         Err(Error::Forbidden)
@@ -19615,6 +19663,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
         collection_id: Some(collection.id),
         search: "Bulk".into(),
         reason: None,
+        level: None,
         needs_attention: true,
         cursor: None,
         limit: Some(1),
@@ -19739,6 +19788,7 @@ fn bulk_preparation_freezes_filter_membership_reuses_outputs_and_retries_only_fa
                     collection_id: Some(collection.id),
                     search: "Bulk healthy".into(),
                     reason: None,
+                    level: None,
                     needs_attention: true,
                     cursor: None,
                     limit: None
@@ -21410,10 +21460,12 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
             .unwrap()
             .album_playback
             .unwrap();
-        assert_eq!(
-            matches!(readiness, collector_app::AlbumPlaybackReadiness::Ready),
-            prepared_tracks == 2
-        );
+        // While the originals exist, unprepared tracks play through live
+        // conversion, so the album is ready however many tracks were saved.
+        assert!(matches!(
+            readiness,
+            collector_app::AlbumPlaybackReadiness::Ready
+        ));
         let page = service
             .browse_presented(
                 &actor,
@@ -21424,10 +21476,7 @@ fn collection_lists_block_partial_disc_expansion_when_originals_are_missing() {
                 },
             )
             .unwrap();
-        assert_eq!(
-            page.items.iter().any(|entry| entry.id == album.id),
-            prepared_tracks != 2
-        );
+        assert!(!page.items.iter().any(|entry| entry.id == album.id));
         let pcm: Vec<u8> = (0..5 * 588)
             .flat_map(|i| [i as u8, 0x80, 0xff, 0x7f])
             .collect();
@@ -28537,6 +28586,7 @@ fn automatic_and_one_click_cd_checks_confirm_only_matching_audio_and_recover() {
                         collection_id: Some(collection.id),
                         search: String::new(),
                         reason: None,
+                        level: None,
                         needs_attention: false,
                         cursor: None,
                         limit: Some(200),

@@ -90,6 +90,9 @@ pub trait LibraryCarePort: Send + Sync {
         language: &str,
     ) -> Result<Page<MetadataCareRow>>;
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>>;
+    /// Entry counts per review level across collections the user curates.
+    fn review_counts(&self, user: UserId, collection: Option<CollectionId>)
+    -> Result<ReviewCounts>;
     fn album_group_proposals(
         &self,
         user: UserId,
@@ -157,6 +160,9 @@ pub struct MetadataCareQuery {
     #[serde(default)]
     pub search: String,
     pub reason: Option<MetadataReviewReason>,
+    /// Only Polish or Setup reasons; other levels use `needs_attention`.
+    #[serde(default)]
+    pub level: Option<crate::ReviewLevel>,
     #[serde(default = "needs_attention_default")]
     pub needs_attention: bool,
     pub cursor: Option<String>,
@@ -313,6 +319,31 @@ impl CollectionService {
     }
 }
 
+/// Counts for the Review tabs and the sidebar badge. Read from catalog rows;
+/// no payload is opened.
+#[derive(Clone, Debug, Default, Serialize, utoipa::ToSchema)]
+pub struct ReviewCounts {
+    /// Entries with a Blocked or Decision reason (including failed lookups and
+    /// possible album groups).
+    pub needs_you: u64,
+    pub polish: u64,
+    /// Entries waiting on setup, such as a game catalog for their system.
+    pub setup: u64,
+}
+
+impl CollectionService {
+    pub fn review_counts(
+        &self,
+        actor: &Principal,
+        collection: Option<CollectionId>,
+    ) -> Result<ReviewCounts> {
+        if let Some(collection) = collection {
+            self.authorize(actor, collection, Action::Curate)?;
+        }
+        self.care.review_counts(actor.user_id, collection)
+    }
+}
+
 /// Only fields consumed by Metadata rows; full graphs stay behind detail reads.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct MetadataCareEntry {
@@ -326,6 +357,8 @@ pub struct MetadataCareEntry {
     pub metadata_provisional: bool,
     pub metadata_tentative: bool,
     pub matching: Option<MetadataMatchingStatus>,
+    /// Open review reasons, so a row can say what is wrong without a detail read.
+    pub reasons: Vec<crate::MetadataReviewReason>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct MetadataMatchingStatus {

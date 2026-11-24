@@ -76,7 +76,7 @@ fn stable_file_id(scope: PackageScope, index: usize) -> PackageFileId {
     )))
 }
 
-fn scope_columns(scope: PackageScope) -> (&'static str, String) {
+pub(crate) fn scope_columns(scope: PackageScope) -> (&'static str, String) {
     match scope {
         PackageScope::Import(id) => ("import", id.to_string()),
         PackageScope::Representation(id) => ("representation", id.to_string()),

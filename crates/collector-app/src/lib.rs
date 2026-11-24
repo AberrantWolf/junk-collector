@@ -596,7 +596,21 @@ pub enum IngestAnalysisPolicy {
     PreserveOnly,
 }
 
+pub use collector_modules::games::GameIdentification;
 pub use collector_modules::{IngestAnchorChoice, IngestBlocker, IngestBlockerKind};
+
+/// Which imports a listing returns. Imports are listed oldest first, except
+/// `Added`, which lists the newest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestListStatus {
+    /// Still saving originals, identifying or preparing audio.
+    Active,
+    /// A failed step, a failed lookup or preparation, or waiting for a choice.
+    Attention,
+    /// Finished cleanly and attached to an entry.
+    Added,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IngestPlanPackage {
@@ -956,6 +970,7 @@ pub trait ProvisionalImportPort: Send + Sync {
         &self,
         user: UserId,
         collection: Option<CollectionId>,
+        status: Option<IngestListStatus>,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<ImportRecord>>;

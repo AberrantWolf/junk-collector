@@ -3950,6 +3950,15 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "description": "active, attention or added",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -7834,6 +7843,15 @@
             }
           },
           {
+            "name": "level",
+            "in": "query",
+            "description": "polish or setup",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "needs_attention",
             "in": "query",
             "required": false,
@@ -8899,6 +8917,39 @@
         }
       }
     },
+    "/api/v1/review/counts": {
+      "get": {
+        "operationId": "review_counts",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCounts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    },
     "/api/v1/security/native-devices": {
       "get": {
         "operationId": "native_devices",
@@ -9646,6 +9697,23 @@
             }
           }
         }
+      },
+      "AcceptedReview": {
+        "type": "object",
+        "description": "One accepted review reason. `reason` is the module-owned reason name and\n`state` a digest of what the entry looked like when it was accepted.",
+        "required": [
+          "reason",
+          "state"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "AccountChange": {
         "type": "object",
@@ -16583,6 +16651,13 @@
           "retained_unknown_fields"
         ],
         "properties": {
+          "accepted_reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AcceptedReview"
+            },
+            "description": "Review reasons the curator accepted as they are (\"no cover exists\",\n\"my name is correct\"). Each is tied to the entry's state when accepted,\nso a later change brings the reason back."
+          },
           "artwork_choice": {
             "oneOf": [
               {
@@ -16833,6 +16908,47 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Accept a review reason as it is for the state the curator saw.",
+            "required": [
+              "reason",
+              "state",
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "accept_review"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/MetadataReviewReason"
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "change"
+            ],
+            "properties": {
+              "change": {
+                "type": "string",
+                "enum": [
+                  "clear_accepted_review"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/MetadataReviewReason"
+              }
+            }
           }
         ]
       },
@@ -17037,7 +17153,8 @@
           "module",
           "summary_state",
           "metadata_provisional",
-          "metadata_tentative"
+          "metadata_tentative",
+          "reasons"
         ],
         "properties": {
           "artwork": {
@@ -17075,6 +17192,13 @@
           "module": {
             "$ref": "#/components/schemas/ModuleId"
           },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataReviewReason"
+            },
+            "description": "Open review reasons, so a row can say what is wrong without a detail read."
+          },
           "subtitle": {
             "type": "string"
           },
@@ -17103,6 +17227,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "level": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLevel",
+                "description": "Only Polish or Setup reasons; other levels use `needs_attention`."
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "limit": {
@@ -17486,7 +17621,12 @@
           "no_match",
           "lookup_failed",
           "manual_conflict",
-          "grouping_proposal"
+          "grouping_proposal",
+          "catalog_ambiguity",
+          "weak_catalog_match",
+          "unsupported_format",
+          "needs_main_file",
+          "no_catalog"
         ]
       },
       "MetadataReviewView": {
@@ -17500,6 +17640,8 @@
           "display",
           "candidates",
           "review_reasons",
+          "accepted_reasons",
+          "review_state",
           "preferred_language",
           "providers",
           "lookup_choices",
@@ -17509,6 +17651,13 @@
           "recognized_systems"
         ],
         "properties": {
+          "accepted_reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataReviewReason"
+            },
+            "description": "Reasons accepted as they are for the entry's current state."
+          },
           "authority": {
             "$ref": "#/components/schemas/MetadataAuthority"
           },
@@ -17585,6 +17734,10 @@
             "items": {
               "$ref": "#/components/schemas/MetadataReviewReason"
             }
+          },
+          "review_state": {
+            "type": "string",
+            "description": "Digest the client sends back when accepting a reason, so acceptance\napplies only to the state the curator saw."
           },
           "revision": {
             "$ref": "#/components/schemas/Revision"
@@ -20006,7 +20159,8 @@
                 "module",
                 "summary_state",
                 "metadata_provisional",
-                "metadata_tentative"
+                "metadata_tentative",
+                "reasons"
               ],
               "properties": {
                 "artwork": {
@@ -20043,6 +20197,13 @@
                 },
                 "module": {
                   "$ref": "#/components/schemas/ModuleId"
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataReviewReason"
+                  },
+                  "description": "Open review reasons, so a row can say what is wrong without a detail read."
                 },
                 "subtitle": {
                   "type": "string"
@@ -22606,6 +22767,34 @@
           "unknown"
         ]
       },
+      "ReviewCounts": {
+        "type": "object",
+        "description": "Counts for the Review tabs and the sidebar badge. Read from catalog rows;\nno payload is opened.",
+        "required": [
+          "needs_you",
+          "polish",
+          "setup"
+        ],
+        "properties": {
+          "needs_you": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries with a Blocked or Decision reason (including failed lookups and\npossible album groups).",
+            "minimum": 0
+          },
+          "polish": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "setup": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries waiting on setup, such as a game catalog for their system.",
+            "minimum": 0
+          }
+        }
+      },
       "ReviewImportCommand": {
         "type": "object",
         "required": [
@@ -22637,6 +22826,16 @@
           }
         },
         "additionalProperties": false
+      },
+      "ReviewLevel": {
+        "type": "string",
+        "description": "How urgent a review reason is. The Review queue shows Blocked and Decision\nby default, Polish on request, and Setup as one grouped notice.",
+        "enum": [
+          "blocked",
+          "decision",
+          "polish",
+          "setup"
+        ]
       },
       "ReviewPurchase": {
         "type": "object",

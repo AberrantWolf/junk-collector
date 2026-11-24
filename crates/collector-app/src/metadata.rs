@@ -71,6 +71,14 @@ pub enum MetadataAuthorityChange {
         artist: Option<String>,
         digital_source: Option<String>,
     },
+    /// Accept a review reason as it is for the state the curator saw.
+    AcceptReview {
+        reason: MetadataReviewReason,
+        state: String,
+    },
+    ClearAcceptedReview {
+        reason: MetadataReviewReason,
+    },
 }
 
 // Internally tagged commands buffer their contents before variant decoding. Decode
@@ -272,6 +280,244 @@ pub enum MetadataReviewReason {
     LookupFailed,
     ManualConflict,
     GroupingProposal,
+    /// Several game catalog entries match these files completely.
+    CatalogAmbiguity,
+    /// Only a partial or CRC-only catalog match; never applied automatically.
+    WeakCatalogMatch,
+    /// The format is recognised but not supported (or not recognised at all).
+    /// Originals are saved; the entry can be named by hand.
+    UnsupportedFormat,
+    /// Several CUE sheets: a main file must be chosen before analysis.
+    NeedsMainFile,
+    /// No game catalog is loaded for this system yet. Not a problem with the
+    /// entry itself; it is checked again when a catalog is activated.
+    NoCatalog,
+}
+
+/// How urgent a review reason is. The Review queue shows Blocked and Decision
+/// by default, Polish on request, and Setup as one grouped notice.
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewLevel {
+    Blocked,
+    Decision,
+    Polish,
+    Setup,
+}
+
+impl MetadataReviewReason {
+    pub const ALL: [Self; 13] = [
+        Self::MissingName,
+        Self::MissingArtwork,
+        Self::AlbumAmbiguity,
+        Self::IncompleteProviderInformation,
+        Self::NoMatch,
+        Self::LookupFailed,
+        Self::ManualConflict,
+        Self::GroupingProposal,
+        Self::CatalogAmbiguity,
+        Self::WeakCatalogMatch,
+        Self::UnsupportedFormat,
+        Self::NeedsMainFile,
+        Self::NoCatalog,
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::MissingName => "missing_name",
+            Self::MissingArtwork => "missing_artwork",
+            Self::AlbumAmbiguity => "album_ambiguity",
+            Self::IncompleteProviderInformation => "incomplete_provider_information",
+            Self::NoMatch => "no_match",
+            Self::LookupFailed => "lookup_failed",
+            Self::ManualConflict => "manual_conflict",
+            Self::GroupingProposal => "grouping_proposal",
+            Self::CatalogAmbiguity => "catalog_ambiguity",
+            Self::WeakCatalogMatch => "weak_catalog_match",
+            Self::UnsupportedFormat => "unsupported_format",
+            Self::NeedsMainFile => "needs_main_file",
+            Self::NoCatalog => "no_catalog",
+        }
+    }
+    pub fn level(self) -> ReviewLevel {
+        match self {
+            Self::NeedsMainFile => ReviewLevel::Blocked,
+            Self::MissingArtwork | Self::IncompleteProviderInformation => ReviewLevel::Polish,
+            Self::NoCatalog => ReviewLevel::Setup,
+            _ => ReviewLevel::Decision,
+        }
+    }
+    /// Reasons the curator can accept as they are. A failed lookup is retried
+    /// and a missing main file must be chosen; setup gaps resolve themselves.
+    pub fn acceptable(self) -> bool {
+        !matches!(
+            self,
+            Self::LookupFailed | Self::NeedsMainFile | Self::NoCatalog | Self::GroupingProposal
+        )
+    }
+}
+
+/// Everything the shared reason policy needs about one entry. Both the detail
+/// review and the catalog's list rows use it, so they cannot disagree.
+pub struct MetadataHealthInput<'a> {
+    pub module: &'a str,
+    pub authority: &'a MetadataAuthority,
+    pub display: &'a ResolvedMetadataDisplay,
+    pub current_candidates: &'a [MetadataCandidateObservation],
+    pub language: &'a str,
+    pub has_cover: bool,
+    pub last_lookup_no_match: bool,
+    pub identification: Option<&'a collector_modules::games::GameIdentification>,
+}
+
+pub struct MetadataHealth {
+    /// Reasons still open after accepted reviews are removed.
+    pub reasons: Vec<MetadataReviewReason>,
+    /// Reasons the curator accepted for the current state.
+    pub accepted: Vec<MetadataReviewReason>,
+    /// Digest of the evidence the reasons were derived from. Accepting a reason
+    /// records it; new evidence changes it and the reason returns.
+    pub state: String,
+}
+
+/// Review reasons from the latest game identification of the entry's files.
+pub fn game_identification_reasons(
+    identification: &collector_modules::games::GameIdentification,
+    user_picked: bool,
+) -> Vec<MetadataReviewReason> {
+    use collector_modules::games::{CatalogMatchResult, GameDetectionStatus};
+    match identification.status {
+        GameDetectionStatus::Ambiguous => vec![MetadataReviewReason::NeedsMainFile],
+        GameDetectionStatus::Unsupported
+        | GameDetectionStatus::Malformed
+        | GameDetectionStatus::Unrecognized => vec![MetadataReviewReason::UnsupportedFormat],
+        GameDetectionStatus::Recognized if identification.catalogs.is_empty() => {
+            vec![MetadataReviewReason::NoCatalog]
+        }
+        GameDetectionStatus::Recognized if user_picked => vec![],
+        GameDetectionStatus::Recognized => {
+            if identification.catalogs.iter().any(|c| {
+                matches!(
+                    c.catalog,
+                    CatalogMatchResult::AmbiguousCompleteMatches { .. }
+                )
+            }) {
+                vec![MetadataReviewReason::CatalogAmbiguity]
+            } else if identification
+                .catalogs
+                .iter()
+                .any(|c| matches!(c.catalog, CatalogMatchResult::PartialIdentification { .. }))
+                || identification
+                    .limitations
+                    .iter()
+                    .any(|l| l.starts_with("CRC32-only"))
+            {
+                vec![MetadataReviewReason::WeakCatalogMatch]
+            } else {
+                vec![]
+            }
+        }
+    }
+}
+
+pub fn metadata_health(input: MetadataHealthInput<'_>) -> Result<MetadataHealth> {
+    let (ranked, uncertain) =
+        automatic_metadata_candidate(input.current_candidates, input.language);
+    let proposed = input
+        .display
+        .candidate
+        .as_ref()
+        .and_then(|id| input.current_candidates.iter().find(|c| &c.identity == id))
+        .or(ranked);
+    let user_picked = input.authority.selected_candidate.is_some()
+        && input.display.candidate == input.authority.selected_candidate;
+    let mut reasons = input
+        .identification
+        .map(|value| game_identification_reasons(value, user_picked))
+        .unwrap_or_default();
+    let game_reason = !reasons.is_empty();
+    let named_by_hand = input
+        .authority
+        .field_overrides
+        .iter()
+        .any(|field| field.field == MetadataField::Title);
+    // A game reason already says why there is no name.
+    if input.display.candidate.is_none() && !named_by_hand && !game_reason {
+        reasons.push(MetadataReviewReason::MissingName);
+    }
+    // Only collection types with an automatic artwork source treat a missing
+    // cover as something to fix. Games have none.
+    if input.module == "org.junk.music" && input.display.artwork.is_none() && !input.has_cover {
+        reasons.push(MetadataReviewReason::MissingArtwork);
+    }
+    if let Some(reason) = uncertain.filter(|_| !user_picked) {
+        reasons.push(reason);
+    }
+    if input.last_lookup_no_match && !game_reason {
+        reasons.push(MetadataReviewReason::NoMatch);
+    }
+    if let Some(proposed) = proposed
+        && input
+            .authority
+            .field_overrides
+            .iter()
+            .any(|field| match field.field {
+                MetadataField::Title => field.value != proposed.title.value,
+                MetadataField::Subtitle => {
+                    Some(field.value.as_str())
+                        != proposed.subtitle.as_ref().map(|v| v.value.as_str())
+                }
+            })
+    {
+        reasons.push(MetadataReviewReason::ManualConflict);
+    }
+    let mut evidence = input
+        .current_candidates
+        .iter()
+        .map(|candidate| &candidate.identity)
+        .collect::<Vec<_>>();
+    evidence.sort_by_key(|identity| serde_json::to_string(identity).unwrap_or_default());
+    let identification = input.identification.map(|value| {
+        (
+            value.status.clone(),
+            value
+                .catalogs
+                .iter()
+                .map(|c| serde_json::to_string(&c.catalog).unwrap_or_default())
+                .collect::<Vec<_>>(),
+        )
+    });
+    let state = hex::encode(
+        &Sha256::digest(
+            serde_json::to_vec(&(
+                "review-state-v1",
+                &evidence,
+                &input.display.candidate,
+                input.last_lookup_no_match,
+                &identification,
+            ))
+            .map_err(|error| Error::Storage(error.to_string()))?,
+        )[..16],
+    );
+    let mut accepted = Vec::new();
+    reasons.retain(|reason| {
+        let taken = reason.acceptable()
+            && input
+                .authority
+                .accepted_reviews
+                .iter()
+                .any(|entry| entry.reason == reason.key() && entry.state == state);
+        if taken {
+            accepted.push(*reason);
+        }
+        !taken
+    });
+    Ok(MetadataHealth {
+        reasons,
+        accepted,
+        state,
+    })
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -284,6 +530,11 @@ pub struct MetadataReviewView {
     pub display: ResolvedMetadataDisplay,
     pub candidates: Vec<MetadataCandidateView>,
     pub review_reasons: Vec<MetadataReviewReason>,
+    /// Reasons accepted as they are for the entry's current state.
+    pub accepted_reasons: Vec<MetadataReviewReason>,
+    /// Digest the client sends back when accepting a reason, so acceptance
+    /// applies only to the state the curator saw.
+    pub review_state: String,
     pub proposed_candidate: Option<MetadataCandidateIdentity>,
     pub preferred_language: LanguageTag,
     pub providers: Vec<MetadataProviderView>,
@@ -1359,7 +1610,7 @@ impl CollectionService {
             .filter(|candidate| current.contains(&candidate.identity))
             .cloned()
             .collect::<Vec<_>>();
-        let (ranked, uncertain) =
+        let (ranked, _) =
             automatic_metadata_candidate(&current_candidates, preferred_language.as_str());
         let proposed = view
             .display
@@ -1371,17 +1622,7 @@ impl CollectionService {
                     .find(|candidate| &candidate.identity == id)
             })
             .or(ranked);
-        let mut review_reasons = Vec::new();
-        if view.display.candidate.is_none() && view.authority.field_overrides.is_empty() {
-            review_reasons.push(MetadataReviewReason::MissingName);
-        }
-        if view.display.artwork.is_none() {
-            review_reasons.push(MetadataReviewReason::MissingArtwork);
-        }
-        if let Some(reason) = unresolved_match_reason(&view.authority, &view.display, uncertain) {
-            review_reasons.push(reason);
-        }
-        if self
+        let last_lookup_no_match = self
             .processing
             .metadata_authority(item.collection_id, item.id)?
             .is_some_and(|record| {
@@ -1389,33 +1630,12 @@ impl CollectionService {
                     .observations
                     .last()
                     .is_some_and(|value| value.outcome == MetadataRefreshOutcome::NoMatch)
-            })
-        {
-            review_reasons.push(MetadataReviewReason::NoMatch);
-        }
-        if self
+            });
+        let lookup_failed = self
             .care
             .metadata_resolution_jobs(actor.user_id, item.id)?
             .first()
-            .is_some_and(|record| record.job.state == JobState::Failed)
-        {
-            review_reasons.push(MetadataReviewReason::LookupFailed);
-        }
-        if let Some(proposed) = proposed
-            && view
-                .authority
-                .field_overrides
-                .iter()
-                .any(|field| match field.field {
-                    MetadataField::Title => field.value != proposed.title.value,
-                    MetadataField::Subtitle => {
-                        Some(field.value.as_str())
-                            != proposed.subtitle.as_ref().map(|value| value.value.as_str())
-                    }
-                })
-        {
-            review_reasons.push(MetadataReviewReason::ManualConflict);
-        }
+            .is_some_and(|record| record.job.state == JobState::Failed);
         let proposed_candidate = proposed.map(|value| value.identity.clone());
         let candidates = view
             .candidates
@@ -1483,6 +1703,23 @@ impl CollectionService {
                 }
             }
         }
+        let health = metadata_health(MetadataHealthInput {
+            module: &item.domain.module.0,
+            authority: &view.authority,
+            display: &view.display,
+            current_candidates: &current_candidates,
+            language: preferred_language.as_str(),
+            has_cover: item
+                .assets
+                .iter()
+                .any(|asset| asset.kind == AssetKind::Cover),
+            last_lookup_no_match,
+            identification: identification.as_ref(),
+        })?;
+        let mut review_reasons = health.reasons;
+        if lookup_failed {
+            review_reasons.push(MetadataReviewReason::LookupFailed);
+        }
         if read_revision != self.metadata_read_revision(actor, item_id)?.revision {
             return Err(Error::CatalogBusy);
         }
@@ -1527,6 +1764,8 @@ impl CollectionService {
             digital_source_eligible: digital_source_eligible(&item),
             permissions: MetadataPermissions { can_update },
             review_reasons,
+            accepted_reasons: health.accepted,
+            review_state: health.state,
             proposed_candidate,
             preferred_language,
         })
@@ -3362,6 +3601,28 @@ fn apply_authority_change(
                 )?);
             }
         }
+        MetadataAuthorityChange::AcceptReview { reason, state } => {
+            if !reason.acceptable() {
+                return Err(Error::Invalid(
+                    "this review reason must be fixed, not accepted".into(),
+                ));
+            }
+            if state.len() != 32 || !state.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(Error::Invalid("review state is invalid".into()));
+            }
+            authority
+                .accepted_reviews
+                .retain(|entry| entry.reason != reason.key());
+            authority.accepted_reviews.push(AcceptedReview {
+                reason: reason.key().into(),
+                state: state.clone(),
+            });
+        }
+        MetadataAuthorityChange::ClearAcceptedReview { reason } => {
+            authority
+                .accepted_reviews
+                .retain(|entry| entry.reason != reason.key());
+        }
     }
     authority.field_overrides.sort_by_key(|value| value.field);
     authority.validate()
@@ -3987,5 +4248,142 @@ mod candidate_detail_tests {
         candidate.observation =
             RawJson::from_value(serde_json::json!({"private_raw_marker": "secret"}));
         assert!(safe_candidate_details(&candidate).is_none());
+    }
+}
+
+#[cfg(test)]
+mod review_health_tests {
+    use super::*;
+    use collector_modules::games::{GameDetectionStatus, GameIdentification};
+
+    fn display(candidate: Option<MetadataCandidateIdentity>) -> ResolvedMetadataDisplay {
+        ResolvedMetadataDisplay {
+            domain_fields: Default::default(),
+            title: ResolvedMetadataText {
+                value: "Imported folder".into(),
+                language: None,
+                source: MetadataValueSource::Provisional,
+            },
+            subtitle: None,
+            artwork: None,
+            candidate,
+            resolution: MetadataResolutionKind::Automatic,
+        }
+    }
+
+    fn identification(status: GameDetectionStatus) -> GameIdentification {
+        GameIdentification {
+            analyses: vec![],
+            status,
+            inspections: vec![],
+            catalogs: vec![],
+            candidates: vec![],
+            limitations: vec![],
+        }
+    }
+
+    fn health(
+        module: &str,
+        authority: &MetadataAuthority,
+        identification: Option<&GameIdentification>,
+        no_match: bool,
+    ) -> MetadataHealth {
+        metadata_health(MetadataHealthInput {
+            module,
+            authority,
+            display: &display(None),
+            current_candidates: &[],
+            language: "en",
+            has_cover: false,
+            last_lookup_no_match: no_match,
+            identification,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_missing_cover_is_polish_for_music_and_not_a_problem_for_games() {
+        let authority = MetadataAuthority::default();
+        let music = health("org.junk.music", &authority, None, false);
+        assert!(
+            music
+                .reasons
+                .contains(&MetadataReviewReason::MissingArtwork)
+        );
+        assert_eq!(
+            MetadataReviewReason::MissingArtwork.level(),
+            ReviewLevel::Polish
+        );
+        let game = health("org.junk.games", &authority, None, false);
+        assert!(!game.reasons.contains(&MetadataReviewReason::MissingArtwork));
+    }
+
+    #[test]
+    fn game_identification_explains_a_missing_name() {
+        let authority = MetadataAuthority::default();
+        let waiting = identification(GameDetectionStatus::Recognized);
+        let game = health("org.junk.games", &authority, Some(&waiting), false);
+        assert_eq!(game.reasons, vec![MetadataReviewReason::NoCatalog]);
+        assert_eq!(MetadataReviewReason::NoCatalog.level(), ReviewLevel::Setup);
+        let unsupported = identification(GameDetectionStatus::Unsupported);
+        let game = health("org.junk.games", &authority, Some(&unsupported), false);
+        assert_eq!(game.reasons, vec![MetadataReviewReason::UnsupportedFormat]);
+        let cues = identification(GameDetectionStatus::Ambiguous);
+        let game = health("org.junk.games", &authority, Some(&cues), false);
+        assert_eq!(game.reasons, vec![MetadataReviewReason::NeedsMainFile]);
+        assert_eq!(
+            MetadataReviewReason::NeedsMainFile.level(),
+            ReviewLevel::Blocked
+        );
+    }
+
+    #[test]
+    fn an_accepted_reason_stays_quiet_until_the_evidence_changes() {
+        let mut authority = MetadataAuthority::default();
+        let before = health("org.junk.music", &authority, None, true);
+        assert!(before.reasons.contains(&MetadataReviewReason::NoMatch));
+        apply_authority_change(
+            &mut authority,
+            &MetadataAuthorityChange::AcceptReview {
+                reason: MetadataReviewReason::NoMatch,
+                state: before.state.clone(),
+            },
+            &[],
+        )
+        .unwrap();
+        let accepted = health("org.junk.music", &authority, None, true);
+        assert!(!accepted.reasons.contains(&MetadataReviewReason::NoMatch));
+        assert_eq!(accepted.accepted, vec![MetadataReviewReason::NoMatch]);
+        // A new lookup outcome changes the evidence, so the acceptance no
+        // longer applies; a later no-match brings the reason back.
+        let changed = health("org.junk.music", &authority, None, false);
+        assert_ne!(changed.state, before.state);
+        let mut stale = authority.clone();
+        stale.accepted_reviews[0].state = changed.state.clone();
+        let returned = health("org.junk.music", &stale, None, true);
+        assert!(returned.reasons.contains(&MetadataReviewReason::NoMatch));
+    }
+
+    #[test]
+    fn failures_and_setup_gaps_cannot_be_accepted() {
+        let mut authority = MetadataAuthority::default();
+        for reason in [
+            MetadataReviewReason::LookupFailed,
+            MetadataReviewReason::NeedsMainFile,
+            MetadataReviewReason::NoCatalog,
+        ] {
+            assert!(
+                apply_authority_change(
+                    &mut authority,
+                    &MetadataAuthorityChange::AcceptReview {
+                        reason,
+                        state: "0".repeat(32),
+                    },
+                    &[],
+                )
+                .is_err()
+            );
+        }
+        assert!(authority.accepted_reviews.is_empty());
     }
 }

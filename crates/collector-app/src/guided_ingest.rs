@@ -2267,6 +2267,7 @@ impl CollectionService {
         &self,
         actor: &Principal,
         collection: Option<CollectionId>,
+        status: Option<crate::IngestListStatus>,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<IngestSummary>> {
@@ -2276,6 +2277,7 @@ impl CollectionService {
         let page = self.provisional_imports.guided_import_records(
             actor.user_id,
             collection,
+            status,
             cursor,
             limit,
         )?;

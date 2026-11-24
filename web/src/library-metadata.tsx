@@ -4,16 +4,17 @@ import {presentationLabel} from './presentation-labels';
 import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 import MetadataReview from './metadata-review';
+import {reasonLabels} from './review-reasons';
 import BulkReview from './bulk-library-review';
 import AlbumGrouping,{GroupUndo} from './album-grouping';
 type Item=components['schemas']['PresentedItem'];
 type Row=components['schemas']['MetadataCareEntry'];
 type RowPage={items:Row[];next_cursor:string|null};
 const pageCache=new Map<string,RowPage[]>();
-function toRow(item:Item):Row{const art=item.assets.find(a=>a.id===item.primary_artwork);return {id:item.id,collection_id:item.collection_id,title:item.title,subtitle:item.subtitle,module:item.domain.module,artwork:art?{id:art.id,revision:art.revision,alt_text:art.alt_text}:null,summary_state:'ready',metadata_provisional:item.effective_metadata.title.source.source==='provisional',metadata_tentative:item.effective_metadata.resolution==='tentative',matching:null};}
+function toRow(item:Item):Row{const art=item.assets.find(a=>a.id===item.primary_artwork);return {id:item.id,collection_id:item.collection_id,title:item.title,subtitle:item.subtitle,module:item.domain.module,artwork:art?{id:art.id,revision:art.revision,alt_text:art.alt_text}:null,summary_state:'ready',metadata_provisional:item.effective_metadata.title.source.source==='provisional',metadata_tentative:item.effective_metadata.resolution==='tentative',matching:null,reasons:[]};}
 type Reason=components['schemas']['MetadataReviewReason'];
 export type Props={restore:BrowseRestore;navigationRevision:number;pages:number;onMore:()=>void;userId:string;collection:string;search:string;itemId:string;reason:string;attention:boolean;batchId:string;groupIds:string;onBatch:(id:string)=>void;onLibrary:(item:Item)=>void;onQuery:(change:{reason?:string;attention?:boolean;item?:string;group?:string},replace?:boolean)=>void;onChanged:(item:Item)=>void;onSessionExpired:()=>void};
-const reasons:Record<Reason,string>={missing_name:'Missing names',missing_artwork:'Missing artwork',album_ambiguity:'Ambiguous matches',incomplete_provider_information:'Incomplete online info',no_match:'No matches',lookup_failed:'Failed lookups',manual_conflict:'Manual conflicts',grouping_proposal:'Possible album groups'};
+const reasons=reasonLabels;
 function Cover({item}:{item:Item|Row}){const row='assets' in item?toRow(item):item;return row.artwork?<img loading="lazy" src={`/api/v1/collections/${row.collection_id}/assets/${row.artwork.id}/thumbnail?revision=${row.artwork.revision}`} alt={row.artwork.alt_text||`${row.title} cover`}/>:<span className="care-cover-empty" aria-label="No artwork">◇</span>;}
 
 export default function LibraryMetadata({restore,navigationRevision,pages,onMore,userId,collection,search,itemId,reason,attention,batchId,groupIds,onBatch,onLibrary,onQuery,onChanged,onSessionExpired}:Props){

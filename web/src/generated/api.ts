@@ -2692,6 +2692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/review/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["review_counts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/native-devices": {
         parameters: {
             query?: never;
@@ -2939,6 +2955,14 @@ export interface components {
         AcceptedIngest: {
             imports: components["schemas"]["IngestSummary"][];
             rejected: components["schemas"]["IngestRejectedPackage"][];
+        };
+        /**
+         * @description One accepted review reason. `reason` is the module-owned reason name and
+         *     `state` a digest of what the entry looked like when it was accepted.
+         */
+        AcceptedReview: {
+            reason: string;
+            state: string;
         };
         AccountChange: {
             administrator: boolean;
@@ -4579,6 +4603,12 @@ export interface components {
             types: string[];
         };
         MetadataAuthority: {
+            /**
+             * @description Review reasons the curator accepted as they are ("no cover exists",
+             *     "my name is correct"). Each is tied to the entry's state when accepted,
+             *     so a later change brings the reason back.
+             */
+            accepted_reviews?: components["schemas"]["AcceptedReview"][];
             artwork_choice?: components["schemas"]["AssetId"] | null;
             automatic_candidate?: components["schemas"]["MetadataCandidateIdentity"] | null;
             automatic_language?: components["schemas"]["LanguageTag"] | null;
@@ -4630,6 +4660,15 @@ export interface components {
             change: "set_album_overrides";
             digital_source?: string | null;
             title?: string | null;
+        } | {
+            /** @enum {string} */
+            change: "accept_review";
+            reason: components["schemas"]["MetadataReviewReason"];
+            state: string;
+        } | {
+            /** @enum {string} */
+            change: "clear_accepted_review";
+            reason: components["schemas"]["MetadataReviewReason"];
         };
         MetadataCandidate: {
             id: string;
@@ -4690,6 +4729,8 @@ export interface components {
             metadata_provisional: boolean;
             metadata_tentative: boolean;
             module: components["schemas"]["ModuleId"];
+            /** @description Open review reasons, so a row can say what is wrong without a detail read. */
+            reasons: components["schemas"]["MetadataReviewReason"][];
             subtitle: string;
             summary_state: components["schemas"]["LibrarySummaryState"];
             title: string;
@@ -4697,6 +4738,7 @@ export interface components {
         MetadataCareQuery: {
             collection_id?: components["schemas"]["CollectionId"] | null;
             cursor?: string | null;
+            level?: components["schemas"]["ReviewLevel"] | null;
             /** Format: int32 */
             limit?: number | null;
             needs_attention?: boolean;
@@ -4786,8 +4828,10 @@ export interface components {
             stage: components["schemas"]["MetadataResolutionStage"];
         };
         /** @enum {string} */
-        MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal";
+        MetadataReviewReason: "missing_name" | "missing_artwork" | "album_ambiguity" | "incomplete_provider_information" | "no_match" | "lookup_failed" | "manual_conflict" | "grouping_proposal" | "catalog_ambiguity" | "weak_catalog_match" | "unsupported_format" | "needs_main_file" | "no_catalog";
         MetadataReviewView: {
+            /** @description Reasons accepted as they are for the entry's current state. */
+            accepted_reasons: components["schemas"]["MetadataReviewReason"][];
             authority: components["schemas"]["MetadataAuthority"];
             candidates: components["schemas"]["MetadataCandidateView"][];
             catalog_sources: components["schemas"]["MetadataCatalogSourceView"][];
@@ -4803,6 +4847,11 @@ export interface components {
             read_revision: string;
             recognized_systems: components["schemas"]["StandardGameSystem"][];
             review_reasons: components["schemas"]["MetadataReviewReason"][];
+            /**
+             * @description Digest the client sends back when accepting a reason, so acceptance
+             *     applies only to the state the curator saw.
+             */
+            review_state: string;
             revision: components["schemas"]["Revision"];
             terms: components["schemas"]["MetadataTerms"];
         };
@@ -5389,6 +5438,8 @@ export interface components {
                 metadata_provisional: boolean;
                 metadata_tentative: boolean;
                 module: components["schemas"]["ModuleId"];
+                /** @description Open review reasons, so a row can say what is wrong without a detail read. */
+                reasons: components["schemas"]["MetadataReviewReason"][];
                 subtitle: string;
                 summary_state: components["schemas"]["LibrarySummaryState"];
                 title: string;
@@ -5961,6 +6012,25 @@ export interface components {
         };
         /** @enum {string} */
         ReturnedPossession: "present" | "elsewhere" | "unknown";
+        /**
+         * @description Counts for the Review tabs and the sidebar badge. Read from catalog rows;
+         *     no payload is opened.
+         */
+        ReviewCounts: {
+            /**
+             * Format: int64
+             * @description Entries with a Blocked or Decision reason (including failed lookups and
+             *     possible album groups).
+             */
+            needs_you: number;
+            /** Format: int64 */
+            polish: number;
+            /**
+             * Format: int64
+             * @description Entries waiting on setup, such as a game catalog for their system.
+             */
+            setup: number;
+        };
         ReviewImportCommand: {
             association: components["schemas"]["CaptureAssociation"];
             expected_item_revision?: components["schemas"]["Revision"] | null;
@@ -5968,6 +6038,12 @@ export interface components {
             expected_revision: number;
             identity: components["schemas"]["ImportIdentityDecision"];
         };
+        /**
+         * @description How urgent a review reason is. The Review queue shows Blocked and Decision
+         *     by default, Polish on request, and Setup as one grouped notice.
+         * @enum {string}
+         */
+        ReviewLevel: "blocked" | "decision" | "polish" | "setup";
         ReviewPurchase: {
             /** @description Set only when explicitly updating an existing order (including cancellations). */
             existing_order_id?: string | null;
@@ -9844,6 +9920,8 @@ export interface operations {
         parameters: {
             query?: {
                 collection_id?: components["schemas"]["CollectionId"];
+                /** @description active, attention or added */
+                status?: string;
                 cursor?: string;
                 limit?: number;
             };
@@ -13177,6 +13255,8 @@ export interface operations {
                 collection_id?: components["schemas"]["CollectionId"];
                 search?: string;
                 reason?: components["schemas"]["MetadataReviewReason"];
+                /** @description polish or setup */
+                level?: string;
                 needs_attention?: boolean;
                 cursor?: string;
                 limit?: number;
@@ -14279,6 +14359,42 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    review_counts: {
+        parameters: {
+            query?: {
+                collection_id?: components["schemas"]["CollectionId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewCounts"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

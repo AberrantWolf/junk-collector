@@ -1089,9 +1089,11 @@ impl ProvisionalImportPort for Store {
         &self,
         user: UserId,
         collection: Option<CollectionId>,
+        status: Option<collector_app::IngestListStatus>,
         cursor: Option<ImportId>,
         limit: u16,
     ) -> Result<Page<ImportRecord>> {
+        use collector_app::IngestListStatus as Status;
         if !(1..=100).contains(&limit) {
             return Err(Error::Invalid("Import page limit must be 1..=100".into()));
         }
@@ -1102,10 +1104,27 @@ impl ProvisionalImportPort for Store {
         if collection.is_some() {
             sql.push_str(" AND collection_id=?");
         }
-        if cursor.is_some() {
-            sql.push_str(" AND id>?");
+        // These read only private import and Job rows, never payloads.
+        let failed = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR imports.phase='awaiting_review' OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed'))";
+        match status {
+            Some(Status::Active) => sql.push_str(&format!(" AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id AND g.settled=0 AND g.cancelled=0 AND NOT {failed})")),
+            Some(Status::Attention) => sql.push_str(&format!(" AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id AND g.cancelled=0 AND {failed})")),
+            Some(Status::Added) => sql.push_str(&format!(" AND imports.phase='published' AND EXISTS(SELECT 1 FROM private.guided_ingest_intents g WHERE g.import_id=imports.id AND g.settled=1 AND g.cancelled=0 AND NOT {failed})")),
+            None => {}
         }
-        sql.push_str(" ORDER BY id LIMIT ?");
+        let newest_first = status == Some(Status::Added);
+        if cursor.is_some() {
+            sql.push_str(if newest_first {
+                " AND id<?"
+            } else {
+                " AND id>?"
+            });
+        }
+        sql.push_str(if newest_first {
+            " ORDER BY id DESC LIMIT ?"
+        } else {
+            " ORDER BY id LIMIT ?"
+        });
         let mut statement = db.prepare(&sql).map_err(storage)?;
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(user.to_string())];
         if let Some(collection) = collection {

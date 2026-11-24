@@ -837,6 +837,7 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
                 .layer(DefaultBodyLimit::max(ACOUSTID_SUBMISSION_BODY_LIMIT)),
         )
         .routes(routes!(metadata_care))
+        .routes(routes!(review_counts))
         .routes(routes!(preparation_care))
         .routes(routes!(preparation_revision))
         .routes(routes!(discover_bulk_intake).layer(DefaultBodyLimit::max(64 * 1024 * 1024)))
@@ -1942,7 +1943,24 @@ async fn undo_album_group(
     ))
 }
 
-#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::MetadataCareEntry>), (status = 401), (status = 403)))]
+#[derive(Deserialize)]
+struct ReviewCountsQuery {
+    collection_id: Option<CollectionId>,
+}
+
+#[utoipa::path(get, path = "/api/v1/review/counts", params(("collection_id" = Option<CollectionId>, Query)), responses((status = 200, body = collector_app::ReviewCounts), (status = 401), (status = 403)))]
+async fn review_counts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ReviewCountsQuery>,
+) -> ApiResult<Json<collector_app::ReviewCounts>> {
+    let actor = principal(&state, &headers).await?;
+    Ok(Json(
+        blocking(move || state.service.review_counts(&actor, query.collection_id)).await?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/library-care/metadata", params(("collection_id" = Option<CollectionId>, Query), ("search" = Option<String>, Query), ("reason" = Option<collector_app::MetadataReviewReason>, Query), ("level" = Option<String>, Query, description = "polish or setup"), ("needs_attention" = Option<bool>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<collector_app::MetadataCareEntry>), (status = 401), (status = 403)))]
 async fn metadata_care(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3515,6 +3533,7 @@ async fn preparation_care(
         search: query.search,
         needs_attention: query.needs_attention.unwrap_or(true),
         reason: None,
+        level: None,
         cursor: query.cursor,
         limit: query.limit,
     };
@@ -3935,11 +3954,12 @@ async fn start_ingest(
 #[derive(Deserialize)]
 struct IngestPageQuery {
     collection_id: Option<CollectionId>,
+    status: Option<collector_app::IngestListStatus>,
     cursor: Option<String>,
     limit: Option<u16>,
 }
 
-#[utoipa::path(get, path = "/api/v1/ingests", params(("collection_id" = Option<CollectionId>, Query), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<IngestSummary>), (status = 403), (status = 422)))]
+#[utoipa::path(get, path = "/api/v1/ingests", params(("collection_id" = Option<CollectionId>, Query), ("status" = Option<String>, Query, description = "active, attention or added"), ("cursor" = Option<String>, Query), ("limit" = Option<u16>, Query)), responses((status = 200, body = Page<IngestSummary>), (status = 403), (status = 422)))]
 async fn list_ingests(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3956,6 +3976,7 @@ async fn list_ingests(
             state.service.ingest_page(
                 &actor,
                 query.collection_id,
+                query.status,
                 cursor,
                 query.limit.unwrap_or(50),
             )

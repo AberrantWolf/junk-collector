@@ -202,9 +202,23 @@ pub struct MetadataAuthority {
     /// envelope; registry dispatch validates its owner and schema semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain_overrides: Option<ModuleData>,
+    /// Review reasons the curator accepted as they are ("no cover exists",
+    /// "my name is correct"). Each is tied to the entry's state when accepted,
+    /// so a later change brings the reason back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accepted_reviews: Vec<AcceptedReview>,
     /// Legacy/provider-specific authority keys remain exact and portable.
     #[schema(value_type = Object)]
     pub retained_unknown_fields: BTreeMap<String, RawJson>,
+}
+
+/// One accepted review reason. `reason` is the module-owned reason name and
+/// `state` a digest of what the entry looked like when it was accepted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AcceptedReview {
+    pub reason: String,
+    pub state: String,
 }
 
 impl<'de> Deserialize<'de> for MetadataAuthority {
@@ -225,6 +239,8 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
             artwork_choice: Option<AssetId>,
             #[serde(default)]
             domain_overrides: Option<ModuleData>,
+            #[serde(default)]
+            accepted_reviews: Vec<AcceptedReview>,
             retained_unknown_fields: BTreeMap<String, RawJson>,
         }
         #[derive(Deserialize)]
@@ -240,6 +256,7 @@ impl<'de> Deserialize<'de> for MetadataAuthority {
             preserved_field_overrides: wire.preserved_field_overrides,
             artwork_choice: wire.artwork_choice,
             domain_overrides: wire.domain_overrides,
+            accepted_reviews: wire.accepted_reviews,
             retained_unknown_fields: wire.retained_unknown_fields,
         };
         for raw in wire.field_overrides {
@@ -295,6 +312,21 @@ impl MetadataAuthority {
                     "domain metadata overrides are invalid or oversized".into(),
                 ));
             }
+        }
+        let mut accepted = BTreeSet::new();
+        if self.accepted_reviews.len() > 32
+            || self.accepted_reviews.iter().any(|entry| {
+                !accepted.insert(entry.reason.as_str())
+                    || entry.reason.is_empty()
+                    || entry.reason.len() > 64
+                    || entry.state.len() > 128
+                    || !entry
+                        .reason
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '_')
+            })
+        {
+            return Err(Error::Invalid("accepted review reasons are invalid".into()));
         }
         if self.retained_unknown_fields.len() > 128
             || self.retained_unknown_fields.iter().any(|(key, value)| {

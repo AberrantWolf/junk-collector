@@ -10,13 +10,14 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     // Superseded by the generation-fenced library cache.
     db.execute_batch("DROP TABLE IF EXISTS preparation_readiness")
         .map_err(storage)?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,missing_name INTEGER NOT NULL,missing_artwork INTEGER NOT NULL,album_ambiguity INTEGER NOT NULL,incomplete_provider_information INTEGER NOT NULL,no_match INTEGER NOT NULL,manual_conflict INTEGER NOT NULL,needs_attention INTEGER NOT NULL);
+    db.execute_batch("CREATE TABLE IF NOT EXISTS metadata_health(item_id TEXT PRIMARY KEY,collection_id TEXT NOT NULL,title_key TEXT NOT NULL,reasons TEXT NOT NULL,needs_attention INTEGER NOT NULL,polish INTEGER NOT NULL,setup INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS album_group_members(item_id TEXT NOT NULL,collection_id TEXT NOT NULL,album_id TEXT NOT NULL,PRIMARY KEY(item_id,album_id));
     CREATE INDEX IF NOT EXISTS album_group_matches ON album_group_members(collection_id,album_id,item_id);
     CREATE TABLE IF NOT EXISTS metadata_language_display(item_id TEXT NOT NULL,language TEXT NOT NULL,title TEXT NOT NULL,subtitle TEXT NOT NULL,title_key TEXT NOT NULL,PRIMARY KEY(item_id,language));
     CREATE INDEX IF NOT EXISTS metadata_language_order ON metadata_language_display(language,title_key,item_id);
     CREATE INDEX IF NOT EXISTS metadata_health_attention ON metadata_health(needs_attention,collection_id,title_key,item_id);
-    CREATE INDEX IF NOT EXISTS metadata_health_collection ON metadata_health(collection_id,title_key,item_id);").map_err(storage)?;
+    CREATE INDEX IF NOT EXISTS metadata_health_collection ON metadata_health(collection_id,title_key,item_id);
+    CREATE INDEX IF NOT EXISTS metadata_health_polish ON metadata_health(polish,collection_id,title_key,item_id);").map_err(storage)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS private.metadata_preferences(user_id TEXT PRIMARY KEY REFERENCES users(id),revision INTEGER NOT NULL,language TEXT NOT NULL);").map_err(storage)?;
     Ok(())
 }
@@ -34,6 +35,11 @@ const PREPARATION_ROWS: &str = "FROM items i
                 AND NOT EXISTS(SELECT 1 FROM captures cap JOIN private.library_dirty_captures d ON d.capture_id=cap.id WHERE cap.item_id=i.id)
             WHERE i.deleted=0 AND basic.listening=1 AND (:collection IS NULL OR i.collection_id=:collection)
             AND (:search='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(:search))>0)";
+
+/// The newest metadata lookup for the entry failed.
+const FAILED_LOOKUP: &str = "EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.kind='metadata_resolution' AND j.state='failed' AND NOT EXISTS(SELECT 1 FROM private.jobs later WHERE later.item_id=j.item_id AND later.user_id=j.user_id AND later.kind=j.kind AND (later.created_at,later.id)>(j.created_at,j.id)))";
+/// Another live entry shares a proposed album identity.
+const GROUPING_PROPOSAL: &str = "EXISTS(SELECT 1 FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items sibling ON sibling.id=peer.item_id AND sibling.deleted=0 WHERE own.item_id=i.id)";
 
 impl LibraryCarePort for Store {
     fn metadata_item_scope(&self, item: ItemId) -> Result<CollectionId> {
@@ -303,24 +309,17 @@ impl LibraryCarePort for Store {
         } else {
             None
         };
-        let failure = "EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.kind='metadata_resolution' AND j.state='failed' AND NOT EXISTS(SELECT 1 FROM private.jobs later WHERE later.item_id=j.item_id AND later.user_id=j.user_id AND later.kind=j.kind AND (later.created_at,later.id)>(j.created_at,j.id)))";
-        let grouping = "EXISTS(SELECT 1 FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items sibling ON sibling.id=peer.item_id AND sibling.deleted=0 WHERE own.item_id=i.id)";
-        let reason = match query.reason {
-            Some(collector_app::MetadataReviewReason::GroupingProposal) => grouping,
-            Some(collector_app::MetadataReviewReason::MissingName) => "h.missing_name=1",
-            Some(collector_app::MetadataReviewReason::MissingArtwork) => "h.missing_artwork=1",
-            Some(collector_app::MetadataReviewReason::AlbumAmbiguity) => "h.album_ambiguity=1",
-            Some(collector_app::MetadataReviewReason::IncompleteProviderInformation) => {
-                "h.incomplete_provider_information=1"
-            }
-            Some(collector_app::MetadataReviewReason::NoMatch) => "h.no_match=1",
-            Some(collector_app::MetadataReviewReason::ManualConflict) => "h.manual_conflict=1",
-            Some(collector_app::MetadataReviewReason::LookupFailed) => failure,
-            None => "1",
+        let failure = FAILED_LOOKUP;
+        let grouping = GROUPING_PROPOSAL;
+        let reason = reason_filter(query.reason, failure, grouping);
+        let level = match query.level {
+            Some(collector_app::ReviewLevel::Polish) => "h.polish=1",
+            Some(collector_app::ReviewLevel::Setup) => "h.setup=1",
+            _ => "1",
         };
         let db = self.read_db()?;
         let sql = format!(
-            "SELECT i.record,COALESCE(d.title_key,h.title_key) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
+            "SELECT i.record,COALESCE(d.title_key,h.title_key) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
         );
         let mut stmt = db.prepare(&sql).map_err(storage)?;
         let mut rows = stmt
@@ -360,6 +359,31 @@ impl LibraryCarePort for Store {
             None
         };
         Ok(Page { items, next_cursor })
+    }
+
+    fn review_counts(
+        &self,
+        user: UserId,
+        collection: Option<CollectionId>,
+    ) -> Result<collector_app::ReviewCounts> {
+        let failure = FAILED_LOOKUP;
+        let grouping = GROUPING_PROPOSAL;
+        let db = self.read_db()?;
+        let sql = format!(
+            "SELECT COALESCE(sum(h.needs_attention=1 OR {failure} OR {grouping}),0),COALESCE(sum(h.polish),0),COALESCE(sum(h.setup),0) FROM metadata_health h JOIN items i ON i.id=h.item_id JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2)"
+        );
+        db.query_row(
+            &sql,
+            params![user.to_string(), collection.map(|id| id.to_string())],
+            |row| {
+                Ok(collector_app::ReviewCounts {
+                    needs_you: row.get::<_, i64>(0)?.max(0) as u64,
+                    polish: row.get::<_, i64>(1)?.max(0) as u64,
+                    setup: row.get::<_, i64>(2)?.max(0) as u64,
+                })
+            },
+        )
+        .map_err(storage)
     }
 
     fn metadata_care_entries(
@@ -412,24 +436,17 @@ impl LibraryCarePort for Store {
         } else {
             None
         };
-        let failure = "EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.kind='metadata_resolution' AND j.state='failed' AND NOT EXISTS(SELECT 1 FROM private.jobs later WHERE later.item_id=j.item_id AND later.user_id=j.user_id AND later.kind=j.kind AND (later.created_at,later.id)>(j.created_at,j.id)))";
-        let grouping = "EXISTS(SELECT 1 FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items sibling ON sibling.id=peer.item_id AND sibling.deleted=0 WHERE own.item_id=i.id)";
-        let reason = match query.reason {
-            Some(collector_app::MetadataReviewReason::GroupingProposal) => grouping,
-            Some(collector_app::MetadataReviewReason::MissingName) => "h.missing_name=1",
-            Some(collector_app::MetadataReviewReason::MissingArtwork) => "h.missing_artwork=1",
-            Some(collector_app::MetadataReviewReason::AlbumAmbiguity) => "h.album_ambiguity=1",
-            Some(collector_app::MetadataReviewReason::IncompleteProviderInformation) => {
-                "h.incomplete_provider_information=1"
-            }
-            Some(collector_app::MetadataReviewReason::NoMatch) => "h.no_match=1",
-            Some(collector_app::MetadataReviewReason::ManualConflict) => "h.manual_conflict=1",
-            Some(collector_app::MetadataReviewReason::LookupFailed) => failure,
-            None => "1",
+        let failure = FAILED_LOOKUP;
+        let grouping = GROUPING_PROPOSAL;
+        let reason = reason_filter(query.reason, failure, grouping);
+        let level = match query.level {
+            Some(collector_app::ReviewLevel::Polish) => "h.polish=1",
+            Some(collector_app::ReviewLevel::Setup) => "h.setup=1",
+            _ => "1",
         };
         let db = self.read_db()?;
         let sql = format!(
-            "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),COALESCE(d.title_key,h.title_key),g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1) FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
+            "SELECT COALESCE(c.record,json_set(b.record,'$.title',COALESCE(d.title,i.title),'$.subtitle',COALESCE(d.subtitle,i.subtitle))),COALESCE(d.title_key,h.title_key),g.role,(SELECT json_object('id',j.id,'state',j.state,'phase',j.phase) FROM private.jobs j WHERE j.user_id=?1 AND j.item_id=i.id AND j.kind='digital_album_matching' ORDER BY j.created_at DESC,j.id DESC LIMIT 1),h.reasons,{failure},{grouping} FROM metadata_health h JOIN items i ON i.id=h.item_id LEFT JOIN metadata_language_display d ON d.item_id=i.id AND d.language=?9 JOIN private.grants g ON g.collection_id=h.collection_id AND g.user_id=?1 AND g.role>=1 JOIN private.users u ON u.id=g.user_id AND u.enabled=1 JOIN library_entry_basics b ON b.item_id=i.id LEFT JOIN library_entry_versions v ON v.item_id=i.id LEFT JOIN library_entries c ON c.item_id=i.id AND c.token=v.token AND c.namespace=?10 AND c.language=?11 AND c.role=g.role WHERE i.deleted=0 AND (?2 IS NULL OR h.collection_id=?2) AND (?3=0 OR h.needs_attention=1 OR {failure} OR {grouping}) AND ({reason}) AND ({level}) AND (?4='' OR instr(lower(COALESCE(d.title,i.title)||' '||COALESCE(d.subtitle,i.subtitle)),lower(?4))>0) AND (?5=0 OR (COALESCE(d.title_key,h.title_key),i.id)>(?6,?7)) ORDER BY COALESCE(d.title_key,h.title_key),i.id LIMIT ?8"
         );
         let mut stmt = db.prepare(&sql).map_err(storage)?;
         let mut rows = stmt
@@ -460,7 +477,17 @@ impl LibraryCarePort for Store {
                 serde_json::from_str(&row.get::<_, String>(0).map_err(storage)?)
                     .map_err(storage)?;
             let matching: Option<String> = row.get(3).map_err(storage)?;
+            let mut reasons: Vec<collector_app::MetadataReviewReason> =
+                serde_json::from_str(&row.get::<_, String>(4).map_err(storage)?)
+                    .map_err(storage)?;
+            if row.get::<_, bool>(5).map_err(storage)? {
+                reasons.push(collector_app::MetadataReviewReason::LookupFailed);
+            }
+            if row.get::<_, bool>(6).map_err(storage)? {
+                reasons.push(collector_app::MetadataReviewReason::GroupingProposal);
+            }
             let entry = collector_app::MetadataCareEntry {
+                reasons,
                 id: item.id,
                 collection_id: item.collection_id,
                 title: item.title,
@@ -805,6 +832,53 @@ impl LibraryCarePort for Store {
     }
 }
 
+/// SQL condition for one reason filter. Reason keys are fixed identifiers, so
+/// formatting them into SQL is safe.
+fn reason_filter(
+    reason: Option<collector_app::MetadataReviewReason>,
+    failure: &str,
+    grouping: &str,
+) -> String {
+    use collector_app::MetadataReviewReason as Reason;
+    match reason {
+        None => "1".into(),
+        Some(Reason::LookupFailed) => failure.into(),
+        Some(Reason::GroupingProposal) => grouping.into(),
+        Some(reason) => format!("instr(h.reasons,'\"{}\"')>0", reason.key()),
+    }
+}
+
+/// Latest game identification for the entry's current originals, if any.
+fn current_game_identification(
+    db: &Connection,
+    item: &Item,
+) -> Result<Option<collector_app::GameIdentification>> {
+    if item.domain.module.0 != "org.junk.games" {
+        return Ok(None);
+    }
+    for representation in item.captures.iter().flat_map(|c| &c.representations) {
+        let fingerprint = crate::processing::representation_fingerprint(representation)?;
+        let source = PackageScope::Representation(representation.id);
+        let (scope, id) = crate::processing::scope_columns(source);
+        let mut statement = db
+            .prepare("SELECT record FROM processing_observations WHERE source_scope=? AND source_id=? AND operation='org.junk.games.identify' ORDER BY created_at DESC,id DESC LIMIT 64")
+            .map_err(storage)?;
+        let records = statement
+            .query_map(params![scope, id], |row| row.get::<_, String>(0))
+            .map_err(storage)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(storage)?;
+        for raw in records {
+            let record: collector_app::PortableProcessingRecord =
+                serde_json::from_str(&raw).map_err(storage)?;
+            if record.observation.source_fingerprint == fingerprint {
+                return Ok(Some(record.observation.typed_result.payload.parse()?));
+            }
+        }
+    }
+    Ok(None)
+}
+
 pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
     let authority: Option<String> = db
         .query_row(
@@ -824,15 +898,20 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
         [item.id.to_string()],
     )
     .map_err(storage)?;
-    let mut missing_name = item.title.trim().is_empty();
-    let mut missing_artwork = !item
+    use collector_app::{MetadataReviewReason as Reason, ReviewLevel};
+    let has_cover = item
         .assets
         .iter()
         .any(|asset| asset.kind == AssetKind::Cover);
-    let mut ambiguity = false;
-    let mut incomplete = false;
-    let mut no_match = false;
-    let mut conflict = false;
+    let identification = current_game_identification(db, item)?;
+    // Without a metadata record there are no candidates to weigh yet.
+    let mut reasons = Vec::new();
+    if item.title.trim().is_empty() {
+        reasons.push(Reason::MissingName);
+    }
+    if item.domain.module.0 == "org.junk.music" && !has_cover {
+        reasons.push(Reason::MissingArtwork);
+    }
     db.execute(
         "DELETE FROM metadata_language_display WHERE item_id=?",
         [item.id.to_string()],
@@ -915,44 +994,40 @@ pub(crate) fn project_health(db: &Connection, item: &Item) -> Result<()> {
             .map_err(storage)?;
         }
 
-        let (proposed, uncertain) = collector_app::automatic_metadata_candidate(
-            &candidates,
-            authority
-                .automatic_language
-                .as_ref()
-                .map_or("en", LanguageTag::as_str),
-        );
-        let uncertain = collector_app::unresolved_match_reason(&authority, &display, uncertain);
-        ambiguity = uncertain == Some(collector_app::MetadataReviewReason::AlbumAmbiguity);
-        incomplete =
-            uncertain == Some(collector_app::MetadataReviewReason::IncompleteProviderInformation);
-        missing_name = display.candidate.is_none()
-            && !authority
-                .field_overrides
-                .iter()
-                .any(|field| field.field == MetadataField::Title);
-        missing_artwork = missing_artwork && display.artwork.is_none();
-        no_match = record
-            .observations
-            .last()
-            .is_some_and(|value| value.outcome == MetadataRefreshOutcome::NoMatch);
-        conflict = proposed.is_some_and(|candidate| {
-            authority
-                .field_overrides
-                .iter()
-                .any(|field| match field.field {
-                    MetadataField::Title => field.value != candidate.title.value,
-                    MetadataField::Subtitle => {
-                        Some(field.value.as_str())
-                            != candidate
-                                .subtitle
-                                .as_ref()
-                                .map(|value| value.value.as_str())
-                    }
-                })
-        });
+        let language = authority
+            .automatic_language
+            .as_ref()
+            .map_or("en", LanguageTag::as_str)
+            .to_string();
+        reasons = collector_app::metadata_health(collector_app::MetadataHealthInput {
+            module: &item.domain.module.0,
+            authority: &authority,
+            display: &display,
+            current_candidates: &candidates,
+            language: &language,
+            has_cover,
+            last_lookup_no_match: record
+                .observations
+                .last()
+                .is_some_and(|value| value.outcome == MetadataRefreshOutcome::NoMatch),
+            identification: identification.as_ref(),
+        })?
+        .reasons;
+    } else if let Some(identification) = &identification {
+        reasons.extend(collector_app::game_identification_reasons(
+            identification,
+            false,
+        ));
+        if reasons.len() > 1 {
+            reasons.retain(|reason| *reason != Reason::MissingName);
+        }
     }
-    db.execute("INSERT INTO metadata_health VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,title_key=excluded.title_key,missing_name=excluded.missing_name,missing_artwork=excluded.missing_artwork,album_ambiguity=excluded.album_ambiguity,incomplete_provider_information=excluded.incomplete_provider_information,no_match=excluded.no_match,manual_conflict=excluded.manual_conflict,needs_attention=excluded.needs_attention",params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),missing_name,missing_artwork,ambiguity,incomplete,no_match,conflict,missing_name||missing_artwork||ambiguity||incomplete||no_match||conflict]).map_err(storage)?;
+    let level = |wanted: &[ReviewLevel]| {
+        reasons
+            .iter()
+            .any(|reason| wanted.contains(&reason.level()))
+    };
+    db.execute("INSERT INTO metadata_health VALUES(?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET collection_id=excluded.collection_id,title_key=excluded.title_key,reasons=excluded.reasons,needs_attention=excluded.needs_attention,polish=excluded.polish,setup=excluded.setup",params![item.id.to_string(),item.collection_id.to_string(),item.title.to_lowercase(),serde_json::to_string(&reasons).map_err(storage)?,level(&[ReviewLevel::Blocked,ReviewLevel::Decision]),level(&[ReviewLevel::Polish]),level(&[ReviewLevel::Setup])]).map_err(storage)?;
     Ok(())
 }
 
@@ -1017,7 +1092,7 @@ pub(crate) fn refresh_picked_match_flags(db: &Connection) -> Result<()> {
         let mut statement = tx
             .prepare(
                 "SELECT i.record FROM metadata_health h JOIN items i ON i.id=h.item_id
-                 WHERE h.album_ambiguity=1 OR h.incomplete_provider_information=1",
+                 WHERE instr(h.reasons,'album_ambiguity')>0 OR instr(h.reasons,'incomplete_provider_information')>0",
             )
             .map_err(storage)?;
         statement
