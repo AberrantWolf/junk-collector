@@ -133,7 +133,9 @@ ExecStartPre=/usr/bin/docker compose --env-file /etc/junk-collector/remote.env -
 ```
 
 Set the optional variables at the end of [remote.env.example](remote.env.example).
-The tunnel's token file stays on the host (mode 0600). Docker restarts Bridge
+The tunnel's token file stays on the host, mode 0600 and owned by uid 65532 (the
+user the `cloudflared` image runs as); Compose mounts it with the host's owner and
+mode, so a root-owned file stops the connector, and with it the stack. Docker restarts Bridge
 only if it crashes; the connector keeps its metrics on `127.0.0.1:20241`.
 
 ## Reconnecting after an outage
@@ -153,12 +155,13 @@ only if it crashes; the connector keeps its metrics on `127.0.0.1:20241`.
 ## Scheduled snapshots
 
 Keep the local roots (config, state, backups, Caddy data and mail) in one Btrfs
-subvolume, for example `/srv/junk-collector`, and snapshot it on a timer. A
+subvolume, `COLLECTOR_DATA` (for example `/var/lib/junk-collector`), and snapshot
+it on a timer. A
 snapshot is atomic, so each SQLite database is captured together with its WAL and
 recovers as it would after a power loss; it can be taken while Collector runs.
 
 ```sh
-snapper -c junk-collector create-config /srv/junk-collector
+snapper -c junk-collector create-config /var/lib/junk-collector
 snapper -c junk-collector set-config TIMELINE_CREATE=yes TIMELINE_LIMIT_HOURLY=24 \
   TIMELINE_LIMIT_DAILY=7 TIMELINE_LIMIT_WEEKLY=0 TIMELINE_LIMIT_MONTHLY=0 \
   TIMELINE_LIMIT_YEARLY=0 NUMBER_LIMIT=10
@@ -186,6 +189,10 @@ version has run for a few days.
 ```sh
 snapper -c junk-collector create --description "before <version>"
 ```
+
+The media service key lives in Docker's `media-authority` volume, outside the
+snapshot. Copy it into the recovery point's private directory, keeping its
+ownership and mode.
 
 **Restore** both snapshots of the same point together, with the old images and
 `remote.env`. Never restore only the local state beside a newer archive, or rsync
