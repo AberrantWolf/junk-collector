@@ -83,7 +83,8 @@ try{
  assert.equal(pendingDiscovery.progress.recordings_total,1,'do not expand first-track alternatives before assessing the seed');
  releaseRecognition();
  const itemUrl=`**/api/v1/items/${item}`;
- await page.route(itemUrl,async route=>{const response=await route.fetch();const data=await response.json();data.revision+=1;refreshed=true;await route.fulfill({json:data});});
+ // The page may cancel a superseded read while it is held here.
+ await page.route(itemUrl,async route=>{const response=await route.fetch().catch(()=>null);if(!response)return;const data=await response.json();data.revision+=1;refreshed=true;await route.fulfill({json:data}).catch(()=>{});});
  await page.getByRole('button',{name:'Refresh panel',exact:true}).click();await expect.poll(()=>refreshed,{timeout:15000}).toBe(true);
  await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeVisible({timeout:90000});await expect(matching.getByRole('button',{name:'Use this album and track mapping'})).toBeDisabled();
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'stale matching notice overflows mobile');await page.setViewportSize({width:1440,height:1000});

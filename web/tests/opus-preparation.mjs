@@ -131,6 +131,8 @@ opus = "${wrapper}"
   if(/\/api\/v1\/items\/[^/?]+(?:\?|$|\/music-preparation-plan)/.test(request.url()))detailReads++;
  });
  await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128`);
+ // The page opens on Saved formats; preparing a new format is one step in.
+ await page.getByRole('button',{name:'Add a format…'}).click();
  const preparation=page.getByRole('region',{name:'Prepare audio workspace'});
  await expect.poll(()=>preparationRows(page,collection,128)).toBe(0);
  await expect(preparation.getByRole('button',{name:'Select all matching entries'})).toBeVisible();
@@ -298,6 +300,7 @@ opus = "${wrapper}"
   },'PUT');
  }
  await page.goto(`${origin}/library-care/music-preparation?collection=${collection}&opus_bitrate_kbps=128&search=Scale%20fixture`);
+ await page.getByRole('button',{name:'Add a format…'}).click();
  const selectAll=preparation.getByRole('button',{name:'Select all matching entries'});
  await expect(selectAll).toBeEnabled({timeout:45000});
  await expect(preparation.getByRole('checkbox',{name:/^Select Scale fixture/})).toHaveCount(50);
