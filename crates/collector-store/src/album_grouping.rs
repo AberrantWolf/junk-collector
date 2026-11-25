@@ -86,7 +86,7 @@ impl AlbumGroupingPort for Store {
     }
 
     fn automatic_album_group_idle(&self, items: &[ItemId]) -> Result<bool> {
-        item_work_idle(&*lock(&self.db)?, items)
+        automatic_group_work_idle(&*lock(&self.db)?, items)
     }
 
     fn album_group_publication(&self, group: TransactionId) -> Result<AlbumGroupPublication> {
@@ -299,7 +299,7 @@ impl AlbumGroupingPort for Store {
         let guard = || -> Result<()> {
             let db = lock(&self.db)?;
             if publication.result.automatic
-                && !item_work_idle(
+                && !automatic_group_work_idle(
                     &db,
                     &publication
                         .entries
@@ -478,6 +478,8 @@ impl AlbumGroupingPort for Store {
     }
 }
 
+/// An entry is idle when none of its own import, lookup or library work is
+/// still running.
 pub(crate) fn item_work_idle(db: &Connection, items: &[ItemId]) -> Result<bool> {
     let ids = serde_json::to_string(items).map_err(storage)?;
     let busy: bool = db.query_row("SELECT
@@ -487,6 +489,33 @@ pub(crate) fn item_work_idle(db: &Connection, items: &[ItemId]) -> Result<bool> 
         AND settled=0 AND cancelled=0) OR
       EXISTS(SELECT 1 FROM private.bulk_library_members m JOIN private.bulk_library b ON b.id=m.batch_id
         WHERE m.item_id IN (SELECT value FROM json_each(?1)) AND b.state='accepted' AND m.state IN ('ready','queued','running'))",
+      [ids], |row| row.get(0)).map_err(storage)?;
+    Ok(!busy)
+}
+
+/// Automatic grouping also waits while another package from the import batch
+/// an entry came from is still being admitted, imported or looked up on its
+/// own, so discs imported together are grouped in one step rather than a
+/// partial group that a late disc joins afterwards. A package that waits for
+/// the user (rejected, failed or needing a decision), or a batch whose admission
+/// job stopped, does not hold the rest of the batch.
+pub(crate) fn automatic_group_work_idle(db: &Connection, items: &[ItemId]) -> Result<bool> {
+    if !item_work_idle(db, items)? {
+        return Ok(false);
+    }
+    let ids = serde_json::to_string(items).map_err(storage)?;
+    let needs_you = crate::provisional_imports::IMPORT_NEEDS_YOU;
+    let busy: bool = db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM private.imports own
+        JOIN private.intake_members own_member ON own_member.import_id=own.id
+        JOIN private.intake_sessions s ON s.id=own_member.intake_id AND s.state IN ('accepted','cancelling')
+        JOIN private.intake_members m ON m.intake_id=s.id
+        LEFT JOIN private.imports imports ON imports.id=m.import_id
+        LEFT JOIN private.guided_ingest_intents g ON g.import_id=m.import_id
+        WHERE own.item_id IN (SELECT value FROM json_each(?1)) AND (
+          (m.import_id IS NULL AND json_extract(m.record,'$.error') IS NULL
+            AND EXISTS(SELECT 1 FROM private.jobs admission WHERE admission.id=s.id
+              AND admission.state IN ('queued','running','cancel_requested'))) OR
+          (g.settled=0 AND g.cancelled=0 AND NOT {needs_you})))"),
       [ids], |row| row.get(0)).map_err(storage)?;
     Ok(!busy)
 }

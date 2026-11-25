@@ -157,6 +157,66 @@ impl CollectionService {
         Ok(())
     }
 
+    /// The edition choice, current matches and display that the maintenance pass
+    /// derives from a record. Equal release versions are settled by a fixed
+    /// tie-break here, so the same inputs always give the same choice.
+    fn settled_music_choice(
+        &self,
+        item: &Item,
+        record: &MetadataAuthorityRecord,
+        history: &[MetadataCandidateObservation],
+    ) -> Result<(
+        MetadataAuthority,
+        Vec<MetadataCandidateIdentity>,
+        ResolvedMetadataDisplay,
+    )> {
+        let mut authority = metadata_authority_for_inventory(item, record)?;
+        let current = record_current_candidates(item, record)
+            .map(|ids| ids.to_vec())
+            .unwrap_or_else(|| history.iter().map(|c| c.identity.clone()).collect());
+        let active = current_metadata_candidates(&authority, history, Some(&current))?;
+        let language = authority
+            .automatic_language
+            .as_ref()
+            .map_or("en", LanguageTag::as_str)
+            .to_owned();
+        self.reassess_music_edition(item, &mut authority, &active, &language)?;
+        let preferred = authority
+            .selected_candidate
+            .iter()
+            .chain(authority.automatic_candidate.iter())
+            .collect::<Vec<_>>();
+        let (_, current) = consolidate_matches(history, &current, &preferred)?;
+        let display = resolve_metadata_display(
+            item,
+            &authority,
+            &current_metadata_candidates(&authority, history, Some(&current))?,
+            &language,
+        )?;
+        Ok((authority, current, display))
+    }
+
+    /// Apply the maintenance pass's derived choices to a record before another
+    /// writer (such as album grouping) publishes it whole. Otherwise the next
+    /// maintenance pass would re-pick among equal release versions and change
+    /// the record moments later, which also makes the grouping look edited.
+    pub(crate) fn settle_music_metadata(
+        &self,
+        item: &Item,
+        record: &mut MetadataAuthorityRecord,
+        history: &[MetadataCandidateObservation],
+    ) -> Result<()> {
+        if item.deleted || item.domain.module.0 != "org.junk.music" {
+            return Ok(());
+        }
+        let (authority, current, display) = self.settled_music_choice(item, record, history)?;
+        record.resolution_policy = crate::METADATA_RESOLUTION_POLICY;
+        record.authority = authority;
+        record.current_candidates = Some(current);
+        record.display = Some(display);
+        Ok(())
+    }
+
     fn reconcile_music_entry(&self, candidate: crate::MetadataMaintenanceCandidate) -> Result<()> {
         let actor = Principal {
             user_id: candidate.user_id,
@@ -175,32 +235,10 @@ impl CollectionService {
         else {
             return Ok(());
         };
-        let mut authority = metadata_authority_for_inventory(&item, &old)?;
         let history = self
             .processing
             .metadata_candidates(item.collection_id, item.id)?;
-        let current = record_current_candidates(&item, &old)
-            .map(|ids| ids.to_vec())
-            .unwrap_or_else(|| history.iter().map(|c| c.identity.clone()).collect());
-        let active = current_metadata_candidates(&authority, &history, Some(&current))?;
-        let language = authority
-            .automatic_language
-            .as_ref()
-            .map_or("en", LanguageTag::as_str)
-            .to_owned();
-        self.reassess_music_edition(&item, &mut authority, &active, &language)?;
-        let preferred = authority
-            .selected_candidate
-            .iter()
-            .chain(authority.automatic_candidate.iter())
-            .collect::<Vec<_>>();
-        let (_, current) = consolidate_matches(&history, &current, &preferred)?;
-        let display = resolve_metadata_display(
-            &item,
-            &authority,
-            &current_metadata_candidates(&authority, &history, Some(&current))?,
-            &language,
-        )?;
+        let (authority, current, display) = self.settled_music_choice(&item, &old, &history)?;
         if old.resolution_policy == crate::METADATA_RESOLUTION_POLICY
             && old.current_candidates.as_ref() == Some(&current)
             && serde_json::to_value(&old.authority).map_err(|e| Error::Storage(e.to_string()))?
