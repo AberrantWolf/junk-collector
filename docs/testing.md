@@ -13,6 +13,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 npm --prefix web ci
 npm --prefix web run check                                  # TypeScript
+npm --prefix web run test:models                            # screen logic in plain Node, no browser
 npm --prefix web run build && git diff --exit-code -- web/dist
 ```
 
