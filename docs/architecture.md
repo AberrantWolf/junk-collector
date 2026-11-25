@@ -186,6 +186,10 @@ are stored once; equivalent lookups do not need a permanent history.
   archive or creating Jobs. Saved preparations (FLAC/Opus derivatives) are
   explicit, recorded with their recipe, and lossless output is checked against
   the source PCM.
+- FFmpeg can't record the length of FLAC it writes to a pipe, and browsers then
+  drop the stream's final, shorter block. Live FLAC made from PCM (WAV and CD
+  images) therefore gets its exact sample count written into the stream header.
+  Live FLAC decoded from compressed files still has no length in its header.
 - Media is exposed through authorized opaque readers, never archive paths.
 - Artwork is shown beside game and music text in browsing, search and offline
   views. Missing artwork and uncertain identity are different states.
