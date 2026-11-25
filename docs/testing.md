@@ -70,6 +70,9 @@ Each journey starts its own temporary server and data directory. The runner cont
 after a failure and exits non-zero if any journey failed. Some offline provider
 fixtures rely on debug-only hooks that release builds never enable.
 
+[Faster testing](plans/faster-testing.md) plans moving screen decision rules into
+plain Node tests and letting one journey scenario run alone.
+
 On macOS, browser tests refuse to start inside the Codex `seatbelt` sandbox (Chrome
 aborts there); run them from a normal terminal.
 
