@@ -95,9 +95,14 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  // and offers removing or deleting the entry, for a disc imported twice.
  const [first]=[...new Set((await members()).map(member=>member.import.target_item_id))];
  await page.setViewportSize({width:1440,height:1000});
- await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${first}`);
  const entry=page.getByRole('region',{name:'Review selected entry'});
  const proposals=entry.getByRole('region',{name:'Album grouping proposals'});
+ // The In progress tab loads no entry rows, so only the entry's own review
+ // reasons can open the grouping choice here.
+ await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&tab=progress&item=${first}`);
+ await expect(proposals).toBeVisible();
+ await expect(entry.getByText('Possibly the same album',{exact:true})).toBeVisible();
+ await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${first}`);
  await expect(proposals).toBeVisible();
  await expect(proposals.locator('.grouping-proposal')).toHaveCount(separated-1);
  await page.screenshot({path:path.join(scratch,'review-grouping-desktop.png'),fullPage:true});

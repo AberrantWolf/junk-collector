@@ -33,5 +33,6 @@
   "remote-media": "remote-media",
   "queue": "music-queue",
   "context": "work-context",
-  "labels": "presentation-labels"
+  "labels": "presentation-labels",
+  "review-list": "review-list"
 }

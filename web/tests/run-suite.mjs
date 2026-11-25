@@ -1,7 +1,7 @@
 import {fileURLToPath} from 'node:url';
 import {runJourneys} from './support/runtime.mjs';
 import scripts from './journeys.json' with {type:'json'};
-const requested=process.argv.slice(2);const selected=requested.length?requested:Object.keys(scripts).filter(name=>!['scale','queue','context','labels'].includes(name));
+const requested=process.argv.slice(2);const selected=requested.length?requested:Object.keys(scripts).filter(name=>!['scale','queue','context','labels','review-list'].includes(name));
 if(selected.some(name=>!Object.hasOwn(scripts,name)))throw Error('Unknown test suite');
 const failures=await runJourneys([...new Set(selected)].map(name=>({
  name,command:process.execPath,args:[fileURLToPath(new URL(`./${scripts[name]}.mjs`,import.meta.url))],
