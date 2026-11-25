@@ -1700,6 +1700,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{id}/files/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["purge_item_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{id}/identify-game": {
         parameters: {
             query?: never;
@@ -1902,6 +1918,22 @@ export interface paths {
         get: operations["music_track_availability"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["purge_item"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4399,6 +4431,14 @@ export interface components {
         ItemLifecycleCommand: {
             expected_revision: components["schemas"]["Revision"];
         };
+        /** @description What a permanent deletion did. */
+        ItemPurgeResult: {
+            /**
+             * Format: int64
+             * @description Disk space given back by deleting the entry's files.
+             */
+            freed_bytes: number;
+        };
         ItemReimport: {
             capture_id: components["schemas"]["CaptureId"];
             completed: boolean;
@@ -5983,6 +6023,14 @@ export interface components {
             reason: string;
             revision?: components["schemas"]["Revision"];
             source?: components["schemas"]["MailSource"] | null;
+        };
+        /** @description Originals to delete permanently from an entry that stays. */
+        PurgeItemFiles: {
+            /** @description The originals (discs or purchases) to delete. */
+            captures: components["schemas"]["CaptureId"][];
+            expected_revision: components["schemas"]["Revision"];
+            /** @description Also delete the physical copy records these originals alone came from. */
+            remove_copies: boolean;
         };
         RecoverAccount: {
             code: string;
@@ -11423,6 +11471,60 @@ export interface operations {
             };
         };
     };
+    purge_item_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeItemFiles"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemPurgeResult"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     identify_game_entry: {
         parameters: {
             query?: never;
@@ -12198,6 +12300,60 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    purge_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["ItemId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemLifecycleCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemPurgeResult"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

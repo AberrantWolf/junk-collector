@@ -567,7 +567,7 @@ impl Store {
 }
 
 /// Sizes from directory metadata only; contents are never read.
-fn directory_bytes(path: &Path) -> Result<u64> {
+pub(crate) fn directory_bytes(path: &Path) -> Result<u64> {
     let mut total = 0;
     for entry in fs::read_dir(path).map_err(storage)? {
         let entry = entry.map_err(storage)?;

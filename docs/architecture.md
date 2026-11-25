@@ -54,6 +54,20 @@ observation, snapshot and recipe. Paths and SQLite row IDs are never identity.
   without an item (an unidentified dump).
 - Ownership, possession, wishlist, loans and disposal are independent facts. A
   sale or loan never deletes archived bytes; removal is a tombstone.
+- Permanent deletion is a separate, confirmed action. A removed entry can be
+  deleted entirely: its item, capture, asset, evidence, recipe and metadata
+  folders, its unshared analysis results, and its catalog and private rows
+  (imports, jobs, history), plus the placeholders of entries merged into it. Its
+  id is recorded so it can't be published again. Alternatively, chosen originals
+  of an entry that stays can be deleted, optionally with the copy records only
+  they came from; the entry then gets a new revision. Works, editions, snapshots,
+  list entries and analysis results another dump shares are kept, as are ids in
+  a surviving entry's metadata lookup history and evidence owned by a merged
+  placeholder. Entries using the legacy payload layout can only stay removed.
+- A combine record names the exact files of every entry it combined, and is
+  checked when the archive loads. Deleting any of those files retires the
+  record: it keeps the surviving members, and its undo data is replaced by a
+  note, so that combine can no longer be undone.
 - Importing a dump does not invent a physical copy unless the user confirms one
   (guided physical imports default to one owned copy). Digital purchases create
   no specimen.
@@ -101,6 +115,11 @@ Schema version constants live in `collector-store`.
   immutable revision directory is the commit point.
 - On startup, interrupted publications are settled before any new write is
   accepted. Unknown staging is kept, not deleted.
+- A permanent deletion saves its plan in `state/item-purges/` first. Step one
+  retires combine records, moves folders into `archive/.purge/`, drops their
+  rows and deletes the moved folders; startup repeats it for any saved plan
+  before checking the catalog. Step two saves the surviving entry, if any, once
+  the store is open. Until then a rebuild treats the plan's evidence as gone.
 - Expected revisions reject stale edits.
 - Archive identity is bound to the local state and remote-mount guards fail
   closed. Running two servers against one archive is not supported and is not

@@ -148,7 +148,7 @@ fn inventory(archive: &Path) -> Result<BTreeMap<String, String>> {
     Ok(files)
 }
 
-fn seal(db: &Connection, archive: &str) -> Result<()> {
+pub(crate) fn seal(db: &Connection, archive: &str) -> Result<()> {
     db.execute("INSERT INTO catalog_checkpoint SELECT 1,?1,?2,epoch FROM catalog_index_state WHERE singleton=1
                 ON CONFLICT(singleton) DO UPDATE SET format=excluded.format,archive=excluded.archive,epoch=excluded.epoch",
         params![FORMAT, archive]).map_err(storage)?;

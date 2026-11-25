@@ -1678,6 +1678,17 @@ impl CollectionService {
         Ok(false)
     }
 
+    /// Every file arrived and was hashed, and the import moved on: the copy is
+    /// done even if a later attempt of its job failed after losing its claim.
+    /// The store's `IMPORT_NEEDS_YOU` list query applies the same rule.
+    fn staging_copied(view: &ImportView) -> bool {
+        !matches!(view.phase, ImportPhase::Staging | ImportPhase::Cancelled)
+            && view
+                .files
+                .iter()
+                .all(|file| file.received_bytes == file.bytes && file.digest.is_some())
+    }
+
     pub(crate) fn ingest_summary(
         &self,
         actor: &Principal,
@@ -1690,9 +1701,11 @@ impl CollectionService {
         let jobs = self
             .provisional_imports
             .import_job_records(view.id, actor.user_id)?;
+        let copied = Self::staging_copied(&view);
         let failed = jobs
             .iter()
             .filter(|job| job.kind != "inbox_cleanup")
+            .filter(|job| !(copied && job.kind == "import_staging"))
             .any(|job| {
                 job.state == JobState::Failed
                     || super::metadata_artwork_error(&job.kind, job.result.as_ref()).is_some()
@@ -2085,16 +2098,7 @@ impl CollectionService {
         } else {
             job_step("preparation", None, false, None)
         };
-        // Every file arrived and was hashed, and the import moved on: the copy
-        // is done even if a later attempt of its job failed after losing its claim.
-        let copied = !matches!(
-            record.view.phase,
-            ImportPhase::Staging | ImportPhase::Cancelled
-        ) && record
-            .view
-            .files
-            .iter()
-            .all(|file| file.received_bytes == file.bytes && file.digest.is_some());
+        let copied = Self::staging_copied(&record.view);
         let staging_step = if let Some(job) = by_kind.get("import_staging") {
             let mut step = job_step("staging", Some(job), false, None);
             if copied && step.state == IngestStepState::Failed {

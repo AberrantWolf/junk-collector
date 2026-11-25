@@ -25498,6 +25498,677 @@ fn same_codec_alternates_require_selection_without_retargeting_tracks() {
     );
 }
 #[test]
+fn an_album_plays_only_the_copy_it_uses_when_it_holds_two() {
+    let (_root, store, actor, service, collection) = setup();
+    let admit = || {
+        admit_digital_test_package(
+            &service,
+            &actor,
+            collection.id,
+            &["01.flac"],
+            &[include_bytes!("fixtures/digital-audio/01.flac")],
+        )
+    };
+    let kept = admit().summary.target_item_id.unwrap();
+    let other = admit().summary.target_item_id.unwrap();
+    // Move the second purchase onto the first entry, as combining two
+    // entries for the same album does.
+    let mut capture = store.item(other).unwrap().captures[0].clone();
+    let revision = capture.revision;
+    capture.association.item_id = Some(kept);
+    Catalog::save_capture(store.as_ref(), capture.clone(), revision).unwrap();
+    let raw = store.item(kept).unwrap();
+    assert_eq!(raw.captures.len(), 2);
+    let unused = capture.representations[0].id;
+    let used = raw
+        .captures
+        .iter()
+        .flat_map(|capture| &capture.representations)
+        .find(|representation| representation.id != unused && representation.source.is_none())
+        .unwrap()
+        .id;
+    // Both copies count toward the album, so it can't tell which disc each is.
+    assert!(service.album_playback_snapshot(&actor, kept, None).is_err());
+
+    let review = service.metadata_review(&actor, kept).unwrap();
+    service.update_metadata_authority(&actor,kept,UpdateMetadataAuthorityCommand {
+        expected_revision:review.revision,change:MetadataAuthorityChange::SetDomainOverrides {overrides:ModuleData {
+            module:ModuleId("org.junk.music".into()),schema_version:1,payload:RawJson::from_value(serde_json::json!({"track_overrides":[
+                {"source_representation_id":unused,"track_position":1,"title":null,"disc_position":null,"display_position":null,"album_selected":false}
+            ]}))
+        }}
+    },&command()).unwrap();
+    let album = service.album_playback_snapshot(&actor, kept, None).unwrap();
+    assert_eq!(
+        album
+            .tracks
+            .iter()
+            .map(|track| track.source_representation_id)
+            .collect::<Vec<_>>(),
+        vec![used]
+    );
+    assert_eq!(
+        service.item_presented(&actor, kept).unwrap().album_playback,
+        Some(collector_app::AlbumPlaybackReadiness::Ready)
+    );
+    // The copy left out still plays on its own.
+    assert_eq!(
+        service
+            .album_playback_snapshot(&actor, kept, Some(unused))
+            .unwrap()
+            .tracks
+            .len(),
+        1
+    );
+}
+/// Rows anywhere in the catalog or private database that still mention `id`.
+fn rows_mentioning(root: &std::path::Path, id: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for name in ["catalog.sqlite", "private.sqlite"] {
+        let db = rusqlite::Connection::open(root.join("state").join(name)).unwrap();
+        let tables = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_%'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        for table in tables {
+            // The deletion's own guard and command receipts name the entry on purpose.
+            if ["purged_items", "command_receipts", "command_outcomes"].contains(&table.as_str()) {
+                continue;
+            }
+            let columns = db
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap();
+            for column in columns {
+                let count: i64 = db
+                    .query_row(
+                        &format!("SELECT count(*) FROM \"{table}\" WHERE instr(CAST(\"{column}\" AS TEXT),?1)>0"),
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                if count > 0 {
+                    found.push(format!("{name}:{table}.{column} ({count})"));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Like `rows_mentioning`, for an id whose entry survives in part. A surviving
+/// album's metadata lookup history records which files or entries its lookups
+/// came from; those are ids in archived history, not the deleted data.
+fn rows_mentioning_outside_lookup_history(root: &std::path::Path, id: &str) -> Vec<String> {
+    rows_mentioning(root, id)
+        .into_iter()
+        .filter(|row| {
+            ![
+                "metadata_authorities.",
+                "metadata_refreshes.",
+                "metadata_candidates.",
+            ]
+            .iter()
+            .any(|table| row.contains(table))
+        })
+        .collect()
+}
+
+fn archive_paths_mentioning(root: &std::path::Path, id: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.join("archive")];
+    while let Some(folder) = pending.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.to_string_lossy().contains(id) {
+                found.push(path.display().to_string());
+            } else if path.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn a_removed_entry_can_be_deleted_permanently_with_everything_it_owns() {
+    let (root, store, actor, service, collection) = setup();
+    let admit = || {
+        admit_digital_test_package(
+            &service,
+            &actor,
+            collection.id,
+            &["01.flac", "02.mp3"],
+            &[
+                include_bytes!("fixtures/digital-audio/01.flac"),
+                include_bytes!("fixtures/digital-audio/02.mp3"),
+            ],
+        )
+    };
+    let doomed = admit();
+    let kept = admit().summary.target_item_id.unwrap();
+    let item = doomed.summary.target_item_id.unwrap();
+    let capture = doomed.import.capture_id;
+    let import = doomed.summary.import_id;
+    assert!(!archive_paths_mentioning(root.path(), &capture.to_string()).is_empty());
+
+    // Only a removed entry can be deleted permanently.
+    let current = store.item(item).unwrap();
+    assert!(matches!(
+        service.purge_item(&actor, item, current.revision),
+        Err(Error::Invalid(_))
+    ));
+    let removed = service
+        .set_item_removed(&actor, item, current.revision, true, &command())
+        .unwrap();
+    assert!(matches!(
+        service.purge_item(&actor, item, current.revision),
+        Err(Error::Conflict)
+    ));
+    let result = service.purge_item(&actor, item, removed.revision).unwrap();
+    assert!(result.freed_bytes > 0);
+
+    assert!(matches!(store.item(item), Err(Error::NotFound)));
+    for id in [item.to_string(), capture.to_string(), import.to_string()] {
+        assert_eq!(
+            archive_paths_mentioning(root.path(), &id),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            rows_mentioning(root.path(), &id),
+            Vec::<String>::new(),
+            "{id}"
+        );
+    }
+    assert!(
+        !root
+            .path()
+            .join("archive/.purge")
+            .join(item.to_string())
+            .exists()
+    );
+    assert!(
+        !root
+            .path()
+            .join("state/item-purges")
+            .join(format!("{item}.json"))
+            .exists()
+    );
+    assert!(store.item(kept).unwrap().captures.len() == 1);
+    // A replayed command can't bring the deleted entry back.
+    let mut revived = self::item(collection.id);
+    revived.id = item;
+    assert!(Catalog::save(store.as_ref(), revived, Revision(0)).is_err());
+
+    // The next start reuses the catalog, and a full rebuild agrees with it.
+    drop(service);
+    drop(store);
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(store.catalog_reused_at_startup());
+    assert!(matches!(Catalog::item(&store, item), Err(Error::NotFound)));
+    store.reindex().unwrap();
+    assert!(matches!(Catalog::item(&store, item), Err(Error::NotFound)));
+    assert_eq!(Catalog::item(&store, kept).unwrap().captures.len(), 1);
+}
+
+fn admit_one_track(
+    service: &CollectionService,
+    actor: &Principal,
+    collection: CollectionId,
+) -> ItemId {
+    admit_digital_test_package(
+        service,
+        actor,
+        collection,
+        &["01.flac"],
+        &[include_bytes!("fixtures/digital-audio/01.flac")],
+    )
+    .summary
+    .target_item_id
+    .unwrap()
+}
+
+fn combine(
+    service: &CollectionService,
+    store: &Store,
+    actor: &Principal,
+    destination: ItemId,
+    other: ItemId,
+) -> TransactionId {
+    use collector_app::{AlbumGroupChoices, ConfirmAlbumGroup, GroupEntry, PreviewAlbumGroup};
+    let request = PreviewAlbumGroup {
+        destination,
+        entries: [destination, other]
+            .map(|id| GroupEntry {
+                item_id: id,
+                expected_revision: store.item(id).unwrap().revision,
+            })
+            .to_vec(),
+        choices: AlbumGroupChoices {
+            title_from: Some(destination),
+            subtitle_from: Some(destination),
+            ..Default::default()
+        },
+    };
+    let preview = service.preview_album_group(actor, request.clone()).unwrap();
+    assert!(preview.can_confirm, "{:?}", preview.conflicts);
+    service
+        .confirm_album_group(
+            actor,
+            ConfirmAlbumGroup {
+                preview: request,
+                token: preview.token,
+            },
+            &command(),
+        )
+        .unwrap()
+        .group_id
+}
+
+fn remove_and_purge(service: &CollectionService, store: &Store, actor: &Principal, id: ItemId) {
+    let current = store.item(id).unwrap();
+    let removed = service
+        .set_item_removed(actor, id, current.revision, true, &command())
+        .unwrap();
+    assert!(
+        service
+            .purge_item(actor, id, removed.revision)
+            .unwrap()
+            .freed_bytes
+            > 0
+    );
+}
+
+fn reopen_and_rebuild(root: &tempfile::TempDir) -> Store {
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(store.catalog_reused_at_startup());
+    store.reindex().unwrap();
+    store
+}
+
+#[test]
+fn an_entry_combined_and_then_separated_can_still_be_deleted() {
+    let (root, store, actor, service, collection) = setup();
+    let (left, right) = (
+        admit_one_track(&service, &actor, collection.id),
+        admit_one_track(&service, &actor, collection.id),
+    );
+    let grouped = combine(&service, &store, &actor, left, right);
+    service
+        .undo_album_group(&actor, grouped, &command())
+        .unwrap();
+    remove_and_purge(&service, &store, &actor, right);
+    assert!(matches!(store.item(right), Err(Error::NotFound)));
+    assert_eq!(
+        rows_mentioning_outside_lookup_history(root.path(), &right.to_string()),
+        Vec::<String>::new()
+    );
+    // The combine named the deleted entry, so it can no longer be undone.
+    let refused = service.album_group_undo(&actor, grouped);
+    assert!(
+        matches!(&refused, Err(Error::Invalid(message)) if message.contains("permanently deleted")),
+        "{refused:?}"
+    );
+    assert_eq!(store.item(left).unwrap().captures.len(), 1);
+    drop(service);
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert!(matches!(Catalog::item(&store, right), Err(Error::NotFound)));
+    assert_eq!(Catalog::item(&store, left).unwrap().captures.len(), 1);
+}
+
+#[test]
+fn deleting_a_combined_album_deletes_the_entries_merged_into_it() {
+    let (root, store, actor, service, collection) = setup();
+    let (album, merged, other) = (
+        admit_one_track(&service, &actor, collection.id),
+        admit_one_track(&service, &actor, collection.id),
+        admit_one_track(&service, &actor, collection.id),
+    );
+    combine(&service, &store, &actor, album, merged);
+    assert_eq!(store.item(album).unwrap().captures.len(), 2);
+    assert_eq!(
+        store.item(merged).unwrap().lifecycle.merged_into,
+        Some(album)
+    );
+    // A merged placeholder is deleted through its album, not on its own.
+    let placeholder = store.item(merged).unwrap();
+    assert!(matches!(
+        service.purge_item(&actor, merged, placeholder.revision),
+        Err(Error::Invalid(_))
+    ));
+    remove_and_purge(&service, &store, &actor, album);
+    for id in [album, merged] {
+        assert!(matches!(store.item(id), Err(Error::NotFound)));
+        assert_eq!(
+            rows_mentioning(root.path(), &id.to_string()),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            archive_paths_mentioning(root.path(), &id.to_string()),
+            Vec::<String>::new()
+        );
+    }
+    assert!(
+        !root
+            .path()
+            .join("archive")
+            .read_dir()
+            .unwrap()
+            .any(|entry| entry.unwrap().file_name() == ".purge")
+    );
+    drop(service);
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert!(matches!(Catalog::item(&store, album), Err(Error::NotFound)));
+    assert_eq!(Catalog::item(&store, other).unwrap().captures.len(), 1);
+}
+
+#[test]
+fn one_disc_can_be_deleted_from_an_album_with_or_without_its_copy_record() {
+    let (root, store, actor, service, collection) = setup();
+    let album = admit_one_track(&service, &actor, collection.id);
+    let copy = SpecimenId::new();
+    let mut with_copy = store.item(album).unwrap();
+    let expected = with_copy.revision;
+    with_copy.specimens.push(Specimen {
+        id: copy,
+        label: "CD set".into(),
+        condition: Condition::Good,
+        ownership: Ownership::Owned,
+        possession: Possession::Present,
+        acquisition: None,
+        components: vec![],
+        loans: vec![],
+        private_notes: None,
+    });
+    Catalog::save(store.as_ref(), with_copy, expected).unwrap();
+    // Two discs of one physical copy, moved onto the album.
+    let discs = [0, 1].map(|_| {
+        let source = admit_one_track(&service, &actor, collection.id);
+        let mut capture = store.item(source).unwrap().captures[0].clone();
+        let revision = capture.revision;
+        capture.association.item_id = Some(album);
+        capture.association.specimen_id = Some(copy);
+        Catalog::save_capture(store.as_ref(), capture.clone(), revision).unwrap();
+        // Re-save the entry the disc left, as moving a disc between entries does.
+        let left = store.item(source).unwrap();
+        let expected = left.revision;
+        Catalog::save(store.as_ref(), left, expected).unwrap();
+        capture.id
+    });
+    assert_eq!(store.item(album).unwrap().captures.len(), 3);
+
+    // The copy stays while its other disc stays, even when asked to go.
+    let current = store.item(album).unwrap();
+    let freed = service
+        .purge_item_files(
+            &actor,
+            album,
+            collector_app::PurgeItemFiles {
+                expected_revision: current.revision,
+                captures: vec![discs[0]],
+                remove_copies: true,
+            },
+        )
+        .unwrap();
+    assert!(freed.freed_bytes > 0);
+    let kept = store.item(album).unwrap();
+    assert_eq!(kept.captures.len(), 2);
+    assert!(kept.specimens.iter().any(|s| s.id == copy));
+    assert_eq!(
+        rows_mentioning_outside_lookup_history(root.path(), &discs[0].to_string()),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        archive_paths_mentioning(root.path(), &discs[0].to_string()),
+        Vec::<String>::new()
+    );
+
+    // Keeping the record: the disc's files go, the copy stays.
+    let kept_record = {
+        let mut copy_kept = store.item(album).unwrap();
+        let expected = copy_kept.revision;
+        copy_kept.specimens[0].label = "Given away".into();
+        Catalog::save(store.as_ref(), copy_kept, expected).unwrap()
+    };
+    let _ = kept_record;
+    let current = store.item(album).unwrap();
+    // Asking to remove the record of the last disc removes it.
+    service
+        .purge_item_files(
+            &actor,
+            album,
+            collector_app::PurgeItemFiles {
+                expected_revision: current.revision,
+                captures: vec![discs[1]],
+                remove_copies: true,
+            },
+        )
+        .unwrap();
+    let kept = store.item(album).unwrap();
+    assert_eq!(kept.captures.len(), 1);
+    assert!(!kept.specimens.iter().any(|s| s.id == copy));
+    assert_eq!(
+        rows_mentioning_outside_lookup_history(root.path(), &copy.to_string()),
+        Vec::<String>::new()
+    );
+    assert!(
+        !root
+            .path()
+            .join("state/item-purges")
+            .join(format!("{album}.json"))
+            .exists()
+    );
+    drop(service);
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert_eq!(Catalog::item(&store, album).unwrap().captures.len(), 1);
+}
+
+#[test]
+fn a_disc_from_a_combined_album_can_be_deleted() {
+    let (root, store, actor, service, collection) = setup();
+    let (album, merged) = (
+        admit_one_track(&service, &actor, collection.id),
+        admit_one_track(&service, &actor, collection.id),
+    );
+    // The disc that came from the merged entry is named in the combine record.
+    let disc = store.item(merged).unwrap().captures[0].id;
+    let grouped = combine(&service, &store, &actor, album, merged);
+    let current = store.item(album).unwrap();
+    service
+        .purge_item_files(
+            &actor,
+            album,
+            collector_app::PurgeItemFiles {
+                expected_revision: current.revision,
+                captures: vec![disc],
+                remove_copies: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(store.item(album).unwrap().captures.len(), 1);
+    assert_eq!(
+        archive_paths_mentioning(root.path(), &disc.to_string()),
+        Vec::<String>::new()
+    );
+    let undo = service.album_group_undo(&actor, grouped);
+    assert!(matches!(undo, Err(Error::Invalid(_))));
+    drop(service);
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert_eq!(Catalog::item(&store, album).unwrap().captures.len(), 1);
+}
+
+#[test]
+fn a_rebuild_between_the_two_steps_of_deleting_a_disc_still_loads() {
+    let (root, store, actor, service, collection) = setup();
+    let album = admit_one_track(&service, &actor, collection.id);
+    let disc = store.item(album).unwrap().captures[0].id;
+    // An upload's integrity check is evidence about the disc, listed by the album.
+    assert!(!store.evidence(album).unwrap().is_empty());
+    let current = store.item(album).unwrap();
+    drop(service);
+    drop(store);
+    // Step one finishes; saving the album's new revision fails, as in a crash.
+    let faulty = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::Prepared,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(faulty.clone(), Arc::new(Registry::builtins()));
+    assert!(
+        service
+            .purge_item_files(
+                &actor,
+                album,
+                collector_app::PurgeItemFiles {
+                    expected_revision: current.revision,
+                    captures: vec![disc],
+                    remove_copies: false,
+                },
+            )
+            .is_err()
+    );
+    assert!(
+        root.path()
+            .join("state/item-purges")
+            .join(format!("{album}.json"))
+            .exists()
+    );
+    drop(service);
+    drop(faulty);
+    // A full rebuild must load although the album's last revision lists the deleted evidence.
+    std::fs::remove_file(root.path().join("state/catalog.sqlite")).unwrap();
+    let store = Store::open(root.path().join("archive"), root.path().join("state")).unwrap();
+    assert!(
+        !root
+            .path()
+            .join("state/item-purges")
+            .join(format!("{album}.json"))
+            .exists()
+    );
+    let item = Catalog::item(&store, album).unwrap();
+    assert!(item.captures.is_empty());
+    assert!(Catalog::evidence(&store, album).unwrap().is_empty());
+    store.reindex().unwrap();
+    assert!(Catalog::evidence(&store, album).unwrap().is_empty());
+}
+
+#[test]
+fn a_later_deletion_finishes_an_earlier_one_that_stopped_part_way() {
+    let (root, store, actor, service, collection) = setup();
+    let album = admit_one_track(&service, &actor, collection.id);
+    let disc = store.item(album).unwrap().captures[0].id;
+    let current = store.item(album).unwrap();
+    drop(service);
+    drop(store);
+    let faulty = Arc::new(
+        Store::open_with_publication_fault(
+            root.path().join("archive"),
+            root.path().join("state"),
+            Arc::new(FailPublicationOnce {
+                point: collector_store::PublicationFaultPoint::Prepared,
+                failed: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let service = CollectionService::new(faulty.clone(), Arc::new(Registry::builtins()));
+    let delete = |expected| {
+        service.purge_item_files(
+            &actor,
+            album,
+            collector_app::PurgeItemFiles {
+                expected_revision: expected,
+                captures: vec![disc],
+                remove_copies: false,
+            },
+        )
+    };
+    assert!(delete(current.revision).is_err());
+    let journal = root
+        .path()
+        .join("state/item-purges")
+        .join(format!("{album}.json"));
+    assert!(journal.exists());
+    // The next deletion on this entry saves the earlier one's new revision
+    // first, so its plan is never replaced while it still has work left.
+    assert!(matches!(delete(current.revision), Err(Error::Conflict)));
+    assert!(!journal.exists());
+    let saved = Catalog::item(faulty.as_ref(), album).unwrap();
+    assert!(saved.revision > current.revision);
+    assert!(saved.captures.is_empty());
+}
+
+#[test]
+fn deleting_files_can_keep_the_copy_record() {
+    let (root, store, actor, service, collection) = setup();
+    let album = admit_one_track(&service, &actor, collection.id);
+    let copy = SpecimenId::new();
+    let mut with_copy = store.item(album).unwrap();
+    let expected = with_copy.revision;
+    with_copy.specimens.push(Specimen {
+        id: copy,
+        label: "Owned copy".into(),
+        condition: Condition::Good,
+        ownership: Ownership::Owned,
+        possession: Possession::Present,
+        acquisition: None,
+        components: vec![],
+        loans: vec![],
+        private_notes: None,
+    });
+    Catalog::save(store.as_ref(), with_copy, expected).unwrap();
+    let mut capture = store.item(album).unwrap().captures[0].clone();
+    let revision = capture.revision;
+    capture.association.specimen_id = Some(copy);
+    Catalog::save_capture(store.as_ref(), capture.clone(), revision).unwrap();
+    let current = store.item(album).unwrap();
+    service
+        .purge_item_files(
+            &actor,
+            album,
+            collector_app::PurgeItemFiles {
+                expected_revision: current.revision,
+                captures: vec![capture.id],
+                remove_copies: false,
+            },
+        )
+        .unwrap();
+    let kept = store.item(album).unwrap();
+    assert!(kept.captures.is_empty());
+    assert!(kept.specimens.iter().any(|s| s.id == copy));
+    assert_eq!(
+        rows_mentioning_outside_lookup_history(root.path(), &capture.id.to_string()),
+        Vec::<String>::new()
+    );
+    drop(service);
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert!(
+        Catalog::item(&store, album)
+            .unwrap()
+            .specimens
+            .iter()
+            .any(|s| s.id == copy)
+    );
+}
+
+#[test]
 fn malformed_purchase_audio_never_advertises_ready_playback() {
     let (_root, _store, actor, service, collection) = setup();
     for (name, data) in [
@@ -32255,6 +32926,31 @@ fn a_finished_inbox_copy_is_not_reported_failed_or_repeated_after_a_lost_claim()
     let shown = step(&service);
     assert_eq!(shown.state, collector_app::IngestStepState::Succeeded);
     assert!(!shown.retryable, "a finished copy offers no retry");
+    // Review's list and row agree with the detail: nothing here needs the curator.
+    let listed = |status| {
+        service
+            .ingest_page(
+                &actor,
+                collector_app::IngestListFilter {
+                    collection: None,
+                    status: Some(status),
+                    intake: None,
+                },
+                None,
+                50,
+            )
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|summary| summary.import_id)
+            .collect::<Vec<_>>()
+    };
+    assert!(!listed(collector_app::IngestListStatus::Attention).contains(&id));
+    assert!(listed(collector_app::IngestListStatus::Added).contains(&id));
+    assert_ne!(
+        service.ingest_detail(&actor, id).unwrap().summary.outcome,
+        collector_app::IngestStepState::Failed
+    );
 
     // A retry already queued by an older release must finish without the inbox.
     store.retry_failed_job(staging, actor.user_id).unwrap();

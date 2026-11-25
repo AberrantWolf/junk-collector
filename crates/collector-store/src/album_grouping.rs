@@ -113,6 +113,9 @@ impl AlbumGroupingPort for Store {
                 if manifest.transaction_id != group {
                     return Err(Error::Storage("group identity mismatch".into()));
                 }
+                if let Some(note) = item_purge::retired_combine(&manifest.decision) {
+                    return Err(Error::Invalid(note));
+                }
                 return manifest.decision.parse();
             }
         }

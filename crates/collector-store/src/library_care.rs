@@ -38,11 +38,11 @@ const PREPARATION_ROWS: &str = "FROM items i
 
 /// The newest metadata lookup for the entry failed.
 const FAILED_LOOKUP: &str = "EXISTS(SELECT 1 FROM private.jobs j WHERE j.item_id=i.id AND j.user_id=?1 AND j.kind='metadata_resolution' AND j.state='failed' AND NOT EXISTS(SELECT 1 FROM private.jobs later WHERE later.item_id=j.item_id AND later.user_id=j.user_id AND later.kind=j.kind AND (later.created_at,later.id)>(j.created_at,j.id)))";
-/// Another live entry shares a proposed album identity.
 /// Review lists put entries that are blocked first, then sort by title. The
 /// cursor carries this whole key, so the order holds across pages.
 const REVIEW_ORDER: &str =
     "(CASE h.blocked WHEN 1 THEN '0' ELSE '1' END||COALESCE(d.title_key,h.title_key))";
+/// Another live entry shares a proposed album identity.
 const GROUPING_PROPOSAL: &str = "EXISTS(SELECT 1 FROM album_group_members own JOIN album_group_members peer ON peer.collection_id=own.collection_id AND peer.album_id=own.album_id AND peer.item_id<>own.item_id JOIN items sibling ON sibling.id=peer.item_id AND sibling.deleted=0 WHERE own.item_id=i.id)";
 
 impl LibraryCarePort for Store {

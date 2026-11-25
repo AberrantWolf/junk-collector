@@ -5568,6 +5568,56 @@
         }
       }
     },
+    "/api/v1/items/{id}/files/purge": {
+      "post": {
+        "operationId": "purge_item_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeItemFiles"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemPurgeResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Unprocessable Entity"
+          }
+        }
+      }
+    },
     "/api/v1/items/{id}/identify-game": {
       "post": {
         "operationId": "identify_game_entry",
@@ -6382,6 +6432,56 @@
           },
           "404": {
             "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/items/{id}/purge": {
+      "post": {
+        "operationId": "purge_item",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemLifecycleCommand"
+              }
+            }
+          },
+          "required": true,
+          "x-body-limit-bytes": 2097152
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemPurgeResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Unprocessable Entity"
           }
         }
       }
@@ -15784,6 +15884,21 @@
         },
         "additionalProperties": false
       },
+      "ItemPurgeResult": {
+        "type": "object",
+        "description": "What a permanent deletion did.",
+        "required": [
+          "freed_bytes"
+        ],
+        "properties": {
+          "freed_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk space given back by deleting the entry's files.",
+            "minimum": 0
+          }
+        }
+      },
       "ItemReimport": {
         "type": "object",
         "required": [
@@ -22609,6 +22724,32 @@
             ]
           }
         }
+      },
+      "PurgeItemFiles": {
+        "type": "object",
+        "description": "Originals to delete permanently from an entry that stays.",
+        "required": [
+          "expected_revision",
+          "captures",
+          "remove_copies"
+        ],
+        "properties": {
+          "captures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureId"
+            },
+            "description": "The originals (discs or purchases) to delete."
+          },
+          "expected_revision": {
+            "$ref": "#/components/schemas/Revision"
+          },
+          "remove_copies": {
+            "type": "boolean",
+            "description": "Also delete the physical copy records these originals alone came from."
+          }
+        },
+        "additionalProperties": false
       },
       "RecoverAccount": {
         "type": "object",

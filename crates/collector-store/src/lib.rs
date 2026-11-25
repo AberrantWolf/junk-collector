@@ -19,6 +19,7 @@ mod files;
 mod group_publication;
 mod index_checkpoint;
 mod item_lifecycle;
+mod item_purge;
 mod jobs;
 mod library;
 mod library_care;
@@ -531,6 +532,7 @@ impl Store {
             }
         }
         migrate_databases(&mut db)?;
+        item_purge::finish_interrupted(&mut db, &archive, &state)?;
         if !recovery_report.unknown_staging.is_empty() {
             let mut statement = db.prepare(
                 "SELECT directory FROM private.import_publication_stages WHERE directory IS NOT NULL
@@ -593,6 +595,7 @@ impl Store {
         if !store.catalog_reused {
             store.reindex_catalog(false)?;
         }
+        store.finish_interrupted_kept_entries()?;
         tracing::info!(
             reused = store.catalog_reused,
             metadata_files,
@@ -689,6 +692,7 @@ impl Store {
         let mut capture_locators = Vec::new();
         let mut assets_v3 = Vec::new();
         let mut evidence_v3 = Vec::new();
+        let pending_evidence = item_purge::pending_evidence(&self.state)?;
         for dir in directories(&self.archive.join("collections"))? {
             let path = dir.join("collection.toml");
             if !path.try_exists().map_err(storage)? {
@@ -724,7 +728,13 @@ impl Store {
                 lists.push(list);
             }
             assets_v3.extend(migration_v3::read_assets(&dir, collection.id)?);
-            evidence_v3.extend(migration_v3::read_evidence(&dir, collection.id)?);
+            // Evidence a saved deletion plan is removing counts as gone, even
+            // where the surviving entry's last revision still lists it.
+            evidence_v3.extend(
+                migration_v3::read_evidence(&dir, collection.id)?
+                    .into_iter()
+                    .filter(|evidence| !pending_evidence.contains(&evidence.id.to_string())),
+            );
             works.extend(read_latest_records::<Work>(
                 &dir.join("works"),
                 collection.id,
@@ -756,7 +766,9 @@ impl Store {
                             .iter()
                             .map(|reference| (reference.id, reference.sha256.as_str()))
                             .collect::<std::collections::BTreeMap<_, _>>();
-                        for reference in &references {
+                        for reference in references.iter().filter(|reference| {
+                            !pending_evidence.contains(&reference.id.to_string())
+                        }) {
                             let evidence = evidence_v3
                                 .iter()
                                 .find(|evidence| {
@@ -1143,6 +1155,9 @@ impl Store {
                 (previous.revision, self.item_path(item.id)?)
             }
             Err(Error::NotFound) => {
+                if item_purge::was_purged(&*lock(&self.db)?, item.id)? {
+                    return Err(Error::Invalid("This entry was permanently deleted.".into()));
+                }
                 let dir: String = lock(&self.db)?
                     .query_row(
                         "SELECT path FROM collections WHERE id=?",
@@ -2946,6 +2961,7 @@ fn migrate_databases(db: &mut Connection) -> Result<()> {
     }
     db.execute_batch("CREATE INDEX IF NOT EXISTS private.guided_ingest_item_activity ON guided_ingest_intents(target_item_id,settled,cancelled);
         CREATE TABLE IF NOT EXISTS private.item_job_generations(job_id TEXT PRIMARY KEY, generation INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS private.item_import_generations(import_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)").map_err(storage)?;
+    item_purge::install(db)?;
     let cleanup_complete_column: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('import_cleanup','private') WHERE name='completed')", [], |row| row.get(0)).map_err(storage)?;
     if !cleanup_complete_column {
         db.execute_batch(
@@ -3782,6 +3798,18 @@ impl Catalog for Store {
     }
     fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item> {
         self.change_item_removed(id, expected, removed)
+    }
+    fn purge_removed_item(&self, id: ItemId, expected: Revision) -> Result<u64> {
+        Store::purge_removed_item(self, id, expected)
+    }
+    fn purge_item_files(
+        &self,
+        id: ItemId,
+        expected: Revision,
+        captures: &[CaptureId],
+        remove_copies: bool,
+    ) -> Result<u64> {
+        Store::purge_item_files(self, id, expected, captures, remove_copies)
     }
     fn retire_item_if_unchanged(
         &self,

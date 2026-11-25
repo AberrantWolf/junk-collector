@@ -688,5 +688,81 @@ try{
  const groupedAlbum=await page.evaluate(async id=>(await fetch(`/api/v1/items/${id}`)).json(),groupedMembers[0].import.target_item_id);
  assert.deepEqual(groupedAlbum.captures.map(capture=>capture.representations.length),[1,1],
   'No preparation batch should encode the other disc’s excluded WAV');
+ // Two purchases holding disc 1 and disc 2 are one copy, so no copy choice.
+ await page.goto(`${origin}/?collection=${collection}&item=${groupedMembers[0].import.target_item_id}`);
+ await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track').first()).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Plays from'})).toHaveCount(0);
+ // Combining two entries that both hold disc 1 gives an album with two copies.
+ // Choosing one makes album playback use only it; the other stays listed apart.
+ const combined=await page.evaluate(async ids=>{
+  const post=async(path,body)=>{const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(body)});if(!response.ok)throw Error(await response.text());return response.json();};
+  const entries=await Promise.all(ids.map(async id=>{const item=await(await fetch(`/api/v1/items/${id}`)).json();return {item_id:id,expected_revision:item.revision};}));
+  const preview={destination:ids[0],entries,choices:{title_from:ids[0],subtitle_from:ids[0],assemblies:[],disc_positions:[]}};
+  const reviewed=await post('/api/v1/album-groups/preview',preview);
+  if(!reviewed.can_confirm)throw Error(JSON.stringify(reviewed.conflicts));
+  return (await post('/api/v1/album-groups',{preview,token:reviewed.token})).destination;
+ },[otherMember.import.target_item_id,flacMember.import.target_item_id]);
+ await page.goto(`${origin}/?collection=${collection}&item=${combined}`);
+ const combinedTracks=page.getByRole('region',{name:'Album tracks'});
+ const playsFrom=combinedTracks.getByRole('combobox',{name:'Plays from'});
+ await expect(playsFrom).toHaveValue('');
+ await expect(playsFrom.locator('option')).toHaveCount(3);
+ const sources=()=>page.evaluate(async id=>{const response=await fetch(`/api/v1/items/${id}/client-playback`);return response.ok?[...new Set((await response.json()).tracks.map(track=>track.source_representation_id))]:[];},combined);
+ const chosen=await playsFrom.locator('option').nth(1).getAttribute('value');
+ await playsFrom.selectOption(chosen);
+ await expect(playsFrom).not.toHaveValue('');
+ await expect.poll(async()=>(await sources()).length).toBe(1);
+ const kept=(await sources())[0];
+ // One copy chosen, the album is no longer reported as needing attention.
+ await expect(page.locator('aside.detail').getByText('Album playback needs attention')).toBeHidden({timeout:15000});
+ // Only the FLAC purchase has a format choice, and only while the album uses it.
+ await expect(combinedTracks.getByRole('combobox',{name:/^Album uses/})).toHaveCount(await playsFrom.inputValue()===steamAlbum.captures[0].representations[0].id?1:0);
+ await expect(combinedTracks.locator('details.other-tracks')).toBeVisible();
+ await page.screenshot({path:path.join(scratch,'plays-from-desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:path.join(scratch,'plays-from-mobile.png'),fullPage:true});console.log(`Plays from screenshots: ${scratch}`);
+ await page.setViewportSize({width:1440,height:1000});
+ const other=await playsFrom.locator('option').nth(1).getAttribute('value')===chosen?await playsFrom.locator('option').nth(2).getAttribute('value'):await playsFrom.locator('option').nth(1).getAttribute('value');
+ await playsFrom.selectOption(other);
+ await expect.poll(async()=>{const now=await sources();return now.length===1&&now[0]!==kept;}).toBe(true);
+ await combinedTracks.getByRole('button',{name:'Use every copy'}).click();
+ await expect(playsFrom).toHaveValue('');
+ // A combined album offers every choice, and says the combine can't be undone after deleting.
+ await page.getByRole('button',{name:'Album management',exact:true}).click();
+ await page.getByRole('button',{name:'Remove item',exact:true}).click();
+ const removeDialog=page.getByRole('dialog',{name:/^Remove /});
+ await expect(removeDialog.getByRole('radio')).toHaveCount(3);
+ await removeDialog.getByRole('radio',{name:/Delete everything/}).check();
+ await expect(removeDialog).toContainText('combine can no longer be undone');
+ await removeDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(removeDialog).toHaveCount(0);
+ // One copy of the combined album is deleted from its disc menu; the album keeps the other.
+ const beforeCaptures=await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).captures.map(capture=>capture.id),combined);
+ assert.equal(beforeCaptures.length,2);
+ await combinedTracks.getByRole('button',{name:/^Disc 1 actions$|^Other copy 1 actions$/}).first().click();
+ await page.getByRole('button',{name:'Delete these files…',exact:true}).click();
+ const filesDialog=page.getByRole('dialog',{name:/^Delete /});
+ await expect(filesDialog).toContainText('stays');
+ await page.screenshot({path:path.join(scratch,'delete-files-desktop.png')});
+ await filesDialog.getByRole('button',{name:'Delete files permanently',exact:true}).click();
+ await expect(filesDialog).toHaveCount(0,{timeout:30000});
+ await expect(combinedTracks.getByText(/and freed/)).toBeVisible();
+ await expect.poll(async()=>(await page.evaluate(async id=>(await(await fetch(`/api/v1/items/${id}`)).json()).captures.length,combined))).toBe(1);
+ await expect(combinedTracks.getByRole('combobox',{name:'Plays from'})).toHaveCount(0);
+ // Choosing "Delete everything" removes the entry and deletes its files and data for good.
+ const doomed=wildMember.import.target_item_id;
+ await page.goto(`${origin}/?collection=${collection}&item=${doomed}`);
+ await page.getByRole('button',{name:'Album management',exact:true}).click();
+ await page.getByRole('button',{name:'Remove item',exact:true}).click();
+ await expect(removeDialog.getByRole('button',{name:'Remove entry',exact:true})).toBeVisible();
+ await removeDialog.getByRole('radio',{name:/Delete everything/}).check();
+ await page.screenshot({path:path.join(scratch,'remove-entry-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:path.join(scratch,'remove-entry-mobile.png')});
+ await page.setViewportSize({width:1440,height:1000});
+ await removeDialog.getByRole('button',{name:'Remove and delete permanently',exact:true}).click();
+ await expect(removeDialog).toHaveCount(0,{timeout:30000});
+ await expect(page.getByText(/permanently and freed/)).toBeVisible();
+ assert.equal(await page.evaluate(async id=>(await fetch(`/api/v1/items/${id}`)).status,doomed),404);
  assert.deepEqual(errors,[]);console.log(`Digital purchase browser acceptance passed (Chrome ${await browser.version()}): real setup, reviewed sharing/purchase, interrupted upload/resume, configured inbox, publication, artwork, direct album/track FLAC+MP3 Play, alternate-encoding review, obsolete-request fencing, playlists, paused reload, manual title/purchase edits, failed-source guidance, WAV digital intake/native FLAC preparation/real playback/reload, embedded tags/cover, portable FLAC metadata/artwork export, in-place source analysis, Steam format-folder discovery, paged bulk album metadata and failure recovery, striped rows, loading states and mobile layout. Artifacts: ${scratch}`);
 }catch(error){console.error(error);console.error(logs);console.error('Browser state:',page?.url(),await page?.locator('body').innerText({timeout:2000}).catch(()=>''));await page?.screenshot({path:path.join(scratch,'failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{try{await browser?.close();}finally{await stopProcess(server);}}

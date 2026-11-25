@@ -761,6 +761,8 @@ fn curation_api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(save_item))
         .routes(routes!(remove_item))
         .routes(routes!(restore_item))
+        .routes(routes!(purge_item))
+        .routes(routes!(purge_item_files))
         .routes(routes!(create_specimen))
         .routes(routes!(update_specimen))
         .routes(routes!(create_component))
@@ -2406,6 +2408,37 @@ async fn remove_item(
                 .set_item_removed(&actor, id, input.expected_revision, true, &context)
         })
         .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/purge", params(("id" = ItemId, Path)), request_body = ItemLifecycleCommand, responses((status = 200, body = collector_app::ItemPurgeResult), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn purge_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(input): Json<ItemLifecycleCommand>,
+) -> ApiResult<Json<collector_app::ItemPurgeResult>> {
+    let actor = principal(&state, &headers).await?;
+    Ok(Json(
+        blocking(move || {
+            state
+                .service
+                .purge_item(&actor, id, input.expected_revision)
+        })
+        .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/items/{id}/files/purge", params(("id" = ItemId, Path)), request_body = collector_app::PurgeItemFiles, responses((status = 200, body = collector_app::ItemPurgeResult), (status = 403), (status = 404), (status = 409), (status = 422)))]
+async fn purge_item_files(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<ItemId>,
+    Json(input): Json<collector_app::PurgeItemFiles>,
+) -> ApiResult<Json<collector_app::ItemPurgeResult>> {
+    let actor = principal(&state, &headers).await?;
+    Ok(Json(
+        blocking(move || state.service.purge_item_files(&actor, id, input)).await?,
     ))
 }
 

@@ -239,6 +239,39 @@ impl CollectionService {
             self.music_track_availability_for_item(actor.user_id, item)?
         };
         let coverage = self.music_album_coverage(actor, item.id)?;
+        // An original whose every track was explicitly left out of the album,
+        // such as the copy not chosen when an album holds a physical and a
+        // digital copy, is not part of whole-album playback. It stays playable
+        // on its own. Tracks left out by default (an MP3 beside a FLAC, or a
+        // file this listener can't see) don't count: they don't say the curator
+        // chose another copy.
+        let unused = if track.is_none() {
+            let edits = self.listening_track_overrides(item)?;
+            let left_out = |row: &collector_api_types::MusicTrackAvailability| {
+                edits.iter().any(|edit| {
+                    edit.source_representation_id == row.source_representation_id
+                        && edit.track_position == row.track_position
+                        && edit.album_selected == Some(false)
+                })
+            };
+            let mut sources = BTreeMap::<RepresentationId, bool>::new();
+            for row in rows.iter().filter(|row| row.primary_playback()) {
+                *sources.entry(row.source_representation_id).or_insert(true) &= left_out(row);
+            }
+            sources
+                .into_iter()
+                .filter_map(|(id, excluded)| excluded.then_some(id))
+                .collect::<BTreeSet<_>>()
+        } else {
+            BTreeSet::new()
+        };
+        // Asked for by name, an unused original plays all of its tracks.
+        let chosen_unused = source.is_some_and(|id| unused.contains(&id));
+        let unused = if source.is_some() {
+            BTreeSet::new()
+        } else {
+            unused
+        };
         // Availability can retain only prepared tracks when original bytes are
         // absent. A disc/album addition must not turn that partial view into a
         // successful-looking complete expansion. Recorded structure defines the
@@ -253,6 +286,7 @@ impl CollectionService {
             }
             for candidate in coverage.sources.iter().filter(|candidate| {
                 source.is_none_or(|id| candidate.source_representation_id == id)
+                    && !unused.contains(&candidate.source_representation_id)
             }) {
                 if let Some(manifest) = self
                     .recorded_file_tracks(item.collection_id, candidate.source_representation_id)?
@@ -330,7 +364,10 @@ impl CollectionService {
             }
         }
         let mut discs: BTreeMap<String, BTreeSet<RepresentationId>> = BTreeMap::new();
-        for row in rows.iter().filter(|r| r.primary_playback()) {
+        for row in rows
+            .iter()
+            .filter(|r| r.primary_playback() && !unused.contains(&r.source_representation_id))
+        {
             let medium = coverage
                 .sources
                 .iter()
@@ -399,6 +436,7 @@ impl CollectionService {
                     && selected.contains(&r.source_representation_id)
                     && track.is_none_or(|p| p == r.track_position)
                     && (track.is_some()
+                        || chosen_unused
                         || r.album_selection == collector_api_types::MusicAlbumSelection::Included)
             })
             .collect::<Vec<_>>();

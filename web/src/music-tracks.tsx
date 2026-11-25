@@ -2,6 +2,8 @@ import {PreparationFormat,conversionProfile,preparationQuery,profileLabel,type P
 import AccurateRipCheck from './accuraterip-check';
 import PurchaseDetails from './purchase-details';
 import ActionMenu from './action-menu';
+import {DeleteFilesDialog} from './remove-entry';
+import {bytes} from './work-progress';
 import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
 import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks,retainUnchanged} from '@collector/runtime';
@@ -31,6 +33,35 @@ function preferredAvailable(group:Availability[]):Availability|undefined{
  const available=group.filter(row=>row.state.status==='available'&&canDecode(row));
  return available.find(row=>!row.profile)||available.find(row=>row.profile?.codec==='flac')||available[0];
 }
+// Copies the album could play from, when it holds more than one, such as a
+// CD set and a digital purchase of the same album. Originals are alternative
+// copies only when they cover the same album disc: CD rips form one copy, and
+// each digital purchase joins the first copy whose discs it doesn't repeat, so
+// two purchases holding disc 1 and disc 2 stay one copy. Saved formats are not
+// compared, only originals.
+function albumCopies(rows:Availability[],sourceLabel:(id:string)=>string){
+ const fileSources=new Set(rows.filter(row=>!row.profile).map(row=>row.source_representation_id));
+ type Source={positions:Set<number>;discs:Set<number>;used:boolean};
+ const sources=new Map<string,Source>();
+ for(const row of rows){
+  const file=fileSources.has(row.source_representation_id);
+  if(file?!!row.profile:row.profile?.codec!=='flac')continue;
+  const source=sources.get(row.source_representation_id)||{positions:new Set<number>(),discs:new Set<number>(),used:false};
+  source.positions.add(row.track_position);source.discs.add(row.disc_position??1);if(row.album_selection!=='excluded')source.used=true;
+  sources.set(row.source_representation_id,source);}
+ type Copy={key:string;sources:Map<string,Source>;discs:Set<number>;rips:number;files:string[]};
+ const copies:Copy[]=[];
+ const rips=[...sources].filter(([id])=>!fileSources.has(id));
+ if(rips.length)copies.push({key:'discs',sources:new Map(rips),discs:new Set(rips.flatMap(([,source])=>[...source.discs])),rips:rips.length,files:[]});
+ for(const [id,source] of sources){if(!fileSources.has(id))continue;
+  let copy=copies.find(copy=>![...source.discs].some(disc=>copy.discs.has(disc)));
+  if(!copy){copy={key:id,sources:new Map(),discs:new Set(),rips:0,files:[]};copies.push(copy);}
+  copy.sources.set(id,source);source.discs.forEach(disc=>copy!.discs.add(disc));copy.files.push(id);}
+ if(copies.length<2)return [];
+ return copies.map(copy=>({key:copy.key,sources:copy.sources,used:[...copy.sources.values()].some(source=>source.used),
+  label:[copy.rips?`CD rips (${copy.rips} ${copy.rips===1?'disc':'discs'})`:'',copy.files.length===1?`Digital files · ${sourceLabel(copy.files[0])}`:copy.files.length?`${copy.files.length} digital purchases`:''].filter(Boolean).join(' + ')}));
+}
+
 function discKey(row:Availability):string{return `${row.capture_id}/${row.source_representation_id}`;}
 function trackKey(row:Availability):string{return `${discKey(row)}/${row.track_position}`;}
 function discPosition(coverage:Coverage|undefined,key:string):number{
@@ -76,6 +107,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
  const [queueNotice,setQueueNotice]=useState('');
+ const [deleting,setDeleting]=useState<{captureId:string;title:string}>();
  const [playBusy,setPlayBusy]=useState(false);
  const playback=useRef<AbortController|null>(null);
  const [busy,setBusy]=useState(false);
@@ -221,6 +253,29 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
    if(controller.signal.aborted)return;setEditingTrack(undefined);setAvailabilityRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
   }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
  }
+ // Leaves every other copy out of the album, so playback and lists use only
+ // the chosen one; the others stay saved and playable on their own. An empty
+ // key puts back copies that were left out whole. Per-track choices inside the
+ // chosen copy, such as an MP3 beside a WAV, are kept.
+ async function chooseAlbumCopy(key:string){
+  const controller=requests.current;setBusy(true);setError('');setEditingTrack(undefined);
+  // Read the current tracks, not the shown list, which may predate the last change.
+  try{const [review,current]=await Promise.all([api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal}),api<Availability[]>(`/items/${item.id}/music-tracks`,{signal:controller.signal})]);
+   const previous=review.authority.domain_overrides;const payload=object(previous?.payload);
+   const existing=Array.isArray(payload.track_overrides)?payload.track_overrides.map(object):[];
+   const changes=new Map<string,{positions:Set<number>;selected:boolean|null}>();
+   for(const choice of albumCopies(current,preparationSourceLabel))for(const [id,source] of choice.sources){
+    if(key&&choice.key!==key)changes.set(id,{positions:source.positions,selected:false});
+    else if(!source.used)changes.set(id,{positions:source.positions,selected:null});
+   }
+   const touched=(value:Record<string,unknown>)=>changes.get(String(value.source_representation_id))?.positions.has(Number(value.track_position));
+   const updated=[...changes.entries()].flatMap(([id,change])=>[...change.positions].map(position=>{const prior=existing.find(value=>value.source_representation_id===id&&value.track_position===position);
+    return {source_representation_id:id,track_position:position,title:prior?.title??null,disc_position:prior?.disc_position??null,display_position:prior?.display_position??null,album_selected:change.selected};
+   })).filter(value=>value.title!=null||value.disc_position!=null||value.display_position!=null||value.album_selected!=null);
+   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:[...existing.filter(value=>!touched(value)),...updated]}}}})});
+   if(controller.signal.aborted)return;setAvailabilityRefresh(v=>v+1);setRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
+  }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
+ }
  // Sets which copy the album uses for every track of one original at once,
  // such as WAV instead of MP3. Automatic clears the choices and lets the server
  // pick the best quality again. Other per-track edits are kept.
@@ -258,12 +313,17 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
    const count=source.codecs.get(row.audio_format.codec)||{included:0,total:0};
    count.total++;if(row.album_selection==='included')count.included++;
    source.codecs.set(row.audio_format.codec,count);sources.set(row.source_representation_id,source);}
-  return [...sources.entries()].filter(([,source])=>source.codecs.size>1).map(([id,source])=>{
+  // A copy the album doesn't use offers no format choice; picking one there
+  // would quietly bring that copy back. Plays from handles copies.
+  return [...sources.entries()].filter(([,source])=>source.codecs.size>1&&[...source.codecs.values()].some(count=>count.included>0)).map(([id,source])=>{
    const codecs=[...source.codecs.entries()];
    const used=codecs.filter(([,count])=>count.included>0);
    return {id,label:source.label,codecs:codecs.map(([codec])=>codec),current:used.length===1&&used[0][1].included===used[0][1].total?used[0][0]:''};
   });
  },[rows]);
+ const copyChoices=React.useMemo(()=>albumCopies(rows,preparationSourceLabel),
+  [rows,item.captures]);
+ const currentCopy=copyChoices.filter(choice=>choice.used).length===1?copyChoices.find(choice=>choice.used)!.key:'';
  const orderedMedia=[...(coverage?.media||[])].sort((a,b)=>a.position-b.position);
  const orderedPlanDiscs=[...(plan?.discs||[])].sort((a,b)=>{
   const selected=(disc:AlbumPlan['discs'][number])=>disc.sources.find(source=>source.source_representation_id===discSources[disc.capture_id])||disc.sources.find(source=>source.default_selected);
@@ -317,8 +377,11 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   const added=addMusicTracks(tracks);setQueueNotice(added===tracks.length?`Added ${added} ${added===1?'track':'tracks'} to your queue.`:`Added ${added} tracks. The queue is full (5,000 tracks).`);
  }
 
+ const discTitle=(key:string,tracks:Availability[][],discIndex:number)=>{const medium=coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position;return medium?`Album disc ${medium}`:tracks[0][0].profile?`Disc ${discIndex+1}`:'Digital original';};
+ // Deleting files is for a disc given away or imported twice; the rest of the album stays.
+ const canDeleteFiles=item.content_permissions.can_edit&&!item.deleted&&!item.merged_into;
  const renderDisc=([key,tracks]:(typeof discs)[number],discIndex:number,other=false)=><article className="music-disc" key={key} data-disc-key={key}>
-   <header><strong>{coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position?`Album disc ${coverage.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)!.medium_position}`:tracks[0][0].profile?`Disc ${discIndex+1}`:'Digital original'}</strong>{!other&&<button disabled={playBusy||!tracks.some(playableRow)} title="Replaces your queue" onClick={()=>void play(tracks[0][0].source_representation_id)}>Play original</button>}{!other&&onAddToList&&<ActionMenu label={`Disc ${discIndex+1} actions`}><button onClick={()=>onAddToList(tracks[0][0].source_representation_id)}>{tracks[0][0].profile?'Add disc to list':'Add original to list'}</button></ActionMenu>}</header>
+   <header><strong>{discTitle(key,tracks,discIndex)}</strong>{!other&&<button disabled={playBusy||!tracks.some(playableRow)} title="Replaces your queue" onClick={()=>void play(tracks[0][0].source_representation_id)}>Play original</button>}{((!other&&onAddToList)||canDeleteFiles)&&<ActionMenu label={`${other?'Other copy':'Disc'} ${discIndex+1} actions`}>{!other&&onAddToList&&<button onClick={()=>onAddToList(tracks[0][0].source_representation_id)}>{tracks[0][0].profile?'Add disc to list':'Add original to list'}</button>}{canDeleteFiles&&<button onClick={()=>setDeleting({captureId:tracks[0][0].capture_id,title:`${discTitle(key,tracks,discIndex).toLowerCase()} (import ${tracks[0][0].capture_id.slice(-6)})`})}>Delete these files…</button>}</ActionMenu>}</header>
    <small className="playback-source">Original: {tracks[0][0].source_label} · Import {tracks[0][0].capture_id.slice(-6)}</small>
    {tracks.map((group,index)=>{const first=group[0];const playable=playableRow(group);const flac=group.find(row=>row.profile?.codec==='flac'&&row.state.status==='available');
     return <div className="music-track" key={trackKey(first)} data-track-position={first.track_position} data-representation-id={playable?.state.status==='available'?playable.state.representation_id:undefined}>
@@ -365,7 +428,9 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   {canPrepareRequested&&item.digital_audio&&item.captures.map(capture=><PurchaseDetails key={`${item.id}/${capture.id}`} itemId={item.id} capture={capture} onChanged={()=>{setAvailabilityRefresh(v=>v+1);if(callbacks.current.onPrepared)void api<Item>(`/items/${item.id}`,{signal:requests.current.signal}).then(value=>callbacks.current.onPrepared?.(value)).catch(report);}}/>)}
   {rows.some(row=>row.album_selection==='needs_review')&&<p className="notice">Some tracks have more than one version. A curator can choose one with Edit track details before the album can play.</p>}{queueNotice&&<p role="status">{queueNotice}</p>}
   <div className="album-track-toolbar"><h3>{item.domain.module==='org.junk.games'?'Soundtrack':'Tracks'}</h3>{discs.length>0&&<button className="primary" disabled={loading||playBusy} onClick={()=>void play()}>Play album</button>}{!canPrepare&&discs.some(([,tracks])=>tracks.some(playableRow))&&<button onClick={()=>enqueue(discs.flatMap(([,tracks])=>tracks),true)}>Add album to queue</button>}<ActionMenu label="Album actions">{onAddToList&&discs.length>0&&<button onClick={()=>onAddToList()}>Add album to list</button>}<button disabled={busy} onClick={()=>{setError('');setAvailabilityRefresh(value=>value+1);setRefresh(value=>value+1);}}>Refresh tracks</button></ActionMenu></div>
+  {item.content_permissions.can_edit&&copyChoices.length>0&&<div className="album-format-choice"><label>Plays from<select aria-label="Plays from" disabled={busy} value={currentCopy} onChange={event=>void chooseAlbumCopy(event.target.value)}>{!currentCopy&&<option value="">Every copy</option>}{copyChoices.map(choice=><option key={choice.key} value={choice.key}>{choice.label}</option>)}</select></label>{currentCopy&&<button type="button" disabled={busy} onClick={()=>void chooseAlbumCopy('')}>Use every copy</button>}<small className="muted">This album holds more than one copy. The others stay saved and are listed under files not part of the album.</small></div>}
   {item.content_permissions.can_edit&&formatChoices.map(choice=><div className="album-format-choice" key={choice.id}><label>{formatChoices.length>1?`Album uses (${choice.label})`:'Album uses'}<select aria-label={formatChoices.length>1?`Album uses (${choice.label})`:'Album uses'} disabled={busy} value={choice.current} onChange={event=>void chooseAlbumFormat(choice.id,event.target.value)}>{!choice.current&&<option value="">Mixed or automatic</option>}{choice.codecs.map(codec=><option key={codec} value={codec}>{codec.toUpperCase()} files</option>)}</select></label>{choice.current&&<button type="button" disabled={busy} onClick={()=>void chooseAlbumFormat(choice.id,'')}>Use best quality automatically</button>}</div>)}
+  {deleting&&<DeleteFilesDialog key={deleting.captureId} item={item} captureId={deleting.captureId} title={deleting.title} onClose={()=>setDeleting(undefined)} onSessionExpired={onSessionExpired} onDone={freed=>{setDeleting(undefined);setQueueNotice(`Deleted ${deleting.title} and freed ${bytes(freed)}.`);setAvailabilityRefresh(v=>v+1);setRefresh(v=>v+1);if(callbacks.current.onPrepared)void api<Item>(`/items/${item.id}`,{signal:requests.current.signal}).then(value=>callbacks.current.onPrepared?.(value)).catch(report);}}/>}
   {discs.map((disc,index)=>renderDisc(disc,index))}
   {otherCount>0&&<details className="other-tracks"><summary>{otherCount} {otherCount===1?'file':'files'} not part of the album</summary><p className="muted">Other copies saved with this album, such as an MP3 version beside lossless files. They stay saved but are left out of album playback and lists.{canPrepareRequested&&' Use Edit track details to include one.'}</p>{otherDiscs.map((disc,index)=>renderDisc(disc,index,true))}</details>}
  </section>;

@@ -1,6 +1,6 @@
 import React from '@collector/runtime';
 import type {UploadProgress} from './package-upload';
-export function bytes(value:number){return value<1024?`${value} B`:value<1048576?`${(value/1024).toLocaleString(undefined,{maximumFractionDigits:1})} KiB`:`${(value/1048576).toLocaleString(undefined,{maximumFractionDigits:1})} MiB`;}
+export function bytes(value:number){return value<1024?`${value} B`:value<1048576?`${(value/1024).toLocaleString(undefined,{maximumFractionDigits:1})} KiB`:value<1073741824?`${(value/1048576).toLocaleString(undefined,{maximumFractionDigits:1})} MiB`:`${(value/1073741824).toLocaleString(undefined,{maximumFractionDigits:2})} GiB`;}
 export function WorkProgress({label,detail,completed,total}:{label:string;detail?:string;completed?:number;total?:number}){
  const known=completed!==undefined&&total!==undefined&&total>0;
  return <div className="work-progress"><div><strong>{label}</strong>{known&&<span>{Math.floor(Math.min(completed,total)/total*100)}%</span>}</div><progress aria-label={label} max={known?total:undefined} value={known?Math.min(completed,total):undefined}/>{detail&&<p role="status">{detail}</p>}</div>;

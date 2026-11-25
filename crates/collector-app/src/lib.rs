@@ -53,7 +53,7 @@ mod inbox_cleanup;
 pub use guided_ingest::{is_inbox_cleanup_directory, is_intake_housekeeping};
 pub use inbox_cleanup::*;
 mod item_lifecycle;
-pub use item_lifecycle::prepare_clean_reimport;
+pub use item_lifecycle::{ItemPurgeResult, PurgeItemFiles, prepare_clean_reimport};
 mod cd_checks;
 pub use cd_checks::*;
 mod library_settings;
@@ -143,6 +143,18 @@ pub trait Catalog: Send + Sync {
     fn item(&self, id: ItemId) -> Result<Item>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
     fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item>;
+    /// Permanently delete a removed entry and the data it owns; returns the
+    /// bytes freed. Refuses entries that were part of a combined album.
+    fn purge_removed_item(&self, id: ItemId, expected: Revision) -> Result<u64>;
+    /// Permanently delete chosen originals of an entry that stays, and with
+    /// `remove_copies` the copy records they alone came from.
+    fn purge_item_files(
+        &self,
+        id: ItemId,
+        expected: Revision,
+        captures: &[CaptureId],
+        remove_copies: bool,
+    ) -> Result<u64>;
     /// Compare the complete hydrated item and authority revision under the writer lock.
     fn retire_item_if_unchanged(
         &self,
@@ -239,6 +251,18 @@ pub trait CollectionWritePort: Send + Sync {
     fn create_collection(&self, user: UserId, collection: Collection) -> Result<Collection>;
     fn save(&self, item: Item, expected: Revision) -> Result<Item>;
     fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item>;
+    /// Permanently delete a removed entry and the data it owns; returns the
+    /// bytes freed. Refuses entries that were part of a combined album.
+    fn purge_removed_item(&self, id: ItemId, expected: Revision) -> Result<u64>;
+    /// Permanently delete chosen originals of an entry that stays, and with
+    /// `remove_copies` the copy records they alone came from.
+    fn purge_item_files(
+        &self,
+        id: ItemId,
+        expected: Revision,
+        captures: &[CaptureId],
+        remove_copies: bool,
+    ) -> Result<u64>;
     /// Compare the complete hydrated item and authority revision under the writer lock.
     fn retire_item_if_unchanged(
         &self,
@@ -1722,6 +1746,18 @@ impl<T: Catalog + ?Sized> CollectionWritePort for T {
     }
     fn set_item_removed(&self, id: ItemId, expected: Revision, removed: bool) -> Result<Item> {
         Catalog::set_item_removed(self, id, expected, removed)
+    }
+    fn purge_removed_item(&self, id: ItemId, expected: Revision) -> Result<u64> {
+        Catalog::purge_removed_item(self, id, expected)
+    }
+    fn purge_item_files(
+        &self,
+        id: ItemId,
+        expected: Revision,
+        captures: &[CaptureId],
+        remove_copies: bool,
+    ) -> Result<u64> {
+        Catalog::purge_item_files(self, id, expected, captures, remove_copies)
     }
     fn retire_item_if_unchanged(
         &self,

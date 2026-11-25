@@ -94,6 +94,14 @@ a later track override says otherwise. Same-format files competing for one track
 need a choice. Queues, lists, matching and preparation use the effective selection.
 Saved list entries keep pointing at the same files when titles or order change.
 
+An album can hold more than one copy, for example a CD set and a digital purchase
+combined into one entry. Originals count as separate copies only when they cover the
+same album disc: CD rips form one copy, and digital purchases for different discs join
+together. When there are two or more copies, **Plays from** on the album's tracks picks
+one. Every track of the other copies is left out of the album, so album playback and
+lists use only the chosen copy. The others stay saved under the files not part of the
+album, and each can still be played on its own. **Use every copy** puts them back.
+
 Original availability reports the actual codec, rate, channels, bit depth and known
 delay/padding. No CD sectors, Disc ID or AccurateRip result is invented for digital
 sources, and they get no CD preparation or AccurateRip prompts.

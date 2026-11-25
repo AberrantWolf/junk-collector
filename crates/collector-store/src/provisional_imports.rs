@@ -319,7 +319,12 @@ fn parse(row: StoredImport) -> Result<ImportRecord> {
 /// queued automatically), so that phase alone is not a stop. Expects `imports`
 /// and its intent as `g`; reads only private import and Job rows, never
 /// payloads.
-pub(crate) const IMPORT_NEEDS_YOU: &str = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed'))";
+///
+/// A copy job that failed after every file arrived and the import moved on
+/// (it lost its claim and a later attempt found the inbox changed) is not a
+/// stop: the import detail shows that copy as finished, so the list must too.
+/// Activity (`work_history.rs`) repeats this exception for its own alias.
+pub(crate) const IMPORT_NEEDS_YOU: &str = "(g.enrichment_error IS NOT NULL OR g.preparation_error IS NOT NULL OR EXISTS(SELECT 1 FROM private.jobs j WHERE json_extract(j.request,'$.import_id')=imports.id AND j.state='failed' AND NOT (j.kind='import_staging' AND imports.phase NOT IN ('staging','cancelled') AND NOT EXISTS(SELECT 1 FROM json_each(imports.files) f WHERE json_extract(f.value,'$.received_bytes') IS NOT json_extract(f.value,'$.bytes') OR json_extract(f.value,'$.digest') IS NULL))))";
 const SELECT: &str = "SELECT id,user_id,revision,collection_id,source_kind,source_label,package_name,files,capture_id,representation_id,item_id,specimen_id,component_id,carrier_id,expected_item_revision,candidates,limitations,review,analysis_job_id,phase,created_at,updated_at FROM private.imports";
 
 fn insert_import(tx: &rusqlite::Transaction<'_>, record: &ImportRecord) -> Result<()> {

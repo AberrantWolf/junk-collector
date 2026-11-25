@@ -50,6 +50,62 @@ impl CollectionService {
         )?;
         self.item_presented(actor, id)
     }
+
+    /// Permanently delete a removed entry: its original files, saved formats,
+    /// covers, metadata, evidence, import records and history. This can't be
+    /// undone. Entries that were part of a combined album are refused; they
+    /// can only stay removed.
+    pub fn purge_item(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        expected: Revision,
+    ) -> Result<ItemPurgeResult> {
+        let item = self.reader.item(id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, item.collection_id)?;
+        let freed_bytes = self.writer.purge_removed_item(id, expected)?;
+        Ok(ItemPurgeResult { freed_bytes })
+    }
+
+    /// Permanently delete chosen originals of an entry, keeping the entry. Used
+    /// when a disc was given away, or imported twice by mistake. This can't be
+    /// undone; combines that included these files can no longer be undone.
+    pub fn purge_item_files(
+        &self,
+        actor: &Principal,
+        id: ItemId,
+        command: PurgeItemFiles,
+    ) -> Result<ItemPurgeResult> {
+        let item = self.reader.item(id)?;
+        self.authorize(actor, item.collection_id, Action::Curate)?;
+        self.content_write_eligibility(actor, item.collection_id)?;
+        let freed_bytes = self.writer.purge_item_files(
+            id,
+            command.expected_revision,
+            &command.captures,
+            command.remove_copies,
+        )?;
+        Ok(ItemPurgeResult { freed_bytes })
+    }
+}
+
+/// Originals to delete permanently from an entry that stays.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PurgeItemFiles {
+    pub expected_revision: Revision,
+    /// The originals (discs or purchases) to delete.
+    pub captures: Vec<CaptureId>,
+    /// Also delete the physical copy records these originals alone came from.
+    pub remove_copies: bool,
+}
+
+/// What a permanent deletion did.
+#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ItemPurgeResult {
+    /// Disk space given back by deleting the entry's files.
+    pub freed_bytes: u64,
 }
 
 /// Evaluate replacement scope and authority resets from writer-locked facts.
