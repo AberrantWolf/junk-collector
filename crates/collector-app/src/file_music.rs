@@ -89,6 +89,13 @@ fn recorded_file_disc(name: &str, tag: Option<&str>) -> Option<u16> {
     })
 }
 
+/// Why a 32-bit float WAV track gets no saved FLAC copy: FLAC stores only
+/// integer samples. The track still plays through live FLAC or Opus
+/// conversion, so an import's preparation step doesn't count it as a failure.
+/// Saved preparation batches keep this text, so it must not change.
+pub(crate) const FLOAT_WAV_NO_SAVED_FLAC: &str =
+    "Choose live FLAC or Opus, or prepare a saved Opus copy of this float WAV.";
+
 impl CollectionService {
     /// A failed optional identification may already have been followed by
     /// preservation. Retry against those exact archived bytes through the same
@@ -375,8 +382,7 @@ impl CollectionService {
                 } else {
                     MusicTrackAvailabilityState::Unavailable {
                         reason: if float_wav {
-                            "Choose live FLAC or Opus, or prepare a saved Opus copy of this float WAV."
-                                .into()
+                            FLOAT_WAV_NO_SAVED_FLAC.into()
                         } else {
                             match encoder {
                                 EncoderAvailability::Unavailable { reason } => reason,

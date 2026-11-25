@@ -63,7 +63,10 @@ observation, snapshot and recipe. Paths and SQLite row IDs are never identity.
   they came from; the entry then gets a new revision. Works, editions, snapshots,
   list entries and analysis results another dump shares are kept, as are ids in
   a surviving entry's metadata lookup history and evidence owned by a merged
-  placeholder. Entries using the legacy payload layout can only stay removed.
+  placeholder. Originals and covers an older archive kept inside the entry's
+  folder go with it, as do that entry's schema migration markers (startup
+  checks each marker's entry exists, so they are removed first). An entry
+  whose folder still holds another entry's files can only stay removed.
 - A combine record names the exact files of every entry it combined, and is
   checked when the archive loads. Deleting any of those files retires the
   record: it keeps the surviving members, and its undo data is replaced by a

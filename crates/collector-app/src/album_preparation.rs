@@ -617,11 +617,14 @@ impl CollectionService {
         Self::enqueue_music_album_batch(self.jobs.as_ref(), frozen, Some(import_id))
     }
 
+    /// Whether an import's preparation batch is done, the reason it failed if
+    /// it did, and a note about float WAV tracks it left alone: FLAC can't hold
+    /// them, and they play through live conversion, so they aren't failures.
     pub(crate) fn guided_music_preparation_outcome(
         &self,
         user_id: collector_core::UserId,
         batch_id: JobId,
-    ) -> Result<(bool, Option<String>)> {
+    ) -> Result<(bool, Option<String>, Option<String>)> {
         let actor = Principal {
             user_id,
             administrator: false,
@@ -636,9 +639,15 @@ impl CollectionService {
                     | crate::JobState::Running
                     | crate::JobState::CancelRequested
             );
+        let float_wav = |member: &&crate::MusicPreparationMemberView| {
+            member.state == MusicPreparationMemberState::Ineligible
+                && member.error.as_deref() == Some(crate::file_music::FLOAT_WAV_NO_SAVED_FLAC)
+        };
+        let left_alone = view.members.iter().filter(float_wav).count();
         let failures = view
             .members
             .iter()
+            .filter(|member| !float_wav(member))
             .filter_map(|member| {
                 member.error.clone().or_else(|| {
                     (member.state == MusicPreparationMemberState::Cancelled)
@@ -658,6 +667,13 @@ impl CollectionService {
                         failures.len() - 1
                     )
                 }
+            }),
+            (left_alone > 0).then(|| {
+                format!(
+                    "{left_alone} 32-bit float WAV {} no saved FLAC copy, because FLAC stores only integer samples. {} with live FLAC or Opus conversion.",
+                    if left_alone == 1 { "track has" } else { "tracks have" },
+                    if left_alone == 1 { "It plays" } else { "They play" },
+                )
             }),
         ))
     }

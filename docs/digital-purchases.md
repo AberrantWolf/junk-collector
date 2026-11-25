@@ -76,7 +76,9 @@ Edit track numbers later with **Edit track details** in the entry's Music editor
   originals or manual edits.
 - WAV originals can be converted to FLAC with **Prepare FLAC after import** or later in
   the Music editor; the encoder is only needed for that. Prepared FLAC keeps rate,
-  channels and bit depth and is checked against the source PCM.
+  channels and bit depth and is checked against the source PCM. FLAC stores only
+  integer samples, so 32-bit float WAV tracks get no saved FLAC. They play through
+  live conversion, and the import's preparation step notes them instead of failing.
 - The prepared FLAC download is a temporary repack with current album/track details,
   cover and a descriptive filename; the PCM is identical. Two exports can run at once,
   up to 8 GiB each.

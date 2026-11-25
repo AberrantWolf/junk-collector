@@ -91,5 +91,44 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
  await page.getByRole('searchbox',{name:'Search collection'}).fill('Bulk resolved album');
  await expect(metadata.locator('[data-item-id]')).toHaveCount(separated);
  assert.equal(new Set((await members()).map(member=>member.import.target_item_id)).size,separated);
+ // Separated again, each entry suggests the others. Review opens that choice
+ // and offers removing or deleting the entry, for a disc imported twice.
+ const [first]=[...new Set((await members()).map(member=>member.import.target_item_id))];
+ await page.setViewportSize({width:1440,height:1000});
+ await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${first}`);
+ const entry=page.getByRole('region',{name:'Review selected entry'});
+ const proposals=entry.getByRole('region',{name:'Album grouping proposals'});
+ await expect(proposals).toBeVisible();
+ await expect(proposals.locator('.grouping-proposal')).toHaveCount(separated-1);
+ await page.screenshot({path:path.join(scratch,'review-grouping-desktop.png'),fullPage:true});
+ await entry.getByRole('button',{name:'Remove or delete…',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:/^Remove /});
+ await expect(dialog.getByRole('radio')).toHaveCount(3);
+ await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(dialog).toHaveCount(0);
+ await proposals.locator('.grouping-proposal').filter({has:page.locator(`img, .care-cover-empty`)}).first().getByRole('button',{name:'Open',exact:true}).click();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('item')).not.toBe(first);
+ // Removing it from Review leads to the Library's removed entries, where it
+ // can be restored or deleted for good.
+ const opened=new URL(page.url()).searchParams.get('item');
+ await entry.getByRole('button',{name:'Remove or delete…',exact:true}).click();
+ await dialog.getByRole('button',{name:'Remove entry',exact:true}).click();
+ await expect(dialog).toHaveCount(0,{timeout:30000});
+ const removedNotice=page.getByRole('status').filter({hasText:'listed under Removed entries'});
+ await removedNotice.getByRole('button',{name:'Open in Library',exact:true}).click();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('filter')).toBe('removed');
+ await page.getByRole('button',{name:'Delete permanently',exact:true}).click();
+ const purge=page.getByRole('dialog',{name:/permanently\?$/});
+ await purge.getByRole('button',{name:'Delete permanently',exact:true}).click();
+ await expect(purge).toHaveCount(0,{timeout:30000});
+ await expect(page.getByText(/permanently and freed/)).toBeVisible();
+ assert.equal(await page.evaluate(async id=>(await fetch(`/api/v1/items/${id}`)).status,opened),404);
+ await page.goto(`${origin}/library-care/metadata?collection=${collectionId}&item=${first}`);
+ await expect(proposals).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Review grouping overflows on mobile');
+ await page.screenshot({path:path.join(scratch,'review-grouping-mobile.png'),fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});
+ console.log(`Review grouping screenshots: ${scratch}`);
  console.log('Automatic MusicBrainz grouping passed: four imported discs, one canonical album with all originals/copies/tracks, old links, mobile, guarded undo and restart separation.');
 }

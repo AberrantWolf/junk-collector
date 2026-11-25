@@ -23,12 +23,12 @@
 //! Shared data stays: works, editions, snapshots, list entries (they show as a
 //! removed entry), and analysis results that another dump's records point at.
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const JOURNALS: &str = "item-purges";
 const TRASH: &str = ".purge";
 const RETIRED: &str = "An entry in this combine was permanently deleted, so it can't be undone.";
-const LEGACY: &str = "These files use an older archive layout, so they can only be removed, not deleted permanently.";
+const LEGACY: &str = "These files are stored in a way Collector does not recognise, so they were left alone. Nothing was deleted.";
 
 /// Everything one deletion removes. Archive paths are relative to the archive root.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -382,24 +382,113 @@ impl Store {
             }
         }
 
+        let item_folders = folders.clone();
+        // An archive upgraded from an older layout keeps one marker per entry
+        // revision, and startup checks every marker's entry still exists. They
+        // go first, so a crash part way never leaves a marker without its entry.
+        let mut markers = Vec::new();
+        let migrations = self.archive.join(".archive-migrations");
+        if migrations.try_exists().map_err(storage)? {
+            for step in fs::read_dir(&migrations).map_err(storage)? {
+                let records = step.map_err(storage)?.path().join("records");
+                if !records.is_dir() {
+                    continue;
+                }
+                for marker in fs::read_dir(&records).map_err(storage)? {
+                    let marker = marker.map_err(storage)?.path();
+                    let name = marker
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned());
+                    if name.is_some_and(|name| {
+                        name.ends_with(".done")
+                            && items.iter().any(|id| name.starts_with(&format!("{id}-")))
+                    }) {
+                        markers.push(relative_folder(&marker)?);
+                    }
+                }
+            }
+        }
+        markers.sort();
+        folders.splice(0..0, markers);
         let captures = scope.captures.iter().cloned().collect::<Vec<_>>();
         let mut representations = BTreeSet::new();
+        let mut capture_representations = BTreeMap::new();
         for capture in &captures {
             let capture = Catalog::capture(self, capture.parse().map_err(storage)?)?;
             representations.extend(capture.representations.iter().map(|r| r.id.to_string()));
+            capture_representations.insert(
+                capture.id.to_string(),
+                capture
+                    .representations
+                    .iter()
+                    .map(|r| r.id.to_string())
+                    .collect::<Vec<_>>(),
+            );
             folders.push(relative_folder(
                 &collection.join("captures").join(capture.id.to_string()),
             )?);
         }
-        let legacy: bool = db
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM legacy_payload_locators WHERE item_id IN (SELECT value FROM json_each(?1)) OR capture_id IN (SELECT value FROM json_each(?2)))",
-                params![json(&items)?, json(&captures)?],
-                |row| row.get(0),
-            )
-            .map_err(storage)?;
-        if legacy {
-            return Err(Error::Invalid(LEGACY.into()));
+        // Older imports kept their original files in `files/<representation>`
+        // inside the folder of the entry they were first saved with. Those go
+        // with that entry's folder, or on their own when that entry stays.
+        let legacy = {
+            let mut statement = db
+                .prepare(
+                    "SELECT capture_id,item_id,relative_path FROM legacy_payload_locators
+                     WHERE item_id IN (SELECT value FROM json_each(?1)) OR capture_id IN (SELECT value FROM json_each(?2))",
+                )
+                .map_err(storage)?;
+            statement
+                .query_map(params![json(&items)?, json(&captures)?], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(storage)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(storage)?
+        };
+        for (capture, root, relative_path) in legacy {
+            let Some(representations) = capture_representations.get(&capture) else {
+                // Another entry's files are stored in a folder this removes.
+                let owner = Catalog::capture(self, capture.parse().map_err(storage)?)?
+                    .association
+                    .item_id;
+                let title: Option<String> = match owner {
+                    Some(owner) => db
+                        .query_row(
+                            "SELECT json_extract(record,'$.title') FROM items WHERE id=?",
+                            [owner.to_string()],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(storage)?,
+                    None => None,
+                };
+                return Err(Error::Invalid(format!(
+                    "Files of “{}” were first saved with this entry and are still stored in its folder. Delete those files from “{0}” first, or keep this entry removed.",
+                    title.unwrap_or_else(|| "another entry".into())
+                )));
+            };
+            if relative_path != "files" {
+                return Err(Error::Invalid(LEGACY.into()));
+            }
+            if items.contains(&root) {
+                continue;
+            }
+            let path: String = db
+                .query_row("SELECT path FROM items WHERE id=?", [&root], |row| {
+                    row.get(0)
+                })
+                .map_err(storage)?;
+            for representation in representations {
+                let folder = Path::new(&path).join("files").join(representation);
+                if self.archive.join(&folder).try_exists().map_err(storage)? {
+                    folders.push(folder.to_string_lossy().into_owned());
+                }
+            }
         }
 
         let mut assets = Vec::new();
@@ -426,15 +515,39 @@ impl Store {
                 AssetSubject::Work { .. } | AssetSubject::Edition { .. } => false,
             };
             if !owned {
+                if record
+                    .legacy_payloads
+                    .iter()
+                    .any(|payload| under(&payload.relative_path, &item_folders))
+                {
+                    return Err(Error::Invalid(
+                        "A cover or image of another entry is still stored in this entry's folder, so it can only stay removed.".into(),
+                    ));
+                }
                 continue;
-            }
-            if !record.legacy_payloads.is_empty() {
-                return Err(Error::Invalid(LEGACY.into()));
             }
             assets.push(record.asset.id.to_string());
             folders.push(relative_folder(
                 &collection.join("assets").join(record.asset.id.to_string()),
             )?);
+            // Older covers keep their bytes in a folder named by the asset,
+            // inside the entry's folder; it goes too.
+            for payload in &record.legacy_payloads {
+                let parent = Path::new(&payload.relative_path)
+                    .parent()
+                    .ok_or_else(|| Error::Invalid(LEGACY.into()))?;
+                let id = record.asset.id.to_string();
+                let named = parent.file_name().is_some_and(|name| name == id.as_str())
+                    || (parent.file_name().is_some_and(|name| name == "payload")
+                        && parent
+                            .parent()
+                            .and_then(Path::file_name)
+                            .is_some_and(|name| name == id.as_str()));
+                if !named {
+                    return Err(Error::Invalid(LEGACY.into()));
+                }
+                folders.push(parent.to_string_lossy().into_owned());
+            }
         }
         drop(statement);
 
@@ -860,6 +973,7 @@ fn unlist(db: &mut Connection, archive: &Path, plan: &ItemPurgePlan) -> Result<(
         format!("DELETE FROM browse_items WHERE id IN {ITEMS}"),
         format!("DELETE FROM components WHERE item_id IN {ITEMS}"),
         "DELETE FROM captures WHERE id IN (SELECT value FROM json_each(:captures))".into(),
+        "DELETE FROM legacy_payload_locators WHERE capture_id IN (SELECT value FROM json_each(:captures))".into(),
         "DELETE FROM assets WHERE id IN (SELECT value FROM json_each(:assets))".into(),
         "DELETE FROM evidence WHERE id IN (SELECT value FROM json_each(:evidence))".into(),
         "DELETE FROM conversion_recipes WHERE id IN (SELECT value FROM json_each(:recipes))".into(),
@@ -921,11 +1035,14 @@ fn unlist(db: &mut Connection, archive: &Path, plan: &ItemPurgePlan) -> Result<(
     }
     for folder in &plan.folders {
         tx.execute(
-            "DELETE FROM archive_index_files WHERE path LIKE ?1||'/%' ESCAPE '\\'",
-            [folder
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")],
+            "DELETE FROM archive_index_files WHERE path=?2 OR path LIKE ?1||'/%' ESCAPE '\\'",
+            [
+                folder
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_"),
+                folder.clone(),
+            ],
         )
         .map_err(storage)?;
     }

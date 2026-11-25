@@ -1519,7 +1519,7 @@ impl CollectionService {
                         }
                         match intent.preparation_batch_id {
                             Some(batch) => {
-                                let (done, error) =
+                                let (done, error, _) =
                                     self.guided_music_preparation_outcome(intent.user_id, batch)?;
                                 if done {
                                     intent.preparation_error = error;
@@ -2075,7 +2075,8 @@ impl CollectionService {
                 retryable: !intent.cancelled && intent.preparation_batch_id.is_some(),
             }
         } else if let Some(batch) = intent.preparation_batch_id {
-            let (done, error) = self.guided_music_preparation_outcome(intent.user_id, batch)?;
+            let (done, error, note) =
+                self.guided_music_preparation_outcome(intent.user_id, batch)?;
             IngestStepView {
                 step: "preparation".into(),
                 state: if done {
@@ -2092,7 +2093,7 @@ impl CollectionService {
                     .iter()
                     .find(|job| job.id == batch)
                     .map(|job| job.attempt),
-                message: error,
+                message: error.or(note),
                 retryable: false,
             }
         } else {
@@ -2302,11 +2303,14 @@ impl CollectionService {
                 .iter()
                 .find(|job| job.id == job_id)
                 .ok_or(Error::NotFound)?;
+            // Each retry records its own command result inside the store, so
+            // this closure must return exactly that: nothing for a preparation
+            // batch, the retried job for any other step.
             self.execute_command(actor, context, "ingest.retry", &(id, &command), |effects| {
                 if job.kind == "music_derivative_batch" {
                     return effects
                         .retry_preparation_batch(job_id, actor.user_id)
-                        .map(|()| job_id);
+                        .map(|()| serde_json::Value::Null);
                 }
                 if job.state != JobState::Failed
                     && !(job.state == JobState::Completed
@@ -2314,7 +2318,11 @@ impl CollectionService {
                 {
                     return Err(Error::Conflict);
                 }
-                effects.retry_failed_job(job_id, actor.user_id)
+                effects
+                    .retry_failed_job(job_id, actor.user_id)
+                    .and_then(|job| {
+                        serde_json::to_value(job).map_err(|e| Error::Storage(e.to_string()))
+                    })
             })?;
         } else {
             let result: serde_json::Value =

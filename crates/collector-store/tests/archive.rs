@@ -25657,6 +25657,26 @@ fn a_removed_entry_can_be_deleted_permanently_with_everything_it_owns() {
     let capture = doomed.import.capture_id;
     let import = doomed.summary.import_id;
     assert!(!archive_paths_mentioning(root.path(), &capture.to_string()).is_empty());
+    // Every cover keeps its bytes in the asset's own payload folder.
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(24, 24, image::Rgb([12, 34, 56]))
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let cover = service
+        .create_asset(
+            &actor,
+            CreateAssetCommand {
+                collection_id: collection.id,
+                subject: AssetSubject::Item { item_id: item },
+                kind: AssetKind::Cover,
+                visibility: Visibility::Shared,
+                alt_text: "Doomed cover".into(),
+            },
+            &encoded.into_inner(),
+            &command(),
+        )
+        .unwrap();
+    assert!(!archive_paths_mentioning(root.path(), &cover.id.to_string()).is_empty());
 
     // Only a removed entry can be deleted permanently.
     let current = store.item(item).unwrap();
@@ -25675,7 +25695,12 @@ fn a_removed_entry_can_be_deleted_permanently_with_everything_it_owns() {
     assert!(result.freed_bytes > 0);
 
     assert!(matches!(store.item(item), Err(Error::NotFound)));
-    for id in [item.to_string(), capture.to_string(), import.to_string()] {
+    for id in [
+        item.to_string(),
+        capture.to_string(),
+        import.to_string(),
+        cover.id.to_string(),
+    ] {
         assert_eq!(
             archive_paths_mentioning(root.path(), &id),
             Vec::<String>::new()
@@ -25790,6 +25815,60 @@ fn reopen_and_rebuild(root: &tempfile::TempDir) -> Store {
     assert!(store.catalog_reused_at_startup());
     store.reindex().unwrap();
     store
+}
+
+#[test]
+fn an_entry_in_the_older_archive_layout_can_be_deleted_permanently() {
+    // The schema-2 fixture keeps its original files and cover inside the
+    // entry's own folder (`files/<representation>`, `assets/<asset>`).
+    let root = tempfile::tempdir().unwrap();
+    let fixture = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/wave-1-schema-2"
+    ));
+    let (archive, state) = (root.path().join("archive"), root.path().join("state"));
+    copy_tree(&fixture.join("archive"), &archive);
+    // Bind the collection to its entries' type so it isn't read-only.
+    let manifest = files_named(&archive, "collection.toml").remove(0);
+    let mut settings = std::fs::read_to_string(&manifest).unwrap();
+    settings.push_str("\n[binding]\nstate = \"assigned\"\nmodule = \"org.example.unavailable\"\n");
+    std::fs::write(&manifest, settings).unwrap();
+    std::fs::create_dir_all(&state).unwrap();
+    let private = rusqlite::Connection::open(state.join("private.sqlite")).unwrap();
+    private
+        .execute_batch(&std::fs::read_to_string(fixture.join("private-v2.sql")).unwrap())
+        .unwrap();
+    drop(private);
+    Store::enroll_archive(&archive, &state, None).unwrap();
+    let store = Arc::new(Store::open_existing(&archive, &state, None).unwrap());
+    let item_id: ItemId = "018f0000-0000-7000-8000-000000000010".parse().unwrap();
+    let item = Catalog::item(&*store, item_id).unwrap();
+    assert!(!item.captures.is_empty());
+    let representation = item.captures[0].representations[0].id.to_string();
+    assert!(!archive_paths_mentioning(root.path(), &representation).is_empty());
+    let removed = Catalog::set_item_removed(&*store, item_id, item.revision, true).unwrap();
+    let freed = Catalog::purge_removed_item(&*store, item_id, removed.revision).unwrap();
+    assert!(freed > 0);
+    assert!(matches!(
+        Catalog::item(&*store, item_id),
+        Err(Error::NotFound)
+    ));
+    for id in [
+        item_id.to_string(),
+        item.captures[0].id.to_string(),
+        representation,
+    ] {
+        assert_eq!(
+            archive_paths_mentioning(root.path(), &id),
+            Vec::<String>::new()
+        );
+    }
+    drop(store);
+    let store = reopen_and_rebuild(&root);
+    assert!(matches!(
+        Catalog::item(&store, item_id),
+        Err(Error::NotFound)
+    ));
 }
 
 #[test]
@@ -32574,6 +32653,146 @@ fn float_wav_import_keeps_playback_coordinates_when_an_alternate_fails() {
             .iter()
             .flat_map(|summary| &summary.limitations)
             .any(|warning| warning.contains(names[0]))
+    );
+}
+
+#[test]
+fn preparing_flac_after_import_leaves_float_wav_tracks_to_live_playback() {
+    let (root, _store, actor, service, collection) = setup();
+    let service = service.with_audio_converter(Arc::new(DerivativeFixtureEncoder::new()));
+    let mut float = b"RIFF\x30\0\0\0WAVEfmt \x10\0\0\0\x03\0\x01\0".to_vec();
+    float.extend(48_000u32.to_le_bytes());
+    float.extend(192_000u32.to_le_bytes());
+    float.extend(b"\x04\0\x20\0data\x0c\0\0\0");
+    for sample in [-0.5f32, 0.25, 1.25] {
+        float.extend(sample.to_le_bytes());
+    }
+    let integer = include_bytes!("fixtures/digital-audio/03.wav").as_slice();
+    let names = ["01 integer.wav", "02 float.wav"];
+    let bytes: [&[u8]; 2] = [integer, &float];
+    let plan = service
+        .plan_ingest(
+            &actor,
+            PlanIngestCommand {
+                collection_id: collection.id,
+                packages: vec![IngestPackageSelection {
+                    album_tracks: Some(
+                        names
+                            .iter()
+                            .enumerate()
+                            .map(|(index, name)| {
+                                collector_modules::music::files::MusicImportTrack {
+                                    file_name: (*name).into(),
+                                    disc_position: None,
+                                    display_position: Some(index as u16 + 1),
+                                }
+                            })
+                            .collect(),
+                    ),
+                    purchase: None,
+                    source: ImportSourceSummary {
+                        kind: ImportSourceKind::Browser,
+                        label: None,
+                        package_name: "Float album".into(),
+                    },
+                    anchor_file_index: None,
+                    files: names
+                        .iter()
+                        .zip(bytes)
+                        .map(|(name, data)| UploadFile {
+                            name: (*name).into(),
+                            bytes: ByteLength(data.len() as u64),
+                            sha256: None,
+                            visibility: Default::default(),
+                        })
+                        .collect(),
+                }],
+            },
+        )
+        .unwrap();
+    let accepted = service
+        .start_ingest(
+            &actor,
+            StartIngestCommand {
+                purchase: None,
+                clean_reimport: None,
+                plan,
+                analysis: collector_app::IngestAnalysisPolicy::Automatic,
+                enrichment: IngestEnrichmentPolicy::None,
+                prepare_music: true,
+                audio_preparation: None,
+                destination: None,
+            },
+            &command(),
+        )
+        .unwrap();
+    let import = accepted.imports[0].import_id;
+    for (index, data) in bytes.iter().enumerate() {
+        service
+            .stage_provisional_import_chunk(&actor, import, index, 0, data)
+            .unwrap();
+    }
+    for _ in 0..20 {
+        if !service.run_next_job("float-preparation").unwrap() {
+            break;
+        }
+    }
+    service.resume_guided_ingests().unwrap();
+    let preparation = |detail: &collector_app::IngestDetail| {
+        detail
+            .steps
+            .iter()
+            .find(|step| step.step == "preparation")
+            .unwrap()
+            .clone()
+    };
+    let detail = service.ingest_detail(&actor, import).unwrap();
+    let step = preparation(&detail);
+    // The integer WAV gets a saved FLAC; the float one plays live and is no failure.
+    assert_eq!(
+        step.state,
+        collector_app::IngestStepState::Succeeded,
+        "{step:?}"
+    );
+    assert!(
+        step.message
+            .as_deref()
+            .unwrap()
+            .contains("1 32-bit float WAV track")
+    );
+    assert_eq!(
+        detail.summary.outcome,
+        collector_app::IngestStepState::Succeeded
+    );
+
+    // An import saved before this rule kept the float track as its failure.
+    // Retrying the step clears it.
+    let db = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    db.execute(
+        "UPDATE guided_ingest_intents SET preparation_error=?1 WHERE import_id=?2",
+        [
+            "Choose live FLAC or Opus, or prepare a saved Opus copy of this float WAV.",
+            &import.to_string(),
+        ],
+    )
+    .unwrap();
+    let stuck = preparation(&service.ingest_detail(&actor, import).unwrap());
+    assert_eq!(stuck.state, collector_app::IngestStepState::Failed);
+    assert!(stuck.retryable);
+    let retried = service
+        .retry_ingest(
+            &actor,
+            import,
+            collector_app::RetryIngestCommand {
+                job_id: stuck.job_id,
+            },
+            &command(),
+        )
+        .unwrap();
+    assert_eq!(
+        preparation(&retried).state,
+        collector_app::IngestStepState::Succeeded,
+        "{retried:?}"
     );
 }
 
