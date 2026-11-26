@@ -88,7 +88,9 @@ export async function ingestProgressJourney(page,{scratch,holdProvider,collectio
   await expect(imports.getByLabel('Current ingest activity').locator('.ingest-work-running').first()).toBeVisible({timeout:180000});
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await expect(imports.getByText(names[0],{exact:true})).toBeVisible();
+  // A package can also be listed under Needs you (a lookup can time out while
+  // the provider is held), so look in the batch's own package list.
+  await expect(imports.locator('.intake-members:not(.intake-problems .intake-members)').getByText(names[0],{exact:true})).toBeVisible();
   await imports.locator('.care-row').first().scrollIntoViewIfNeeded();
   await page.screenshot({path:path.join(scratch,'ingest-activity-mobile.png'),fullPage:true});
  }finally{release();await page.setViewportSize({width:1440,height:1000});}
