@@ -806,7 +806,7 @@ impl CollectionService {
                 .as_ref()
                 .map_or("en", LanguageTag::as_str),
         )?;
-        let record = MetadataAuthorityRecord {
+        let mut record = MetadataAuthorityRecord {
             resolution_policy: crate::METADATA_RESOLUTION_POLICY,
             current_candidates,
             inventory: Some(item.into()),
@@ -825,6 +825,9 @@ impl CollectionService {
             display: Some(display),
             updated_at: item.updated_at,
         };
+        // Publish the edition choice the maintenance pass would make, so it has
+        // nothing to change afterwards and the group stays undoable.
+        self.settle_music_metadata(item, &mut record, &candidates)?;
         record.validate()?;
         record.validate_display(&candidates)?;
         Ok(record)

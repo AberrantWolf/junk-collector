@@ -1,6 +1,7 @@
 //! Isolated, bounded FFmpeg pipes for live playback; no archive or Job access.
 use collector_app::{StreamCodec, StreamInput};
 use collector_core::{Error, Result};
+use junk_libs_pcm::flac::{STREAM_HEADER_BYTES, set_stream_total_samples};
 use std::{io, io::Read, path::Path, process::Stdio};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -13,6 +14,10 @@ pub struct LiveEncoder {
     child: Child,
     output: ChildStdout,
     input: Option<JoinHandle<io::Result<()>>>,
+    /// Exact FLAC sample count still to be written into the stream header.
+    flac_total: Option<u64>,
+    /// Patched header bytes not yet handed to the reader.
+    header: Vec<u8>,
 }
 impl LiveEncoder {
     pub fn start(
@@ -21,6 +26,14 @@ impl LiveEncoder {
         codec: StreamCodec,
         start_ms: u32,
     ) -> Result<Self> {
+        // FFmpeg can't record the length of FLAC it writes to a pipe, and
+        // browsers then drop the stream's final, shorter block. PCM input has
+        // an exact frame count, and the encoder keeps the sample rate, so the
+        // header can carry it.
+        let flac_total = match (&source, codec) {
+            (StreamInput::Pcm(_, frames), StreamCodec::Flac) => Some(*frames),
+            _ => None,
+        };
         let mut command = Command::new(program);
         #[cfg(unix)]
         command.process_group(0);
@@ -148,10 +161,35 @@ impl LiveEncoder {
             child,
             output,
             input: Some(input),
+            flac_total,
+            header: Vec::new(),
         })
     }
 
     pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(total) = self.flac_total.take() {
+            let mut header = [0; STREAM_HEADER_BYTES];
+            let mut filled = 0;
+            while filled < header.len() {
+                let read = self.read_encoded(&mut header[filled..]).await?;
+                if read == 0 {
+                    return Err(io::Error::other("live FLAC ended inside its header"));
+                }
+                filled += read;
+            }
+            set_stream_total_samples(&mut header, total)?;
+            self.header = header.to_vec();
+        }
+        if !self.header.is_empty() {
+            let count = buf.len().min(self.header.len());
+            buf[..count].copy_from_slice(&self.header[..count]);
+            self.header.drain(..count);
+            return Ok(count);
+        }
+        self.read_encoded(buf).await
+    }
+
+    async fn read_encoded(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if let Some(input) = &mut self.input {
             tokio::select! {
                 biased;

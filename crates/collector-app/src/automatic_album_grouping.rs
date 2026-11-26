@@ -476,7 +476,7 @@ impl CollectionService {
                     .iter()
                     .flat_map(|observation| observation.candidates.clone())
                     .collect::<Vec<_>>();
-                metadata.display = Some(resolve_record_metadata(&entry.after, metadata, &history)?);
+                self.settle_music_metadata(&entry.after, metadata, &history)?;
                 for observation in &mut metadata.observations {
                     observation.raw_observation = RawJson::from_value(
                         serde_json::json!({"basis":"automatic_musicbrainz_disc_group","album_options":shared,

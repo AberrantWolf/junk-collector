@@ -21,7 +21,7 @@ type ArtworkOption=components['schemas']['MetadataArtworkOption'];
 type Job=components['schemas']['JobView'];
 type LookupKind=components['schemas']['MetadataLookupKind'];
 type Resolution=components['schemas']['MetadataResolutionView'];
-type Props={userId:string;item:Item;onChanged:(item:Item)=>void;onSessionExpired:()=>void};
+type Props={userId:string;item:Item;onChanged:(item:Item)=>void;onSessionExpired:()=>void;onReviewReasons?:(reasons:Review['review_reasons'])=>void};
 type Feedback={kind:'success'|'error';text:string};
 type Stage=Resolution['stage'];
 type Pending={jobId:string;stage:Stage;commandKey:string;expectedRevision?:number;expectedGeneration?:number};
@@ -60,7 +60,7 @@ function DigitalSource({review,busy,onSave}:{review:Review;busy:boolean;onSave:(
  return <section className="metadata-overrides" aria-label="Digital source"><h4>Digital source</h4>{saved&&<p>Saved source: <strong>{saved}</strong></p>}<label>Source<input placeholder="Steam, Bandcamp, GOG…" maxLength={256} disabled={busy||!review.permissions.can_update||!review.digital_source_eligible} value={draft} onChange={event=>{touched.current=true;setDraft(event.target.value);}}/></label><div className="button-row"><button disabled={busy||!review.permissions.can_update||!review.digital_source_eligible||!draft.trim()} onClick={()=>void save(draft.trim())}>Save source</button>{saved&&<button disabled={busy||!review.permissions.can_update} onClick={()=>void save(null)}>Clear source</button>}</div></section>;
 }
 
-export default function MetadataReview({userId,item,onChanged,onSessionExpired}:Props){
+export default function MetadataReview({userId,item,onChanged,onSessionExpired,onReviewReasons}:Props){
  const [review,setReview]=useState<Review>();const [loading,setLoading]=useState(true);const [feedback,setFeedback]=useState<Feedback>();const [busy,setBusy]=useState(false);
  const [lookupId,setLookupId]=useState('');const [lookupKind,setLookupKind]=useState<LookupKind>('search');const [lookupValue,setLookupValue]=useState('');const [forceRefresh,setForceRefresh]=useState(true);
  const [manualSystem,setManualSystem]=useState(false);const [systemDraft,setSystemDraft]=useState('');const systemTouched=useRef(false);
@@ -78,6 +78,9 @@ export default function MetadataReview({userId,item,onChanged,onSessionExpired}:
  const latestItem=useRef(item);latestItem.current=item;
  const latestReview=useRef(review);latestReview.current=review;
  const callbacks=useRef({onChanged,onSessionExpired});callbacks.current={onChanged,onSessionExpired};
+ // Tell the parent which decisions this entry waits on, from the review this panel already loads.
+ const reasonsCallback=useRef(onReviewReasons);reasonsCallback.current=onReviewReasons;
+ useEffect(()=>{if(review)reasonsCallback.current?.(review.review_reasons);},[review?.review_reasons]);
  const draftKey=`collector.metadata.${userId}.${item.id}.draft`;
  useEffect(()=>{if(!review)return;const title=review.authority.field_overrides.find(value=>value.field==='title')?.value??review.display.title.value;const subtitle=review.authority.field_overrides.find(value=>value.field==='subtitle')?.value??review.display.subtitle?.value??'';if(titleDraft===title&&subtitleDraft===subtitle){draftsTouched.current=false;sessionStorage.removeItem(draftKey);}else if(draftsTouched.current)sessionStorage.setItem(draftKey,JSON.stringify({title:titleDraft,subtitle:subtitleDraft,manualTitle,manualSubtitle}));},[titleDraft,subtitleDraft,draftKey,review]);
  const storageKey=`collector.metadata.${item.id}.pending`;

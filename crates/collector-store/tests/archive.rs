@@ -27454,6 +27454,182 @@ fn automatic_disc_grouping_accepts_coherent_release_variants_and_keeps_manual_au
 }
 
 #[test]
+fn automatic_disc_grouping_settles_equal_release_versions_before_publication() {
+    let (_root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6, 7, 8]);
+    // Each disc lookup returns its own version of the same release. Give the
+    // destination (lowest entry ID) the version that the edition tie-break would
+    // not keep, so a grouping that just copied it would be re-picked afterwards.
+    let mut versions = (0..4)
+        .map(|index| {
+            let mut version = release.clone();
+            version.disambiguation = Some(format!("lookup {index}"));
+            let digest = Digest::sha256(&serde_json::to_vec(&version).unwrap()).hex;
+            (digest, version)
+        })
+        .collect::<Vec<_>>();
+    versions.sort_by(|left, right| right.0.cmp(&left.0));
+    let mut entries = items.clone();
+    entries.sort_by_key(|item| item.id);
+    for (inventory, (_, version)) in entries.iter().zip(&versions) {
+        automatic_group_metadata(&service, &actor, inventory, version);
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = automatic_group_live(&store, &items);
+    assert_eq!(album.len(), 1);
+    assert_eq!(album[0].captures.len(), 4);
+    let group = album[0].lifecycle.merge_group.unwrap();
+    let grouped = store
+        .metadata_authority(collection.id, album[0].id)
+        .unwrap()
+        .unwrap();
+    // The routine metadata pass that follows grouping must find nothing to change.
+    service.reconcile_music_metadata().unwrap();
+    let settled = store
+        .metadata_authority(collection.id, album[0].id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(settled.revision, grouped.revision);
+    assert_eq!(
+        settled.authority.automatic_candidate,
+        grouped.authority.automatic_candidate
+    );
+    let undo = service.album_group_undo(&actor, group).unwrap();
+    assert!(undo.group.automatic && undo.can_undo, "{:?}", undo.reason);
+    // Separated entries keep their restored metadata through the next pass too.
+    service.undo_album_group(&actor, group, &command()).unwrap();
+    let restored = items
+        .iter()
+        .map(|item| {
+            store
+                .metadata_authority(collection.id, item.id)
+                .unwrap()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    service.reconcile_music_metadata().unwrap();
+    for record in restored {
+        let current = store
+            .metadata_authority(collection.id, record.item_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.revision, record.revision);
+    }
+}
+
+#[test]
+fn automatic_disc_grouping_waits_for_the_rest_of_an_import_batch() {
+    // The last unadmitted package stops holding the batch either when it is
+    // rejected or when the batch's admission job stops.
+    for reject in [true, false] {
+        automatic_disc_grouping_batch_case(reject);
+    }
+}
+
+fn automatic_disc_grouping_batch_case(reject: bool) {
+    let (root, store, actor, service, collection) = setup();
+    let (items, release) =
+        automatic_group_sources(&store, &actor, &service, collection.id, &[5, 6]);
+    for inventory in &items {
+        automatic_group_metadata(&service, &actor, inventory, &release);
+    }
+    // The entries' own package is done, while another package from the same
+    // batch is still being imported and looked up, and one is not yet admitted.
+    let private = rusqlite::Connection::open(root.path().join("state/private.sqlite")).unwrap();
+    let intake = JobId::new().to_string();
+    let own = JobId::new().to_string();
+    let sibling = JobId::new().to_string();
+    private
+        .execute(
+            "INSERT INTO intake_sessions VALUES(?1,?2,?3,'accepted','{}')",
+            rusqlite::params![intake, actor.user_id.to_string(), collection.id.to_string()],
+        )
+        .unwrap();
+    private
+        .execute(
+            "INSERT INTO jobs(id,user_id,collection_id,kind,state,phase,completed_units,total_units,attempt,created_at,updated_at,request,cancellation_requested)
+             VALUES(?1,?2,?3,'bulk_intake','queued','queued',0,3,1,0,0,'{}',0)",
+            rusqlite::params![intake, actor.user_id.to_string(), collection.id.to_string()],
+        )
+        .unwrap();
+    for (import, item, phase, position, settled) in [
+        (&own, Some(items[1].id.to_string()), "published", 0, 1),
+        (&sibling, None, "analyzing", 1, 0),
+    ] {
+        private
+            .execute(
+                "INSERT INTO imports(id,user_id,revision,collection_id,source_kind,package_name,files,capture_id,representation_id,item_id,candidates,limitations,phase,created_at,updated_at)
+                 VALUES(?1,?2,1,?3,'inbox','Disc','[]',?4,?5,?6,'[]','[]',?7,0,0)",
+                rusqlite::params![
+                    import,
+                    actor.user_id.to_string(),
+                    collection.id.to_string(),
+                    CaptureId::new().to_string(),
+                    RepresentationId::new().to_string(),
+                    item,
+                    phase
+                ],
+            )
+            .unwrap();
+        private
+            .execute(
+                "INSERT INTO guided_ingest_intents(import_id,user_id,plan_token,target_item_id,default_title,enrichment,created_at,updated_at,settled)
+                 VALUES(?1,?2,'plan',?3,'Disc','automatic',0,0,?4)",
+                rusqlite::params![
+                    import,
+                    actor.user_id.to_string(),
+                    ItemId::new().to_string(),
+                    settled
+                ],
+            )
+            .unwrap();
+        private
+            .execute(
+                "INSERT INTO intake_members VALUES(?1,?2,1,?3,'{}')",
+                rusqlite::params![intake, position, import],
+            )
+            .unwrap();
+    }
+    private
+        .execute(
+            "INSERT INTO intake_members VALUES(?1,2,1,NULL,'{}')",
+            [&intake],
+        )
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    // A package that now waits for the user no longer holds the batch, but the
+    // package still waiting to be admitted does.
+    private
+        .execute(
+            "UPDATE guided_ingest_intents SET enrichment_error='Lookup failed' WHERE import_id=?",
+            [&sibling],
+        )
+        .unwrap();
+    service.reconcile_automatic_album_groups().unwrap();
+    assert_eq!(automatic_group_live(&store, &items).len(), 2);
+    // Once nothing in the batch is still moving on its own, grouping goes ahead
+    // although the batch itself never completes.
+    if reject {
+        private
+            .execute(
+                "UPDATE intake_members SET record='{\"error\":\"Rejected\"}' WHERE intake_id=? AND position=2",
+                [&intake],
+            )
+            .unwrap();
+    } else {
+        private
+            .execute("UPDATE jobs SET state='failed' WHERE id=?", [&intake])
+            .unwrap();
+    }
+    service.reconcile_automatic_album_groups().unwrap();
+    let album = automatic_group_live(&store, &items);
+    assert_eq!(album.len(), 1);
+    assert_eq!(album[0].captures.len(), 2);
+}
+
+#[test]
 fn automatic_group_candidates_are_paged_and_require_a_current_curator() {
     use collector_app::AlbumGroupingPort;
     let (_root, store, actor, service, collection) = setup();

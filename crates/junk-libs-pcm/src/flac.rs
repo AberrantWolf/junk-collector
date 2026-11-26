@@ -1,4 +1,5 @@
 //! Bounded metadata-only FLAC export; audio frames and STREAMINFO remain unchanged.
+//! Also fills in the length of a FLAC stream that an encoder wrote to a pipe.
 use crate::{invalid, metadata::read_bounded};
 use sha2::{Digest, Sha256};
 use std::{
@@ -187,9 +188,62 @@ pub fn repack(
         bytes: output.bytes,
     })
 }
+/// Bytes from the start of a FLAC stream through its STREAMINFO block.
+pub const STREAM_HEADER_BYTES: usize = 42;
+
+/// Records the exact sample count in the STREAMINFO of a FLAC stream that an
+/// encoder wrote to a pipe. Such an encoder can't go back and fill in the
+/// length, and some decoders (Chromium's included) then drop the final, shorter
+/// block of audio. Only a header that leaves the count unknown (zero) changes;
+/// any other header is refused.
+pub fn set_stream_total_samples(
+    header: &mut [u8; STREAM_HEADER_BYTES],
+    total: u64,
+) -> io::Result<()> {
+    // "fLaC", then a metadata block header for STREAMINFO (type 0) of 34 bytes.
+    if &header[..4] != b"fLaC" || header[4] & 0x7f != 0 || header[5..8] != [0, 0, 34] {
+        return Err(invalid("stream does not start with FLAC STREAMINFO"));
+    }
+    if total == 0 || total >= 1 << 36 {
+        return Err(invalid("FLAC sample count out of range"));
+    }
+    // Sample rate (20 bits), channels (3), bits per sample (5) and the total
+    // sample count (36) share these 8 bytes; only the low 36 bits change.
+    let field = &mut header[18..26];
+    let packed = u64::from_be_bytes(field.try_into().expect("8 bytes"));
+    if packed & ((1 << 36) - 1) != 0 {
+        return Err(invalid("FLAC stream already records its length"));
+    }
+    field.copy_from_slice(&(packed | total).to_be_bytes());
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn piped_stream_header_gains_its_exact_length() {
+        let original = include_bytes!("../../collector-store/tests/fixtures/digital-audio/01.flac");
+        let mut header: [u8; STREAM_HEADER_BYTES] =
+            original[..STREAM_HEADER_BYTES].try_into().unwrap();
+        // A complete file already records its length and is left alone.
+        let complete = header;
+        assert!(set_stream_total_samples(&mut header, 24000).is_err());
+        assert_eq!(header, complete);
+        // Clear the count, as an encoder writing to a pipe leaves it.
+        let packed = u64::from_be_bytes(header[18..26].try_into().unwrap());
+        assert_eq!(packed & ((1 << 36) - 1), 24000);
+        header[18..26].copy_from_slice(&(packed & !((1 << 36) - 1)).to_be_bytes());
+        assert!(set_stream_total_samples(&mut header, 0).is_err());
+        assert!(set_stream_total_samples(&mut header, 1 << 36).is_err());
+        set_stream_total_samples(&mut header, 24000).unwrap();
+        assert_eq!(
+            header, complete,
+            "sample rate, channels and depth must not change"
+        );
+        let mut not_flac = complete;
+        not_flac[0] = b'X';
+        assert!(set_stream_total_samples(&mut not_flac, 1).is_err());
+    }
     #[test]
     fn metadata_export_is_readable_and_cancellable_with_exact_hashes() {
         let original = include_bytes!("../../collector-store/tests/fixtures/digital-audio/01.flac");

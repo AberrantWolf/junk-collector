@@ -10,7 +10,7 @@
     "generate:api": "python3 ../scripts/api_contract.py --write",
     "test": "node tests/run-suite.mjs",
     "test:smoke": "node tests/run-suite.mjs smoke",
-    "test:models": "node tests/run-suite.mjs queue context labels",
+    "test:models": "node tests/run-suite.mjs queue context labels review-list",
     "test:scale": "node tests/run-suite.mjs scale"
   },
   "dependencies": {

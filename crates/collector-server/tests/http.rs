@@ -2410,6 +2410,8 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
     separate.remote_media_allowed = false;
     separate.direct_media = false;
     let separate = router(separate);
+    // The stalled encoder writes a complete FLAC header with an unknown
+    // length, as FFmpeg does when writing to a pipe, and then stops.
     #[cfg(unix)]
     let stalled = {
         use std::os::unix::fs::PermissionsExt;
@@ -2419,7 +2421,8 @@ async fn music_derivative_http_availability_preparation_ranges_revocation_and_re
             r#"#!/bin/sh
 /bin/sleep 60 &
 printf '%s %s\n' "$$" "$!" > "$0.pid"
-printf fLaC
+printf 'fLaC\000\000\000\042\020\000\020\000\000\000\000\000\000\000\012\304\102\360\000\000\000\000'
+printf '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000'
 wait
 "#,
         )
@@ -2550,8 +2553,17 @@ wait
         );
         let opus = opus.unwrap();
         assert!(opus.starts_with(b"OggS") && opus.windows(8).any(|x| x == b"OpusHead"));
+        let lossless = lossless.unwrap();
+        // A piped encoder leaves the length unknown, and browsers then drop the
+        // final short block; the stream must carry the exact frame count.
+        let packed = u64::from_be_bytes(lossless[18..26].try_into().unwrap());
+        assert_eq!(
+            packed & ((1 << 36) - 1),
+            (pcm.len() / 4 - 441) as u64,
+            "live FLAC header must record the exact sample count"
+        );
         let encoded = root.path().join("live-audio.flac");
-        std::fs::write(&encoded, lossless.unwrap()).unwrap();
+        std::fs::write(&encoded, &lossless).unwrap();
         let decoded = std::process::Command::new("flac")
             .args([
                 "-d",
