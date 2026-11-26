@@ -9,10 +9,12 @@ import path from 'node:path';
 import https from 'node:https';
 import {createHash,randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-certificate-'));
-const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');const origin='http://localhost:19972';const tlsOrigin='https://localhost:19973';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19971"\nprivate_bind = "127.0.0.1:19972"\nlan_bind = "127.0.0.1:19973"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}"]\n`);
-const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);assert.ok(setup.stdout.includes('https://localhost:19973'));
+const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');const origin=`http://localhost:${ports[1]}`;const tlsOrigin=`https://localhost:${ports[2]}`;const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}"]\n`);
+const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);assert.ok(setup.stdout.includes(`https://localhost:${ports[2]}`));
 let server,browser;let logs='';
 async function trustedRequest(certificate,route,body){return new Promise((resolve,reject)=>{const content=body?JSON.stringify(body):undefined;const request=https.request(tlsOrigin+route,{ca:certificate,method:content?'POST':'GET',headers:content?{'content-type':'application/json'}:{}},response=>{let bytes='';response.on('data',value=>bytes+=value);response.on('end',()=>{try{resolve({status:response.statusCode,body:JSON.parse(bytes)});}catch(error){reject(error);}});});request.setTimeout(5000,()=>request.destroy(new Error('HTTPS fixture request timed out')));request.on('error',reject);request.end(content);});}
 try{

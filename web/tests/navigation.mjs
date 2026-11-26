@@ -8,11 +8,13 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-navigation-'));
 const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');
-const origin='http://localhost:19962';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19961"\nprivate_bind = "127.0.0.1:19962"\nlan_bind = "127.0.0.1:19963"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}", "http://localhost:19961"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
+const origin=`http://localhost:${ports[1]}`;const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${origin}", "http://localhost:${ports[0]}"]\n[exposure]\npublic_curation = false\npublic_administration = false\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let server,browser;let logs='';
 try{
@@ -109,6 +111,6 @@ try{
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.keyboard.press('Escape');await expect(nav).toBeHidden();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();
  await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'Account & security',exact:true}).click();await page.getByRole('dialog',{name:'Account & security'}).waitFor();await page.getByRole('button',{name:'Close account and security',exact:true}).click();await expect(page.getByRole('button',{name:'Menu',exact:true})).toBeFocused();
  await page.setViewportSize({width:1360,height:600});await page.getByRole('button',{name:'Sign out',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeInViewport();
- const client=await browser.newPage();await client.goto('http://localhost:19961');await client.getByLabel('Username',{exact:true}).fill('owner');await client.getByLabel('Password',{exact:true}).fill(password);await client.getByRole('button',{name:'Sign in',exact:true}).click();await client.getByRole('heading',{name:'Library',exact:true}).waitFor();assert.equal(await client.getByRole('button',{name:'Administration',exact:true}).count(),0);assert.equal(await client.getByRole('button',{name:'Add to library',exact:true}).count(),0);await expect(client.getByRole('button',{name:'Lists',exact:true})).toBeVisible();
+ const client=await browser.newPage();await client.goto(`http://localhost:${ports[0]}`);await client.getByLabel('Username',{exact:true}).fill('owner');await client.getByLabel('Password',{exact:true}).fill(password);await client.getByRole('button',{name:'Sign in',exact:true}).click();await client.getByRole('heading',{name:'Library',exact:true}).waitFor();assert.equal(await client.getByRole('button',{name:'Administration',exact:true}).count(),0);assert.equal(await client.getByRole('button',{name:'Add to library',exact:true}).count(),0);await expect(client.getByRole('button',{name:'Lists',exact:true})).toBeVisible();
  assert.deepEqual(errors,[]);console.log('Navigation acceptance passed: destination/scope separation, populated desktop/mobile screenshots, scope preservation, browser back, search/pagination, keyboard disclosures and focus, mobile/short viewport access, listener exposure.');
 }finally{await browser?.close();await stopProcess(server);await rm(scratch,{recursive:true,force:true});}

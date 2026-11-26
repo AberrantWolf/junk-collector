@@ -10,7 +10,7 @@
     "generate:api": "python3 ../scripts/api_contract.py --write",
     "test": "node tests/run-suite.mjs",
     "test:smoke": "node tests/run-suite.mjs smoke",
-    "test:unit": "node --test 'tests/unit/**/*.test.mjs'",
+    "test:unit": "node --test 'tests/unit/**/*.test.mjs' && node tests/harness-check.mjs",
     "test:unit:watch": "node --test --watch 'tests/unit/**/*.test.mjs'",
     "test:scale": "node tests/run-suite.mjs scale"
   },

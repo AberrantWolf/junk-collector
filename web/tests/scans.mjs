@@ -8,12 +8,14 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-scans-'));
 const config=path.join(scratch,'collector.toml');
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const password=randomBytes(24).toString('hex');
-const origin='http://localhost:19952';
+const origin=`http://localhost:${ports[1]}`;
 // Recorded check summaries for one capture representation.
 async function checks(f){return page.evaluate(async f=>(await(await fetch(`/api/v1/captures/${f.capture}/operations?representation_id=${f.representation}&limit=100`)).json()).items,f);}
 // A running check shows progress and offers no new submission.
@@ -22,7 +24,7 @@ async function openChecks(editor){const details=editor.locator('details').filter
 let server,browser,page,logs='';
 try{
  const datPath=path.join(scratch,'ambiguous.dat');await writeFile(datPath,'<datafile><header><name>Game Boy</name><author>No-Intro</author><version>1</version></header><game name="Ambiguous A"><rom name="game.bin" size="67108864" crc="b2eb30ed"/></game><game name="Ambiguous B"><rom name="game.bin" size="67108864" crc="b2eb30ed"/></game></datafile>');
- await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19951"\nprivate_bind = "127.0.0.1:19952"\nlan_bind = "127.0.0.1:19953"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n[dat_sources.scan_choices]\npath = "${datPath}"\nsystem = "gb"\ncatalog = "No-Intro"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`);
+ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n[dat_sources.scan_choices]\npath = "${datPath}"\nsystem = "gb"\ncatalog = "No-Intro"\nbyte_domain = "org.junk.game.raw-bytes"\nbyte_domain_version = 1\n`);
  const init=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(init.status,0,init.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',v=>logs+=v);server.stdout.on('data',v=>logs+=v);
  await waitForServer(origin+'/healthz',server,{logs:()=>logs});
