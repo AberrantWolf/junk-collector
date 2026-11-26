@@ -253,9 +253,11 @@ opus = "${wrapper}"
  await expect.poll(async()=>(await request(page,`/items/${digital}/music-preparation-batches`)).find(batch=>batch.profile.bitrate_kbps===192)?.cancelled_by_user,{timeout:45000}).toBe(true);
  await expect(album.getByRole('region',{name:'Album preparation progress'})).toBeVisible();
  await writeFile(gate,'ready');
+ // Retry waits for the cancelled tracks to finish publishing, which can take
+ // as long as the cancellation itself on a slow machine.
  const retryResponse=page.waitForResponse(response=>
   /\/api\/v1\/music-preparation-batches\/[^/]+\/retry$/.test(response.url())
-  &&response.request().method()==='POST');
+  &&response.request().method()==='POST',{timeout:45000});
  await album.getByRole('button',{name:'Retry unfinished tracks'}).click();
  assert.equal((await retryResponse).status(),200,'Retry must be accepted after cancellation settles');
  let opus192=[];
