@@ -953,10 +953,9 @@ impl LibraryCarePort for Store {
                 )
                 .map_err(storage)?
         {
-            return Err(Error::Unavailable(
-                "Preparation summaries are still updating. Try again once the results are current."
-                    .into(),
-            ));
+            // The summary worker rebuilds stale rows within moments; callers
+            // treat this like a briefly busy catalog and try again.
+            return Err(Error::CatalogBusy);
         }
 
         // Use the ID index for explicit selection and freeze all matching IDs

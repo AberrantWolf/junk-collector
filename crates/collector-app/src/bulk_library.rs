@@ -1,6 +1,10 @@
 //! Frozen library selections and rolling admission for library care.
 use crate::*;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// How long Start waits for album summaries that are being rebuilt.
+const SELECTION_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const SELECTION_RETRY: std::time::Duration = std::time::Duration::from_millis(250);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BulkLibraryKind {
@@ -220,13 +224,34 @@ impl CollectionService {
                 if command.sources.len() > 10_000 || command.sources.values().any(|ids| ids.len() > 256) {
                     return Err(Error::Invalid("Select at most 256 sources per album.".into()));
                 }
-                let entries = self.care.preparation_batch_selection(
-                    actor.user_id,
-                    &command.selection,
-                    &command.profile,
-                    &self.library_namespace()?,
-                    &self.metadata_language(actor.user_id)?,
-                )?;
+                let namespace = self.library_namespace()?;
+                let language = self.metadata_language(actor.user_id)?;
+                // Choosing "all matching" reads every matching album's summary.
+                // Right after an import, edit or finished analysis the summary
+                // worker may still be rebuilding one, or every catalog reader
+                // may be in use. Both clear within moments, so wait for them
+                // instead of refusing the Start.
+                let deadline = std::time::Instant::now() + SELECTION_WAIT;
+                let entries = loop {
+                    match self.care.preparation_batch_selection(
+                        actor.user_id,
+                        &command.selection,
+                        &command.profile,
+                        &namespace,
+                        &language,
+                    ) {
+                        Err(Error::CatalogBusy) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(SELECTION_RETRY);
+                        }
+                        Err(Error::CatalogBusy) => {
+                            return Err(Error::Unavailable(
+                                "The library is still updating these albums. Try again in a moment."
+                                    .into(),
+                            ));
+                        }
+                        result => break result?,
+                    }
+                };
                 if entries.is_empty() {
                     return Err(Error::Invalid("No albums match this selection.".into()));
                 }
