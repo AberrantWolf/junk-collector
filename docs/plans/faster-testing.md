@@ -26,8 +26,15 @@ Done:
   `browse-navigation.ts`), `import-file-order.ts`, `review-reasons.ts` and
   `playback-preference.ts`. `intake-drafts.ts` is only IndexedDB plumbing and has
   no rule worth a unit test.
-- Phase 1 items 1, 2 and 6: `album-copies.ts`, `entry-removal.ts` and
-  `check-results.ts`, with unit tests. `digital-purchases.mjs` keeps one copy
+- Phase 1 items 1 to 6: `album-copies.ts`, `entry-removal.ts`,
+  `review-list.ts` (now also the list requests, Reason filter, polling, tab
+  labels, import states, "Next entry" and "all matching" ticks),
+  `metadata-candidates.ts`, `intake-plan.ts` and `check-results.ts`, with unit
+  tests. The "is this a digital purchase" test now has one home
+  (`isDigitalPackage`). Not moved: `lookupFeedback` (spread across several
+  commands) and `discFromPath`, which waits on the disc-folder decision below.
+  Searching the match list does hide the pinned match when it doesn't match the
+  search; that is today's behaviour and was moved unchanged. `digital-purchases.mjs` keeps one copy
   switch and "Use every copy"; its copy-count and format-choice assertions moved to
   the unit tests. The removal notice wording stays in the two screens.
 - Phase 3 registry without snapshots: `journeys.json` entries can carry
@@ -47,7 +54,7 @@ Done:
   flushes on macOS. `scripts/test-tmpdir.sh` puts scratch data in memory, and
   debug builds now optimize third-party crates. Together: about 70 s.
 
-Left: Phase 1 items 3, 4, 5 and 7; Phase 2 snapshots; the Phase 3 splits that need
+Left: Phase 1 item 7; Phase 2 snapshots; the Phase 3 splits that need
 snapshots; replacing refresh-timer waits.
 
 ## Where the time goes today

@@ -2,7 +2,7 @@ import ImportFileTree from './import-file-tree';
 import {audioFormat,compareImportFiles,freezeTrackOrder} from './import-file-order';
 import MoreButton from './more-button';
 import ImportAlbumEditor,{type AlbumTarget} from './import-album-editor';
-import {ImportPreparation,importPreparation,type ImportPreparationChoice} from './audio-profiles';
+import {ImportPreparation,type ImportPreparationChoice} from './audio-profiles';
 import PurchaseFields from './purchase-fields';
 import IngestStatus from './ingest-status';
 import {presentationLabel} from './presentation-labels';
@@ -12,6 +12,7 @@ import InboxPackageChooser from './inbox-package-chooser';
 import DestinationChooser from './destination-chooser';
 import {uploadPackage,type UploadProgress} from './package-upload';
 import {loadDraft,saveDraft} from './intake-drafts';
+import {albumRoot as isAlbumFolder,intakeBatches,intakeIntent,isDigitalPackage,needsDecision as packageNeedsDecision} from './intake-plan';
 import {UploadMeter,bytes} from './work-progress';
 type PendingManifest={key:string;id?:string;packages:Package[];automatic:boolean;prepare:boolean;analysis?:'automatic'|'preserve_only';audio_preparation?:S['ImportAudioPreparation'];reviewed_opus_import?:S['OpusImportDefault']};
 type S=components['schemas'];type Session=S['IntakeSession'];type Member=S['IntakeMemberView'];type Plan=S['IngestPlanPackage'];type Package=S['IntakePackage']&{manualFileGroups?:string[]};type Item=S['PresentedItem'];
@@ -21,7 +22,7 @@ const transfers=new Map<string,{controller:AbortController;progress?:UploadProgr
 const originalFiles=new Map<string,File[]>();
 window.addEventListener('collector-api-identity-changed',event=>{const user=(event as CustomEvent<{userId?:string}>).detail.userId;for(const [key,task] of transfers)if(!user||!key.startsWith(user+':'))task.controller.abort();});
 const name=(f:File)=>f.webkitRelativePath||f.name;
-const digitalPackage=(p:Package)=>p.package.files.some(f=>audioFormat(f.name))&&!p.package.files.some(f=>/\.(cue|toc)$/i.test(f.name));
+const digitalPackage=(p:Package)=>isDigitalPackage(p.package.files.map(f=>f.name));
 async function transferBatch(user:string,id:string,files:File[]){const key=user+':'+id;if(transfers.get(key)?.running)return;const task={controller:new AbortController(),running:true,progress:undefined as UploadProgress|undefined,error:undefined as string|undefined};transfers.set(key,task);const signal=task.controller.signal;
  try{let cursor:string|null=null;let lastPosition=-1;
   for(;;){signal.throwIfAborted();const page:{items:Member[];next_cursor:string|null}=await api<{items:Member[];next_cursor:string|null}>(`/intakes/${id}/members?limit=32${cursor?'&cursor='+cursor:''}`,{signal});
@@ -264,11 +265,7 @@ export default function Imports({userId,collection,itemId,attach='',collections,
    if(folder){
     const roots=new Set(selected.map(file=>file.webkitRelativePath.split('/')[0]));
     const [selectedDirectory]=roots;
-    const albumRoot=layout==='album'||layout==='auto'&&selected.some(file=>{
-     if(!/\.(flac|wav|mp3)$/i.test(file.name))return false;
-     const parts=file.webkitRelativePath.split('/');
-     return parts.length===2||/^(?:flac|wav|mp3|(?:disc|cd)[ _-]*[0-9]+)$/i.test(parts[1]||'');
-    });
+    const albumRoot=layout==='album'||layout==='auto'&&isAlbumFolder(selected.map(file=>file.webkitRelativePath));
     const discovery=await api<S['IntakeDiscovery']>('/intake-discoveries',{
      method:'POST',signal,
      body:JSON.stringify({collection_id:collection,directory:musicCollection&&roots.size===1&&!albumRoot?selectedDirectory:null,files:input}),
@@ -324,7 +321,7 @@ export default function Imports({userId,collection,itemId,attach='',collections,
  const missingCopy=packages.some(p=>p.destination.destination!=='separate'&&!p.destination.copy_key.trim());
  // Small imports show every package open; larger ones list the packages that
  // need a decision first and keep the rest compact.
- const needsDecision=(index:number)=>{const entry=packages[index];const plan=plans[index];return packages.length<=10||expanded.has(index)||!!plan?.blockers.length||(entry.package.album_tracks?!entry.package.album_tracks.length:!!plan?.music_layout?.needs_attention)||entry.destination.destination!=='separate'&&!entry.destination.copy_key.trim();};
+ const needsDecision=(index:number)=>packageNeedsDecision(packages[index],plans[index],{total:packages.length,expanded:expanded.has(index)});
  const decisionPositions=packages.map((_,index)=>index).filter(needsDecision);
  const readyPositions=packages.map((_,index)=>index).filter(index=>!needsDecision(index));
  function reviewedPackage(entry:Package,index:number):S['IntakePackage']{
@@ -335,10 +332,10 @@ export default function Imports({userId,collection,itemId,attach='',collections,
   return {package:ordered===tracks?selection:{...selection,album_tracks:ordered},destination};
  }
  async function start(){const signal=scope.current.signal;await mutate(async()=>{
-  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages:packages.map(reviewedPackage),automatic:automatic&&!preserveOnly,prepare:false,analysis:preserveOnly?'preserve_only':'automatic',audio_preparation:musicCollection&&!preserveOnly?importPreparation(audioChoice):undefined,reviewed_opus_import:musicCollection&&audioChoice==='default'&&!preserveOnly?opusDefault:undefined};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);}
+  let intent=pending;if(!intent){intent={key:crypto.randomUUID(),packages:packages.map(reviewedPackage),...intakeIntent({automatic,preserveOnly,music:musicCollection,audioChoice,opusDefault})};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);}
   let saved:Session=intent.id?await api<Session>(`/intakes/${intent.id}`,{signal}):await api<Session>('/intakes',{method:'POST',signal,headers:{'Idempotency-Key':intent.key},body:JSON.stringify({collection_id:collection,automatic_metadata:intent.automatic,analysis:intent.analysis??'automatic',prepare_music:intent.prepare,audio_preparation:intent.audio_preparation,reviewed_opus_import:intent.reviewed_opus_import,expected_packages:intent.packages.length,expected_files:intent.packages.reduce((n,p)=>n+p.package.files.length,0)})});
   intent={...intent,id:saved.id};await saveDraft(pendingKey,intent);signal.throwIfAborted();setPending(intent);onQuery({item:saved.id,attach:''});signal.throwIfAborted();setSession(saved);
-  if(saved.state==='draft'){for(let i=saved.package_count;i<intent.packages.length;){let end=i;let count=0;let size=0;while(end<intent.packages.length&&end-i<64){const p=intent.packages[end];const length=JSON.stringify(p).length;if(end>i&&(count+p.package.files.length>10000||size+length>12*1024*1024))break;count+=p.package.files.length;size+=length;end++;}saved=await api<Session>(`/intakes/${saved.id}/members`,{method:'POST',signal,headers:{'Idempotency-Key':intent.key+':'+i},body:JSON.stringify({expected_revision:saved.revision,packages:intent.packages.slice(i,end)})});signal.throwIfAborted();setSession(saved);i=end;}
+  if(saved.state==='draft'){for(const {start:i,end} of intakeBatches(intent.packages,saved.package_count,p=>({files:p.package.files.length,bytes:JSON.stringify(p).length}))){saved=await api<Session>(`/intakes/${saved.id}/members`,{method:'POST',signal,headers:{'Idempotency-Key':intent.key+':'+i},body:JSON.stringify({expected_revision:saved.revision,packages:intent.packages.slice(i,end)})});signal.throwIfAborted();setSession(saved);}
    saved=await api<Session>(`/intakes/${saved.id}/start`,{method:'POST',signal,headers:{'Idempotency-Key':intent.key+':start'},body:JSON.stringify({expected_revision:saved.revision})});signal.throwIfAborted();setSession(saved);
   }
   await saveDraft(pendingKey,undefined);await saveDraft(draftKey,undefined);signal.throwIfAborted();setPending(undefined);setPackages([]);setPlans([]);

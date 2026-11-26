@@ -10,11 +10,11 @@ const sections:Record<ReviewReason,string>={missing_name:'fix-name',missing_artw
 export function reasonSection(reason:ReviewReason){return sections[reason];}
 import React,{useEffect,useRef,useState,api,useOperationScope,isApiRequestError,requestErrorMessage,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
+import {activeCandidate as candidateInUse,candidateList,identityKey,metadataSourceLabel,providerLabel,resumableLookup} from './metadata-candidates';
 
 type Item=components['schemas']['PresentedItem'];
 type Review=components['schemas']['MetadataReviewView'];
 type Candidate=components['schemas']['MetadataCandidateView'];
-type CandidateIdentity=components['schemas']['MetadataCandidateIdentity'];
 type AuthorityChange=components['schemas']['MetadataAuthorityChange'];
 type Acquire=components['schemas']['AcquireMetadataCommand'];
 type ArtworkOption=components['schemas']['MetadataArtworkOption'];
@@ -26,8 +26,6 @@ type Feedback={kind:'success'|'error';text:string};
 type Stage=Resolution['stage'];
 type Pending={jobId:string;stage:Stage;commandKey:string;expectedRevision?:number;expectedGeneration?:number};
 const activeStates=new Set<Job['state']>(['queued','running','cancel_requested']);
-function identityKey(identity:CandidateIdentity){return JSON.stringify(identity);}
-function providerLabel(id:string){if(id==='org.junk.music.file-tags')return 'Imported tags';if(id==='org.junk.providers.musicbrainz')return 'MusicBrainz';if(id==='org.junk.providers.local-dat')return 'Game catalog';return id;}
 function sourceLabel(candidate:Candidate){return candidate.strength==='disc_layout'?'Matches the disc layout':candidate.strength==='identifier'?'Matches a recorded ID':candidate.strength==='name'?'Text match':candidate.strength==='complete_hashes'?'All checksums match':presentationLabel(candidate.strength);}
 function candidateFields(candidate:Candidate):Record<string,string>{
  const values:Record<string,string>={provider:candidate.identity.provider,record_id:candidate.identity.provider_record_id,internal_version:candidate.identity.provider_record_version||'',title:candidate.title.value,title_language:candidate.title.language||'',subtitle:candidate.subtitle?.value||'',subtitle_language:candidate.subtitle?.language||'',artwork:candidate.artwork||'',complete_identity:String(candidate.complete_identity),strength:candidate.strength,provider_priority:String(candidate.provider_priority)};
@@ -125,7 +123,7 @@ export default function MetadataReview({userId,item,onChanged,onSessionExpired,o
   const generation=artworkGeneration.current;
   void request<Resolution[]>(`/items/${item.id}/metadata/resolutions`).then(values=>{
    if(generation!==artworkGeneration.current)return;
-   const active=values.find(value=>activeStates.has(value.job.state))??values.slice(0,1).find(value=>value.job.retryable&&!dismissedLookups.current.has(value.job.id));
+   const active=resumableLookup(values,dismissedLookups.current);
    if(active)rememberPending({jobId:active.job.id,stage:active.stage,commandKey:active.job.id});
    // The newest listing owns these choices, even while pending or when empty.
    const listing=values.find(value=>value.stage==='artwork_listing'||value.result?.artwork_options.length);
@@ -182,18 +180,12 @@ export default function MetadataReview({userId,item,onChanged,onSessionExpired,o
  if(loading&&!review)return <section className="metadata-review" aria-label="Metadata review"><p role="status">Loading metadata review…</p></section>;
  if(!review)return <section className="metadata-review" aria-label="Metadata review"><h3>Metadata review</h3>{feedback&&<p role="alert" className="error">{feedback.text}</p>}<button onClick={()=>void load(false)}>Try again</button></section>;
  const selectedKey=review.authority.selected_candidate&&identityKey(review.authority.selected_candidate);const mb=review.providers.find(value=>value.id==='org.junk.providers.musicbrainz');const caa=review.providers.find(value=>value.id==='org.junk.providers.cover-art-archive');const titleOverride=review.authority.field_overrides.find(value=>value.field==='title');const subtitleOverride=review.authority.field_overrides.find(value=>value.field==='subtitle');
- const activeCandidate=review.display.resolution!=='tentative'&&review.display.candidate?review.candidates.find(candidate=>identityKey(candidate.identity)===identityKey(review.display.candidate!)):undefined;
+ const activeCandidate=candidateInUse(review);
  const manualFields=[...new Set([...(review.display.title.source.source==='manual'?['title']:[]),...(review.display.subtitle?.source.source==='manual'?[terms.subtitle]:[]),...Object.entries(review.display.domain_fields??{}).filter(([,field])=>field.source.source==='manual').map(([name])=>name==='platform'?'system':name==='digital_source'?'digital source':name)])];
- const activeLabel=activeCandidate?activeCandidate.identity.provider==='org.junk.music.file-tags'?'Imported tags in use':`${providerLabel(activeCandidate.identity.provider)} ${item.domain.module==='org.junk.music'?'release':'match'} in use`:manualFields.length?'Using manual metadata':'No match in use';
+ const activeLabel=metadataSourceLabel(activeCandidate,item.domain.module,manualFields.length>0);
  const proposed=review.candidates.find(candidate=>identityKey(candidate.identity)===identityKey(review.authority.selected_candidate||review.proposed_candidate||{provider:'',provider_record_id:'',provider_record_version:null}));
- const candidateQuery=candidateSearch.trim().toLocaleLowerCase();
- const albumCandidates=item.domain.module==='org.junk.music'&&!showOtherCandidates?review.candidates.filter(candidate=>candidate.selected||candidate.accepted_automatically||candidate.unmatched||(candidate.current&&(candidate.strength==='disc_layout'||candidate.strength==='identifier'))):review.candidates;
- const hiddenCandidates=review.candidates.length-albumCandidates.length;
- const matchingCandidates=candidateQuery?albumCandidates.filter(candidate=>[candidate.title.value,candidate.subtitle?.value,candidate.identity.provider_record_id].some(value=>value?.toLocaleLowerCase().includes(candidateQuery))):albumCandidates;
  const pinnedKey=activeCandidate?identityKey(activeCandidate.identity):selectedKey;
- const selectedCandidates=pinnedKey?matchingCandidates.filter(candidate=>identityKey(candidate.identity)===pinnedKey):[];
- const otherCandidates=matchingCandidates.filter(candidate=>identityKey(candidate.identity)!==pinnedKey).sort((left,right)=>Number(right.current)-Number(left.current));
- const visibleCandidates=[...selectedCandidates,...otherCandidates.slice(0,candidateLimit)];
+ const {listed:albumCandidates,hidden:hiddenCandidates,matching:matchingCandidates,shown:visibleCandidates}=candidateList(review.candidates,{module:item.domain.module,showOthers:showOtherCandidates,search:candidateSearch,limit:candidateLimit,pinned:pinnedKey||undefined});
  const compared=compareKeys.map(key=>albumCandidates.find(candidate=>identityKey(candidate.identity)===key)).filter((candidate):candidate is Candidate=>!!candidate);
  return <section className="metadata-review" data-unsaved={titleDraft!==(titleOverride?.value??review.display.title.value)||subtitleDraft!==(subtitleOverride?.value??review.display.subtitle?.value??'')||artworkChoice!==(review.authority.artwork_choice??review.display.artwork??'')} aria-label="Metadata review">
   <div className="section-heading"><div><h3>Metadata review</h3><InfoHelp label="metadata">Metadata describes a {terms.singular} or edition. Audio checks and file checksums are separate.</InfoHelp></div><button disabled={busy} onClick={()=>void Promise.all([load(true),refreshItem()]).catch(report)}>Refresh panel</button></div>

@@ -3,6 +3,7 @@ import {presentationLabel} from './presentation-labels';
 import React,{useEffect,useState,useRef,api,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
 import {resultLabel} from './check-results';
+import {isDigitalPackage} from './intake-plan';
 
 
 type Item=components['schemas']['PresentedItem'];
@@ -69,7 +70,7 @@ function RepresentationOperations({item,capture,representation,capabilities,snap
  const preferenceKey=`collector.scan.${representation.id}`;
 
  const [preferences]=useState<Record<string,unknown>>(()=>{try{return object(JSON.parse(sessionStorage.getItem(preferenceKey)||'{}'));}catch{return {};}});
- const digital=item.domain.module==='org.junk.music'&&representation.files.some(file=>/\.(wav|flac|mp3)$/i.test(file.name))&&!representation.files.some(file=>/\.(cue|toc)$/i.test(file.name));
+ const digital=item.domain.module==='org.junk.music'&&isDigitalPackage(representation.files.map(file=>file.name));
  const available=capabilities.filter(value=>operations[value.id]&&(value.id!=='org.junk.music.import-analysis'||digital)&&value.id!=='org.junk.music.accuraterip-verification');
  const [operation,setOperation]=useState(focusOperation?(focusOperation==='files'?'org.junk.music.import-analysis':item.domain.module==='org.junk.games'?'org.junk.games.cd-audio':'org.junk.music.cd-structure'):typeof preferences.operation==='string'&&available.some(v=>v.id===preferences.operation)?preferences.operation:available.find(value=>value.id===(digital?'org.junk.music.import-analysis':item.domain.module==='org.junk.games'?'org.junk.games.hash':'org.junk.music.cd-structure'))?.id||available.find(value=>value.availability.state==='available')?.id||'');
  const [fileIndex,setFileIndex]=useState<number|null>(typeof preferences.fileIndex==='number'?preferences.fileIndex:null);const [profile,setProfile]=useState(typeof preferences.profile==='string'?preferences.profile:'raw');const [copierHeader,setCopierHeader]=useState(preferences.copierHeader===true);const [catalogInput,setCatalogInput]=useState(typeof preferences.catalogInput==='string'?preferences.catalogInput:'raw_files');const [system,setSystem]=useState(()=>String(preferences.system??object(item.domain.payload).platform??''));const [snapshotId,setSnapshotId]=useState(()=>typeof preferences.snapshotId==='string'?preferences.snapshotId:snapshots.find(value=>value.active)?.snapshot.id||snapshots[0]?.snapshot.id||'');const [summaries,setSummaries]=useState<Summary[]>([]);const [cursor,setCursor]=useState<string|null>(null);
