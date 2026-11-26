@@ -421,6 +421,18 @@ impl LibraryCarePort for Store {
         partial_saved_format(&*self.read_db()?, item)
     }
 
+    fn grouping_proposed(&self, item: ItemId) -> Result<bool> {
+        self.read_db()?
+            .query_row(
+                &format!("SELECT {GROUPING_PROPOSAL} FROM items i WHERE i.id=?1"),
+                [item.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(false))
+            .map_err(storage)
+    }
+
     fn saved_format_albums(
         &self,
         user: UserId,

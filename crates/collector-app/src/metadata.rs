@@ -1789,6 +1789,12 @@ impl CollectionService {
         if lookup_failed {
             review_reasons.push(MetadataReviewReason::LookupFailed);
         }
+        // The review list adds this reason from album grouping proposals; the
+        // entry's own review must agree, because Review opens the grouping
+        // choice from it.
+        if self.care.grouping_proposed(item.id)? {
+            review_reasons.push(MetadataReviewReason::GroupingProposal);
+        }
         if read_revision != self.metadata_read_revision(actor, item_id)?.revision {
             return Err(Error::CatalogBusy);
         }

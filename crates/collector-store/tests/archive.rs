@@ -28075,6 +28075,16 @@ fn automatic_disc_grouping_rebuilds_single_identity_catalog_without_resetting_pr
     assert!(peers.next_cursor.is_none());
     let service = CollectionService::new(store.clone(), Arc::new(Registry::builtins()));
     assert!(service.item_presented(&actor, items[0].id).is_ok());
+    // The entry's own review carries the same grouping reason as the list row,
+    // because Review opens the grouping choice from it.
+    let proposed = |item| {
+        service
+            .metadata_review(&actor, item)
+            .unwrap()
+            .review_reasons
+            .contains(&collector_app::MetadataReviewReason::GroupingProposal)
+    };
+    assert!(proposed(items[0].id));
     service.reconcile_automatic_album_groups().unwrap();
     assert_eq!(automatic_group_live(&store, &items).len(), 2);
     let claim = store
@@ -28086,7 +28096,12 @@ fn automatic_disc_grouping_rebuilds_single_identity_catalog_without_resetting_pr
         .complete_job(claim.id, &claim.claim_token, serde_json::json!({}))
         .unwrap();
     service.reconcile_automatic_album_groups().unwrap();
-    assert_eq!(automatic_group_live(&store, &items).len(), 1);
+    let album = automatic_group_live(&store, &items);
+    assert_eq!(album.len(), 1);
+    assert!(
+        !proposed(album[0].id),
+        "a grouped album has no live sibling left to propose"
+    );
 }
 
 #[test]

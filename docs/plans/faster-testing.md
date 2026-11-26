@@ -248,7 +248,9 @@ The inline rules include:
 - The checkbox state in "all matching except" mode.
 - When "Possibly the same album" opens on its own.
 
-Target `web/src/review-list.ts`:
+Target `web/src/review-list.ts`. It already exists with `groupingAllowed`,
+`proposesGrouping` and `maxGroupedAlbums`, tested by `web/tests/review-list.mjs`;
+the rest moves in beside them:
 
 ```ts
 export function reviewTab(param: string): ReviewTab;
@@ -260,11 +262,11 @@ export function reasonFilterOptions(tab: ReviewTab): ReviewReason[];
 export function entryPollDelay(rows: Row[]): number;
 export function reviewTabLabel(tab: ReviewTab, counts?: Counts): string;
 export function ingestStateLabel(summary: Ingest): string;
-export function groupingAllowed(selection: Row[]): boolean;   // music only, 2–32 entries, one collection
+export function groupingAllowed(selection: Row[]): boolean;   // exists: music only, 2–32 entries, one collection
 export function nextEntry(rows: Row[], itemId: string): Row | undefined;
 export function rowChecked(row: Row, selection: { all: boolean; exclusions: string[]; chosen: Row[] }): boolean;
 export function bulkSelection(selection: {...}, query?: MetadataCareQuery): BulkSelection;
-export function proposesGrouping(reasons: ReviewReason[]): boolean;
+export function proposesGrouping(reviewReasons?: ReviewReason[], rowReasons?: ReviewReason[]): boolean;   // exists
 ```
 
 `acceptable` already lives in `review-reasons.ts`, which gets its first tests in
@@ -277,8 +279,8 @@ Unit tests check:
 - The Reason filter never offers a reason the tab can't show.
 - Lookup-failed, needs-main-file, no-catalog and grouping-proposal reasons are
   never auto-accepted.
-- Grouping is allowed only for 2 to 32 music entries in one collection. Today the
-  button allows more than 32 and the panel then reports an error.
+- Grouping is allowed only for 2 to 32 music entries in one collection (already
+  tested).
 - "Next entry" at the end of the list is empty.
 
 ### 4. Metadata candidates and status (`metadata-review.tsx`, 26 commits)
@@ -651,8 +653,8 @@ suite under 5 minutes) without any server change.
 ## Findings from planning
 
 These turned up while measuring. They are bugs or gaps in today's tests or
-code. The first is fixed; the rest are left for a decision or a separate
-change.
+code. Those marked fixed are fixed; the rest are left for a decision or a
+separate change.
 
 - **Fixed: CI never ran the plain Node model tests.** The default `npm test`
   skips `queue`, `context` and `labels`, and CI ran only `npm test`. CI now also
@@ -662,17 +664,16 @@ change.
   by no suite and no CI step. That includes the only browser check of "Review
   removes an entry and the Library deletes it". Step 3 above makes them named
   scenarios.
-- **The automatic grouping run fails today.** On this machine it stopped at
-  `automatic-album-grouping-journey.mjs:48`. The undo check reported "Metadata
-  changed after grouping; automatic undo is unavailable." This is the timing
-  problem a separate session is fixing. It must pass before step 3 adds it to CI.
-- **`integration` fails on this Mac at a playback wait.** It timed out at
-  `smoke.mjs:1154`, waiting for an imported album to start playing after "Add
-  album to queue" and Play. The same journey's earlier playback check passed. It
-  failed the same way on a second run alone (2 of 2) on macOS with Chromium, but
-  passes in CI on Linux. It is not investigated yet. It is the longest journey
-  and covers the most, so a run that fails on developer Macs costs the most
-  time.
+- **Fixed: automatic grouping lost its undo moments after finishing.**
+  Grouping kept the first disc's copy of the release, then the metadata
+  maintenance pass re-picked among equal copies and saved a new revision, so
+  undo reported "Metadata changed after grouping; automatic undo is
+  unavailable." Grouping now saves the same choice the maintenance pass would
+  make. The grouping run must still pass before step 3 adds it to CI.
+- **Fixed: `integration` failed on macOS at a playback wait.** Live FLAC
+  streamed from FFmpeg left its length unknown, and Chrome then dropped the last,
+  shorter block of audio, so a 0.133 s test track never played past 0.1 s. Live
+  FLAC made from PCM now records its exact length.
 - **Three disc-folder patterns disagree.**
   - `digital-album-matching.tsx` accepts `Disc.2` and at most two digits.
   - `import-file-tree.tsx` (`pathDisc`) rejects `.` and takes any number.
@@ -681,15 +682,10 @@ change.
     import tree.
   - Picking one rule is a product decision. Phase 1 item 5 then gives it one home
     (`discFromPath`) and a unit test.
-- **"Possibly the same album" opens on its own only when the entry is in the
-  loaded list.** `library-metadata.tsx` decides this from the list rows already
-  loaded (`entries.items`), not from the entry's own review reasons. An entry
-  opened from a link, or one past the first page, keeps the section closed even
-  when grouping is the decision it waits on. Phase 1 item 3's
-  `proposesGrouping` should take the entry's own reasons.
-- **The "Group into one album" button allows more than 32 entries.** The panel
-  then reports "Choose 2 to 32 albums to group." `groupingAllowed` in Phase 1
-  item 3 should apply the same limit to the button.
+- **Fixed: "Possibly the same album" opened on its own only when the entry was
+  in the loaded list.** It now decides from the entry's own review reasons.
+- **Fixed: the "Group into one album" button allowed more than 32 entries.** It
+  now applies the same limit as the grouping panel and says why when it can't.
 - **Fragile, but not a bug today:** `specimenDraft` in `inventory-editor.tsx`
   turns a disposed copy's ownership into `unknown`. A save would lose the
   disposal record. This can't happen now, because disposed copies have no "Edit

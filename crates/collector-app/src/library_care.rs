@@ -92,6 +92,9 @@ pub trait LibraryCarePort: Send + Sync {
     fn metadata_care_items(&self, user: UserId, query: &MetadataCareQuery) -> Result<Page<Item>>;
     /// Whether a saved format covers fewer tracks than the album plays.
     fn partial_saved_format(&self, item: ItemId) -> Result<bool>;
+    /// Whether the entry shares an album proposal with another live entry, the
+    /// same test the review list uses for its grouping reason.
+    fn grouping_proposed(&self, item: ItemId) -> Result<bool>;
     /// Albums with saved (non-original) formats, with totals per format.
     fn saved_format_albums(
         &self,
