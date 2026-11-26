@@ -3,28 +3,16 @@ import type {components} from './generated/api';
 import {api,isApiRequestError,requestErrorMessage} from './runtime';
 import {useDialogDismiss} from './dialog';
 import {bytes} from './work-progress';
+import {copyRecordChoice,initialRemovalChoice,originalBytes,removalButtonLabel,removalChoiceDisabled,removalFailureMessage,removalSteps,withConflictRetry,type RemovalChoice} from './entry-removal';
 
 type Item=components['schemas']['PresentedItem'];
 type Purge=components['schemas']['ItemPurgeResult'];
-type Choice='hide'|'files'|'everything';
+type Choice=RemovalChoice;
 
 const combinedNote='This album was combined from other entries. After this, that combine can no longer be undone.';
 
-function originalBytes(item:Item,captures?:string[]){
- return item.captures.filter(capture=>!captures||captures.includes(capture.id)).flatMap(capture=>capture.representations).flatMap(representation=>representation.files).reduce((total,file)=>total+file.bytes,0);
-}
-
-// Work on the entry stops or finishes before files can go; retry while it does.
-async function withRetry<T>(request:()=>Promise<T>,refresh:()=>Promise<void>){
- for(let attempt=0;;attempt++){
-  try{return await request();}
-  catch(failure){
-   if(!(isApiRequestError(failure)&&failure.status===409)||attempt>=15)throw failure;
-   await new Promise(resolve=>setTimeout(resolve,1000));
-   await refresh();
-  }
- }
-}
+const isConflict=(failure:unknown)=>isApiRequestError(failure)&&failure.status===409;
+const withRetry=<T,>(request:()=>Promise<T>,refresh:()=>Promise<void>)=>withConflictRetry(request,refresh,{isConflict});
 
 // Removing an entry hides it and can be undone. The other choices delete for
 // good: only its files (the entry and its copy records stay, for example after
@@ -32,7 +20,7 @@ async function withRetry<T>(request:()=>Promise<T>,refresh:()=>Promise<void>){
 // deleted entirely.
 export function RemoveEntryDialog({item,onClose,onDone,onSessionExpired}:{item:Item;onClose:()=>void;onDone:(result:{removed?:Item;kept?:boolean;freed?:number})=>void;onSessionExpired:()=>void}){
  const already=item.deleted;
- const [choice,setChoice]=useState<Choice>(already?'everything':'hide');
+ const [choice,setChoice]=useState<Choice>(initialRemovalChoice(item));
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  // Set when this dialog removed the entry but the deletion after it failed:
@@ -45,42 +33,42 @@ export function RemoveEntryDialog({item,onClose,onDone,onSessionExpired}:{item:I
   setBusy(true);setError('');
   let removed:Item|undefined;
   try{
-   if(choice==='files'){
+   const steps=removalSteps(choice,{alreadyRemoved:already,removedHere:!!removedHere});
+   if(steps.includes('purge-files')){
     let current=item;
     const result=await withRetry(()=>api<Purge>(`/items/${item.id}/files/purge`,{method:'POST',body:JSON.stringify({expected_revision:current.revision,captures:current.captures.map(capture=>capture.id),remove_copies:false})}),async()=>{current=await api<Item>(`/items/${item.id}`);});
     onDone({kept:true,freed:result.freed_bytes});return;
    }
-   removed=already?item:removedHere??await api<Item>(`/items/${item.id}/remove`,{method:'POST',body:JSON.stringify({expected_revision:item.revision})});
-   if(choice==='hide'){onDone({removed});return;}
+   removed=steps.includes('remove')?await api<Item>(`/items/${item.id}/remove`,{method:'POST',body:JSON.stringify({expected_revision:item.revision})}):already?item:removedHere;
+   if(!steps.includes('purge')){onDone({removed});return;}
    if(!already)setRemovedHere(removed);
-   let current=removed;
+   let current=removed!;
    const result=await withRetry(()=>api<Purge>(`/items/${item.id}/purge`,{method:'POST',body:JSON.stringify({expected_revision:current.revision})}),async()=>{current=await api<Item>(`/items/${item.id}`);});
    onDone({removed,freed:result.freed_bytes});
   }catch(failure){
    if(isApiRequestError(failure)&&failure.code==='unauthenticated'){onSessionExpired();return;}
    const message=requestErrorMessage(failure);
-   setError(removed&&!already?`${message} The entry is removed and can still be restored.`:message);
+   setError(removalFailureMessage(message,!!removed&&!already));
   }finally{setBusy(false);}
  }
  const option=(value:Choice,title:string,detail:string,disabled=false)=><label className={`remove-entry-option ${choice===value?'checked':''} ${value==='hide'?'':'permanent'}`}>
   <input type="radio" name="remove-entry-choice" value={value} checked={choice===value} disabled={busy||disabled} onChange={()=>setChoice(value)}/>
   <span><strong>{title}</strong><small>{detail}</small></span>
  </label>;
- const label=choice==='hide'?'Remove entry':choice==='files'?'Delete files permanently':already?'Delete permanently':'Remove and delete permanently';
  return <div className="modal-backdrop"><section ref={dialog.ref} className="modal remove-entry" role="dialog" aria-modal="true" aria-labelledby="remove-entry-title" aria-busy={busy}>
   <button className="close" aria-label="Close" disabled={busy} onClick={dialog.dismiss}>×</button>
   <h2 id="remove-entry-title">{already?`Delete “${item.title}” permanently?`:`Remove “${item.title}”?`}</h2>
   {already?<p>The entry, its files{size?` (${bytes(size)})`:''}, saved copies, covers, copy records, metadata and import history are deleted for good. Works, editions and lists it appeared in are kept.</p>:
   <div className="remove-entry-choices" role="radiogroup" aria-label="What to remove">
    {option('hide','Hide it','The entry is hidden and its running work stops. You can restore it later.')}
-   {option('files','Delete its files, keep the entry',`Its original files${size?` (${bytes(size)})`:''}, saved FLAC and Opus copies and check results are deleted for good. The entry and its physical copy records stay, for example after giving a copy away.`,item.captures.length===0||!!removedHere)}
+   {option('files','Delete its files, keep the entry',`Its original files${size?` (${bytes(size)})`:''}, saved FLAC and Opus copies and check results are deleted for good. The entry and its physical copy records stay, for example after giving a copy away.`,removalChoiceDisabled(item,'files',!!removedHere))}
    {option('everything','Delete everything',`The entry, its files${size?` (${bytes(size)})`:''}, saved copies, covers, copy records, metadata and import history are deleted for good. Use this for an entry imported by mistake. Works, editions and lists it appeared in are kept.`)}
   </div>}
   {choice!=='hide'&&<p className="notice">This can’t be undone.{item.merge_group?` ${combinedNote}`:''}</p>}
   {error&&<p role="alert" className="notice error">{error}</p>}
   <div className="button-row">
    <button disabled={busy} onClick={dialog.dismiss}>Cancel</button>
-   <button className={choice==='hide'?'primary':'danger'} disabled={busy} onClick={()=>void confirm()}>{busy?(choice==='hide'?'Removing…':'Deleting…'):label}</button>
+   <button className={choice==='hide'?'primary':'danger'} disabled={busy} onClick={()=>void confirm()}>{removalButtonLabel(choice,already,busy)}</button>
   </div>
  </section></div>;
 }
@@ -93,10 +81,7 @@ export function DeleteFilesDialog({item,captureId,title,onClose,onDone,onSession
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const dialog=useDialogDismiss(()=>{if(!busy)onClose();});
- const capture=item.captures.find(value=>value.id===captureId);
- const specimen=capture?.association.specimen_id;
- const copy=specimen?item.specimens.find(value=>value.id===specimen):undefined;
- const shared=!!specimen&&item.captures.some(value=>value.id!==captureId&&value.association.specimen_id===specimen);
+ const {copy,shared}=copyRecordChoice(item,captureId);
  const size=originalBytes(item,[captureId]);
  async function confirm(){
   setBusy(true);setError('');

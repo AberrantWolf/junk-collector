@@ -2,6 +2,7 @@ import AccurateRipCheck from './accuraterip-check';
 import {presentationLabel} from './presentation-labels';
 import React,{useEffect,useState,useRef,api,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
+import {resultLabel} from './check-results';
 
 
 type Item=components['schemas']['PresentedItem'];
@@ -30,27 +31,6 @@ const operationLabels:Record<string,string>={...operations,'org.junk.music.impor
 function object(value:unknown):Record<string,unknown>{return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};}
 function snapshotLabel(status:SnapshotStatus){const value=object(status.snapshot.parsed_observation);return `${String(value.catalog||'DAT catalog')} ${String(value.version||'unversioned')} · ${String(value.system||'unknown system')}${status.active?' · active':''}`;}
 function musicSnapshotLabel(status:SnapshotStatus){const value=object(status.snapshot.parsed_observation);const query=object(value.query);return `AccurateRip ${String(value.outcome||'response')} · ${String(query.track_count||'?')} tracks · ${new Date(status.snapshot.created_at).toLocaleString()}`;}
-function resultLabel(summary:{result:unknown}):string{
- const result=object(summary.result);const catalog=object(result.catalog);const kind=String(catalog.match||'');
- const candidates=kind==='unique_complete_match'?[object(catalog.candidate)]:Array.isArray(catalog.candidates)?catalog.candidates.map(object):[];
- const matched=candidates.flatMap(candidate=>Array.isArray(candidate.matched_units)?candidate.matched_units.map(object):[]);
- const crcOnly=matched.length>0&&matched.every(unit=>object(unit.digest).algorithm==='crc32');
- const checksumNote=crcOnly?' (CRC32 only; not cryptographic identity)':'';
- if(kind==='unique_complete_match')return `Exact catalog match${checksumNote}`;
- if(kind==='ambiguous_complete_matches')return `Exact but ambiguous catalog matches${checksumNote}`;
- if(kind==='partial_identification')return `Partial identification only${checksumNote}`;
- if(kind==='no_match')return 'No catalog match';
- if(kind==='inconclusive')return `Inconclusive: ${String(catalog.reason||'not enough information')}`;
- if(Array.isArray(object(result.file_tracks).tracks))return `Digital audio analyzed · ${(object(result.file_tracks).tracks as unknown[]).length} tracks`;
- if(result.result==='hashes')return 'File hashes recorded';
- if(result.result==='track_hashes')return 'Track hashes recorded';
- if(result.result==='structure')return `${String(result.format||'Game')} structure inspected`;
- if(result.result==='cd_audio')return `Game CD audio recorded · ${Array.isArray(object(result.audio).tracks)?(object(result.audio).tracks as unknown[]).length:0} audio tracks`;
- if(result.result==='layout')return `CD structure recorded · ${Array.isArray(result.tracks)?result.tracks.length:0} tracks`;
- if(result.result==='audio_verification'){const verification=object(result.verification);return `AccurateRip: ${presentationLabel(String(verification.status||'unknown'))}`;}
- if(Array.isArray(result.observations))return result.observations.map(value=>resultLabel({...summary,result:object(value)})).join(' · ');
- return 'Recorded check';
-}
 
 function ResultDetails({summary}:{summary:{result:unknown}}){
  const result=object(summary.result);
