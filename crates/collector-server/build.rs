@@ -3,8 +3,9 @@
 //! `web/dist/source-digest`; this script recomputes it. When they differ and Node
 //! with the web dependencies is available, it rebuilds `web/dist` (under a second).
 //! Otherwise it stops the build and says how to fix it, so a server never ships
-//! old screens by accident. Builds that only have `web/dist` (the container build)
-//! skip the check; CI checks the committed assets match `web/src`.
+//! old screens by accident. The container build copies `web/src` for this check
+//! but has no Node, so there it can only refuse. A build that has `web/dist`
+//! without `web/src` skips the check.
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

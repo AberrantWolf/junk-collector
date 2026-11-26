@@ -16,6 +16,35 @@ When it is done:
 Each phase below can land on its own. The order at the end puts the cheapest,
 biggest wins first.
 
+## Status
+
+Done:
+
+- Phase 0: `web/tests/support/load-source.mjs`, `web/tests/unit/*.test.mjs` on
+  `node:test`, and `npm --prefix web run test:unit` in CI (it also runs
+  `harness-check.mjs`). First tests for `browse-location.ts` (split out of
+  `browse-navigation.ts`), `import-file-order.ts`, `review-reasons.ts` and
+  `playback-preference.ts`. `intake-drafts.ts` is only IndexedDB plumbing and has
+  no rule worth a unit test.
+- Phase 1 items 1, 2 and 6: `album-copies.ts`, `entry-removal.ts` and
+  `check-results.ts`, with unit tests. `digital-purchases.mjs` keeps one copy
+  switch and "Use every copy"; its copy-count and format-choice assertions moved to
+  the unit tests. The removal notice wording stays in the two screens.
+- Phase 3 registry without snapshots: `journeys.json` entries can carry
+  environment settings, so `auto-grouping`, `grouping-ambiguity` and
+  `ingest-progress` are named journeys. The first two run in the default suite.
+- Phase 4 ports and concurrency: every journey picks free ports, and
+  `run-suite.mjs` runs `COLLECTOR_TEST_JOBS` at a time (default half the cores),
+  with timing and audio journeys in a one-at-a-time group afterwards.
+- Phase 4 pacing: see the corrected section below.
+- Not in the original plan: building `collector-server` now rebuilds `web/dist`
+  when `web/src` changed (or refuses, with the command to run, when it can't), so
+  a server can't be built with old screens. The container build copies `web/src`
+  for the same check, so an image can't ship old screens either.
+
+Left: Phase 1 items 3, 4, 5 and 7; Phase 2 snapshots; the Phase 3 splits that need
+snapshots; replacing refresh-timer waits.
+
 ## Where the time goes today
 
 Measured on one developer machine: Apple M4 with 10 cores, a debug server build,
@@ -554,23 +583,15 @@ These changes cut the time of the full suite, not only of a rerun.
 
 ### Provider pacing against local stand-ins
 
-The MusicBrainz client waits at least 1 s between requests. Journeys already
-point it at a local stand-in server through the debug-only
-`JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN`. Extend that existing hook: when a
-debug build has a test origin set, let `JUNK_COLLECTOR_TEST_PROVIDER_INTERVAL_MS`
-lower the interval for that client.
-
-- Release builds never read it, because the code is compiled only with
-  `debug_assertions`, like the origin hooks.
-- The real MusicBrainz server is never contacted with a shorter interval,
-  because the override applies only together with a test origin.
-- It changes pacing only. It doesn't change which requests are made or what is
-  stored.
-
-Before building this, count the stand-in's requests per journey to confirm the
-saving. If each disc makes two or three paced requests, `intake-review` and the
-grouping run each save roughly 10–25 s. Keep one journey on the default interval,
-so the real pacing and its cancellation checks stay covered.
+Correction: this was already done. With a test origin set, debug builds give
+MusicBrainz a 1 ms interval and AccurateRip none (`with_test_origin` in
+`crates/collector-providers`). The waits come from the server's recovery loop
+instead: automatic album grouping and metadata upkeep run on a 5 s cycle
+(`start_job_workers` in `crates/collector-server/src/lib.rs`), and grouping needs
+more than one pass. Debug builds now read
+`JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS` (50–5000) for that cycle.
+`intake-review.mjs` sets 500 ms; every other journey keeps the real 5 s, so the
+real cadence stays covered. It changes only how soon a pass runs.
 
 ### Run journeys side by side
 

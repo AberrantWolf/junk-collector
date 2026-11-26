@@ -157,6 +157,7 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
     }
 
     let recovery_state = state.clone();
+    let recovery_interval = recovery_interval();
     workers.push(tokio::spawn(async move {
         loop {
             let state = recovery_state.clone();
@@ -180,7 +181,7 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
                 Ok(Err(error)) => tracing::error!(%error, "workflow recovery failed"),
                 Err(error) => tracing::error!(%error, "workflow recovery panicked"),
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(recovery_interval).await;
         }
     }));
     let summaries = state.service.clone();
@@ -234,6 +235,23 @@ pub fn start_job_workers(state: AppState) -> collector_core::Result<JobRuntime> 
         }));
     }
     Ok(JobRuntime(workers))
+}
+
+/// How often recovery, automatic album grouping and metadata upkeep run.
+/// Debug builds let browser journeys shorten it with
+/// `JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS`, so a journey doesn't spend most
+/// of its time waiting for the next pass. It changes only how soon a pass runs,
+/// not what a pass does. Release builds never read it.
+fn recovery_interval() -> std::time::Duration {
+    #[cfg(debug_assertions)]
+    if let Some(millis) = std::env::var("JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|millis| (50..=5000).contains(millis))
+    {
+        return std::time::Duration::from_millis(millis);
+    }
+    std::time::Duration::from_secs(5)
 }
 
 pub trait RateLimitClock: Send + Sync {
