@@ -122,6 +122,28 @@ COLLECTOR_CD_IDENTITY="$PWD/target/release/collector-cd-identity" python3 -B scr
 
 These use fake redumper and HTTP inputs; they never open a drive or contact MusicBrainz.
 
+## Faster local runs
+
+On macOS each durable write the store makes is a full flush to the physical disk,
+and most of the store and browser tests' time goes to waiting on those flushes.
+Point their scratch folders at memory instead:
+
+```sh
+TMPDIR="$(scripts/test-tmpdir.sh)" cargo test --workspace
+TMPDIR="$(scripts/test-tmpdir.sh)" npm --prefix web test
+```
+
+The script creates a RAM disk once on macOS (it lasts until a restart, or
+`diskutil eject JunkCollectorTests`) and uses `/dev/shm` on Linux. It changes where
+test data is written, not what the code does. `collector-store`'s `archive.rs`
+tests took about 290 s on an SSD and about 70 s this way. Crash-recovery tests
+stop the process; they don't simulate power loss, so they don't depend on the
+flushes reaching the disk.
+
+Debug builds also optimize third-party crates (`[profile.dev.package."*"]` in
+`Cargo.toml`), including the bundled SQLite. Workspace crates stay unoptimized.
+The first build after cleaning `target/` takes longer; later builds don't.
+
 ## Disk usage
 
 Debug and test builds use line-table debug info and no incremental compilation to keep

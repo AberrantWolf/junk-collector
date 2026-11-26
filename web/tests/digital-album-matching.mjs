@@ -16,11 +16,13 @@ async function includeAllAlbumFiles(imports){
 const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-digital-matching-'));const origin=`https://localhost:${ports[2]}`;const password=randomBytes(24).toString('hex');
 const release='00000000-0000-4000-8000-000000000090';const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const partial=true;const fingerprints=new Map();const requests=[];const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
-let releaseRecognition;const recognitionGate=new Promise(resolve=>releaseRecognition=resolve);
+// AcoustID lookups run one at a time, and each track's lookup starts when its
+// fingerprint is ready, so either track can go first. The second one is held.
+let releaseRecognition;const recognitionGate=new Promise(resolve=>releaseRecognition=resolve);const lookupOrder=[];
 let releaseArtwork;let artworkStarted=false;const artworkGate=new Promise(resolve=>releaseArtwork=resolve);
 const provider=createServer(async(req,res)=>{
  try{let body='';for await(const b of req)body+=b;requests.push(`${req.method} ${req.url} ${body}`);const url=new URL(req.url,'http://fixture');let result;
- if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');const known={'67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df':1,'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8':2};const recording=known[createHash('sha256').update(fp).digest('hex')];assert.ok(recording,'unknown fingerprint');fingerprints.set(fp,recording);if(recording===2)await recognitionGate;result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))},...(recording===1?[{id:id(31)},{id:id(32)}]:[])]}]};}
+ if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');const known={'67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df':1,'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8':2};const recording=known[createHash('sha256').update(fp).digest('hex')];assert.ok(recording,'unknown fingerprint');fingerprints.set(fp,recording);if(!lookupOrder.includes(recording))lookupOrder.push(recording);if(recording===lookupOrder[1])await recognitionGate;result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))},...(recording===1?[{id:id(31)},{id:id(32)}]:[])]}]};}
  else if(url.pathname==='/v2/submit'){
   assert.equal(req.method,'POST');
   const form=new URLSearchParams(body);
@@ -80,9 +82,15 @@ try{
  await matching.evaluate(region=>{window.matchingAlerts=[];new MutationObserver(()=>{for(const alert of region.querySelectorAll('[role=alert]'))window.matchingAlerts.push(alert.textContent);}).observe(region,{subtree:true,childList:true,characterData:true});});
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await accepted;
  let pendingDiscovery;
- await expect.poll(async()=>{const jobs=await matchingJobs(item);pendingDiscovery=jobs?.[0];return pendingDiscovery?.progress?.releases;},{timeout:60000}).toBe(1);
- assert.equal(pendingDiscovery.progress.lookups,1,'remaining recognition must still be gated');
- assert.equal(pendingDiscovery.progress.recordings_total,1,'do not expand first-track alternatives before assessing the seed');
+ await expect.poll(async()=>{const jobs=await matchingJobs(item);pendingDiscovery=jobs?.[0];return pendingDiscovery?.progress?.lookups;},{timeout:60000}).toBe(1);
+ assert.equal(lookupOrder.length,2,'remaining recognition must still be gated');
+ // Only recording 1 is recognized (the fixture returns nothing for 2), so it
+ // alone finds a release, without expanding its alternatives yet.
+ if(lookupOrder[0]===1){
+  await expect.poll(async()=>{pendingDiscovery=(await matchingJobs(item))?.[0];return pendingDiscovery?.progress?.releases;}).toBe(1);
+  assert.equal(pendingDiscovery.progress.lookups,1,'remaining recognition must still be gated');
+  assert.equal(pendingDiscovery.progress.recordings_total,1,'do not expand first-track alternatives before assessing the seed');
+ }else assert.equal(pendingDiscovery.progress.releases,0,'an unrecognized track must not find a release');
  releaseRecognition();
  const itemUrl=`**/api/v1/items/${item}`;
  // The page may cancel a superseded read while it is held here.

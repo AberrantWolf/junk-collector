@@ -42,6 +42,11 @@ Done:
   a server can't be built with old screens. The container build copies `web/src`
   for the same check, so an image can't ship old screens either.
 
+- Not in the original plan: Rust tests. `collector-store/tests/archive.rs` (344
+  tests) was about 290 s of `cargo test --workspace`, mostly waiting on disk
+  flushes on macOS. `scripts/test-tmpdir.sh` puts scratch data in memory, and
+  debug builds now optimize third-party crates. Together: about 70 s.
+
 Left: Phase 1 items 3, 4, 5 and 7; Phase 2 snapshots; the Phase 3 splits that need
 snapshots; replacing refresh-timer waits.
 
@@ -707,6 +712,24 @@ separate change.
   in the loaded list.** It now decides from the entry's own review reasons.
 - **Fixed: the "Group into one album" button allowed more than 32 entries.** It
   now applies the same limit as the grouping panel and says why when it can't.
+- **Fixed: one disc of a grouped album could fail its artwork step.** Discs of
+  one album resolve metadata in parallel jobs that save to the same entry. When
+  one saved between another's revision read and its save, the second failed with
+  "revision conflict" and the import showed as failed. The job's provider save
+  now reads the entry again and retries a few times. A faster server made this
+  happen in most `intake-review` runs.
+- **Fixed: `digital-matching` assumed track 1 is looked up first.** Each track's
+  AcoustID lookup starts when its fingerprint is ready, and lookups run one at a
+  time, so either track can go first. The stand-in held track 2, which blocked
+  the only slot until it timed out whenever track 2 went first. It now holds
+  whichever lookup arrives second.
+- **Open: fingerprints depend on how `chromaprint-next` is compiled.** With
+  optimization on, the same audio gives a different fingerprint, so the
+  stand-ins' exact fingerprint hashes stop matching. Debug builds keep that
+  crate unoptimized for now. Release builds are optimized, so their
+  fingerprints probably differ from what the tests pin. AcoustID matches
+  fingerprints approximately, so this may not matter to users, but the cause
+  (likely floating-point code that compiles differently) is worth a look.
 - **Fragile, but not a bug today:** `specimenDraft` in `inventory-editor.tsx`
   turns a disposed copy's ownership into `unknown`. A save would lose the
   disposal record. This can't happen now, because disposed copies have no "Edit

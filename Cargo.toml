@@ -63,3 +63,14 @@ opt-level = 3
 
 [profile.dev.package.junk-libs-accuraterip]
 opt-level = 3
+
+# Optimize third-party crates (including the bundled SQLite, which otherwise
+# dominates the store tests' CPU time) while workspace crates stay unoptimized
+# for debugging. This changes speed only, not behaviour.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Audio fingerprints come out slightly different when these are optimized, and
+# test fixtures pin exact fingerprints. Keep them as before.
+[profile.dev.package.chromaprint-next]
+opt-level = 0
