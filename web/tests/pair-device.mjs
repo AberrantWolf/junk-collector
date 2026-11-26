@@ -7,11 +7,13 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-pair-'));
 const config=path.join(scratch,'collector.toml');const password=randomBytes(24).toString('hex');
-const multiUser=process.env.COLLECTOR_MULTI_USER==='1';const base='http://localhost:19942';const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
-await writeFile(config,`multi_user = ${multiUser}\narchive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19941"\nprivate_bind = "127.0.0.1:19942"\nlan_bind = "127.0.0.1:19943"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${base}"]\n`);
+const multiUser=process.env.COLLECTOR_MULTI_USER==='1';const base=`http://localhost:${ports[1]}`;const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
+await writeFile(config,`multi_user = ${multiUser}\narchive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = ["${base}"]\n`);
 const setup=spawnSync(binary,['--config',config,'setup'],{input:password+'\n',encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let browser;let server;let logs='';
 try{

@@ -7,20 +7,22 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes,createHash} from 'node:crypto';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-documents-'));
 const config=path.join(scratch,'collector.toml');
 const password=randomBytes(24).toString('hex');
-const origin='https://localhost:19903';
+const origin=`https://localhost:${ports[2]}`;
 
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19901"\nprivate_bind = "127.0.0.1:19902"\nlan_bind = "127.0.0.1:19903"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[inboxes]\npurchases = "${scratch}"\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page;
 try{
- for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19901/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
+ for(let i=0;i<300;i++){try{if((await fetch(`http://127.0.0.1:${ports[0]}/healthz`)).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  const publicKey=spawnSync('openssl',['x509','-in',path.join(scratch,'state/tls/cert.pem'),'-pubkey','-noout']);assert.equal(publicKey.status,0);const publicDer=spawnSync('openssl',['pkey','-pubin','-outform','DER'],{input:publicKey.stdout});assert.equal(publicDer.status,0);const certificatePin=createHash('sha256').update(publicDer.stdout).digest('base64');
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',args:[`--ignore-certificate-errors-spki-list=${certificatePin}`],headless:true});
  const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);

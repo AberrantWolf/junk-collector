@@ -7,11 +7,13 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
-const root=path.resolve(import.meta.dirname,'../..'),scratch=await mkdtemp(path.join(tmpdir(),'collector-backup-reminder-')),config=path.join(scratch,'collector.toml'),binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server')),password=randomBytes(24).toString('hex'),origin='http://localhost:19912';
-const base=`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19911"\nprivate_bind = "127.0.0.1:19912"\nlan_bind = "127.0.0.1:19913"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "https://localhost:19913"\nallowed_origins = ["${origin}"]\n[backup_reminder]\nafter_days = 30\n`;
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
+const root=path.resolve(import.meta.dirname,'../..'),scratch=await mkdtemp(path.join(tmpdir(),'collector-backup-reminder-')),config=path.join(scratch,'collector.toml'),binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server')),password=randomBytes(24).toString('hex'),origin=`http://localhost:${ports[1]}`;
+const base=`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "https://localhost:${ports[2]}"\nallowed_origins = ["${origin}"]\n[backup_reminder]\nafter_days = 30\n`;
 await writeFile(config,base);const cli=(args,input)=>spawnSync(binary,['--config',config,...args],{input,encoding:'utf8',timeout:60000});const setup=cli(['setup','--username','owner'],password);assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
-async function start(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);for(let i=0;i<300;i++){if(server.exitCode!==null)throw Error(logs);try{if((await fetch('http://127.0.0.1:19911/healthz')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timeout: '+logs);}
+async function start(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);for(let i=0;i<300;i++){if(server.exitCode!==null)throw Error(logs);try{if((await fetch(`http://127.0.0.1:${ports[0]}/healthz`)).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server readiness timeout: '+logs);}
 async function stop(){await stopProcess(server);}
 const reminderState=()=>page.evaluate(async()=> (await(await fetch('/api/v1/admin/settings')).json()).backup_reminder);const shown=new Map();
 async function expectReminder(reminder,status,completed){await expect.poll(async()=>(await reminderState()).status).toBe(status);const message=reminder.getByRole('status');await expect(message).toBeVisible();shown.set(status,(await message.innerText()).trim());if(completed)await expect(reminder.locator('time')).toHaveAttribute('datetime',completed);else await expect(reminder.locator('time')).toHaveCount(0);}

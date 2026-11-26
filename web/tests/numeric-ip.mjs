@@ -8,12 +8,14 @@ import path from 'node:path';
 import https from 'node:https';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-ip-origin-'));
-const config=path.join(scratch,'collector.toml'),origin='https://127.0.0.1:19663';
+const config=path.join(scratch,'collector.toml'),origin=`https://127.0.0.1:${ports[2]}`;
 const password=randomBytes(24).toString('hex');
 const artifact=path.join(tmpdir(),'collector-ip-passkeys.png');
-await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19661"\nprivate_bind = "127.0.0.1:19662"\nlan_bind = "127.0.0.1:19663"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["127.0.0.1"]\n`);
+await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["127.0.0.1"]\n`);
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 let browser,page,server,logs='';
 try{
@@ -21,7 +23,7 @@ try{
  const doctor=spawnSync(binary,['--config',config,'doctor'],{encoding:'utf8',timeout:30000});assert.equal(doctor.status,0,doctor.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
  for(let i=0;i<200;i++){
-  try{if((await fetch('http://127.0.0.1:19661/healthz')).ok)break;}catch{}
+  try{if((await fetch(`http://127.0.0.1:${ports[0]}/healthz`)).ok)break;}catch{}
   if(server.exitCode!==null)throw Error(logs);if(i===199)throw Error('Numeric-IP server did not start');await new Promise(resolve=>setTimeout(resolve,100));
  }
  const ca=await readFile(path.join(scratch,'state/tls/cert.pem'));

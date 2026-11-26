@@ -7,18 +7,22 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes,createHash,X509Certificate} from 'node:crypto';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 async function includeAllAlbumFiles(imports){
  await imports.locator('summary').filter({hasText:'Files and album playback'}).click();
  await imports.getByLabel('Use folder for album playback: All files',{exact:true}).check();
 }
-const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-digital-matching-'));const origin='https://localhost:19893';const password=randomBytes(24).toString('hex');
+const root=path.resolve(import.meta.dirname,'../..');const scratch=await mkdtemp(path.join(tmpdir(),'collector-digital-matching-'));const origin=`https://localhost:${ports[2]}`;const password=randomBytes(24).toString('hex');
 const release='00000000-0000-4000-8000-000000000090';const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const partial=true;const fingerprints=new Map();const requests=[];const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
-let releaseRecognition;const recognitionGate=new Promise(resolve=>releaseRecognition=resolve);
+// AcoustID lookups run one at a time, and each track's lookup starts when its
+// fingerprint is ready, so either track can go first. The second one is held.
+let releaseRecognition;const recognitionGate=new Promise(resolve=>releaseRecognition=resolve);const lookupOrder=[];
 let releaseArtwork;let artworkStarted=false;const artworkGate=new Promise(resolve=>releaseArtwork=resolve);
 const provider=createServer(async(req,res)=>{
  try{let body='';for await(const b of req)body+=b;requests.push(`${req.method} ${req.url} ${body}`);const url=new URL(req.url,'http://fixture');let result;
- if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');const known={'67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df':1,'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8':2};const recording=known[createHash('sha256').update(fp).digest('hex')];assert.ok(recording,'unknown fingerprint');fingerprints.set(fp,recording);if(recording===2)await recognitionGate;result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))},...(recording===1?[{id:id(31)},{id:id(32)}]:[])]}]};}
+ if(url.pathname==='/v2/lookup'){const form=new URLSearchParams(body);assert.equal(form.get('client'),'fixture-key');const fp=form.get('fingerprint');const known={'67aa4ec8404218920890087a3b40dd3dc7d878c9665614801bc77f2ef87d48df':1,'ea75c59f8406db544ce308fdb1d25089af8352429ad5b6c483d1d9325c2172e8':2};const recording=known[createHash('sha256').update(fp).digest('hex')];assert.ok(recording,'unknown fingerprint');fingerprints.set(fp,recording);if(!lookupOrder.includes(recording))lookupOrder.push(recording);if(recording===lookupOrder[1])await recognitionGate;result={status:'ok',results:partial&&fingerprints.get(fp)===2?[]:[{score:.99,recordings:[{id:id(fingerprints.get(fp))},...(recording===1?[{id:id(31)},{id:id(32)}]:[])]}]};}
  else if(url.pathname==='/v2/submit'){
   assert.equal(req.method,'POST');
   const form=new URLSearchParams(body);
@@ -40,7 +44,7 @@ const provider=createServer(async(req,res)=>{
 const wav=path.join(scratch,'01.wav');
 const decoded=spawnSync(process.env.COLLECTOR_TEST_FLAC&&process.env.COLLECTOR_TEST_FLAC!=='1'?process.env.COLLECTOR_TEST_FLAC:'flac',['--decode','--stdout','--silent',path.join(root,'crates/collector-store/tests/fixtures/digital-matching/01.flac')],{maxBuffer:8*1024*1024});
 assert.equal(decoded.status,0,'Matching WAV fixture requires the independent FLAC decoder');await writeFile(wav,decoded.stdout);
-const config=path.join(scratch,'collector.toml');await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19891"\nprivate_bind = "127.0.0.1:19892"\nlan_bind = "127.0.0.1:19893"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[providers]\nmusicbrainz_user_agent = "MatchingTests/1 (test@example.invalid)"\nacoustid_api_key = "fixture-key"\n`);
+const config=path.join(scratch,'collector.toml');await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nauthentication_origin = "${origin}"\nallowed_origins = ["${origin}"]\ntls_names = ["localhost", "127.0.0.1"]\nendpoints = ["${origin}"]\n[exposure]\npublic_curation = true\npublic_administration = true\n[providers]\nmusicbrainz_user_agent = "MatchingTests/1 (test@example.invalid)"\nacoustid_api_key = "fixture-key"\n`);
 const binary=process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server');const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='';const server=spawn(binary,['--config',config,'serve'],{env:{...process.env,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_ACOUSTID_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
 let browser,page,releaseDiscoveryResponse;
@@ -61,7 +65,7 @@ async function metadataReview(item){
 }
 
 try{
- for(let i=0;i<300;i++){try{if((await fetch('http://127.0.0.1:19891/healthz')).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
+ for(let i=0;i<300;i++){try{if((await fetch(`http://127.0.0.1:${ports[0]}/healthz`)).ok)break;}catch{}if(server.exitCode!==null)throw Error(logs);await new Promise(r=>setTimeout(r,100));}
  const spki=createHash('sha256').update(new X509Certificate(await readFile(path.join(scratch,'state/tls/cert.pem'))).publicKey.export({type:'spki',format:'der'})).digest('base64');
  browser=await chromium.launch({mode:process.env.COLLECTOR_TEST_BROWSER||'chrome',headless:true,args:[`--ignore-certificate-errors-spki-list=${spki}`]});const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000}});context.setDefaultTimeout(30000);page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -78,9 +82,16 @@ try{
  await matching.evaluate(region=>{window.matchingAlerts=[];new MutationObserver(()=>{for(const alert of region.querySelectorAll('[role=alert]'))window.matchingAlerts.push(alert.textContent);}).observe(region,{subtree:true,childList:true,characterData:true});});
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await accepted;
  let pendingDiscovery;
- await expect.poll(async()=>{const jobs=await matchingJobs(item);pendingDiscovery=jobs?.[0];return pendingDiscovery?.progress?.releases;},{timeout:60000}).toBe(1);
- assert.equal(pendingDiscovery.progress.lookups,1,'remaining recognition must still be gated');
- assert.equal(pendingDiscovery.progress.recordings_total,1,'do not expand first-track alternatives before assessing the seed');
+ await expect.poll(async()=>{const jobs=await matchingJobs(item);pendingDiscovery=jobs?.[0];return pendingDiscovery?.progress?.lookups;},{timeout:60000}).toBe(1);
+ // The held lookup is the remaining recognition; wait until it reaches the stand-in.
+ await expect.poll(()=>lookupOrder.length).toBe(2);
+ // Only recording 1 is recognized (the fixture returns nothing for 2), so it
+ // alone finds a release, without expanding its alternatives yet.
+ if(lookupOrder[0]===1){
+  await expect.poll(async()=>{pendingDiscovery=(await matchingJobs(item))?.[0];return pendingDiscovery?.progress?.releases;}).toBe(1);
+  assert.equal(pendingDiscovery.progress.lookups,1,'remaining recognition must still be gated');
+  assert.equal(pendingDiscovery.progress.recordings_total,1,'do not expand first-track alternatives before assessing the seed');
+ }else assert.equal(pendingDiscovery.progress.releases,0,'an unrecognized track must not find a release');
  releaseRecognition();
  const itemUrl=`**/api/v1/items/${item}`;
  // The page may cancel a superseded read while it is held here.

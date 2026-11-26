@@ -2833,6 +2833,35 @@ impl CollectionService {
         artwork: Vec<ProviderArtworkLink>,
         stage: &str,
     ) -> Result<(MetadataAuthorityRecord, MetadataRefreshOutcome)> {
+        // Discs of one album resolve in parallel jobs that save to the same
+        // entry, so another job can save between reading the revision and
+        // saving here. This save carries no curator decision: it applies a
+        // stored provider response, which merges with what the other discs
+        // found. Read the entry again and retry rather than failing the step.
+        const ATTEMPTS: usize = 5;
+        for attempt in 1.. {
+            match self.refresh_resolution_metadata_once(
+                claim,
+                frozen,
+                snapshot_id,
+                artwork.clone(),
+                stage,
+            ) {
+                Err(Error::Conflict) if attempt < ATTEMPTS => continue,
+                result => return result,
+            }
+        }
+        unreachable!("the retry loop returns on its last attempt")
+    }
+
+    fn refresh_resolution_metadata_once(
+        &self,
+        claim: &JobClaim,
+        frozen: &FrozenMetadataResolution,
+        snapshot_id: SnapshotId,
+        artwork: Vec<ProviderArtworkLink>,
+        stage: &str,
+    ) -> Result<(MetadataAuthorityRecord, MetadataRefreshOutcome)> {
         let item = self.resolution_item(claim, frozen)?;
         let observation_id = ObservationId(deterministic_inventory_uuid(
             claim.user_id,

@@ -3,9 +3,19 @@
   "email-purchases": "email-purchases",
   "storage": "storage-unavailable",
   "digital-matching": "digital-album-matching",
-  "scale": "fx04",
+  "scale": {
+    "script": "fx04",
+    "env": {
+      "COLLECTOR_SCALE_COUNT": "3000"
+    },
+    "suite": false,
+    "timeout": 1800000
+  },
   "smoke": "quick-smoke",
-  "integration": "smoke",
+  "integration": {
+    "script": "smoke",
+    "timeout": 600000
+  },
   "browse": "browse",
   "audio-checks": "audio-check-status",
   "accuraterip-snapshots": "accuraterip-snapshots",
@@ -26,13 +36,32 @@
   "numeric-ip": "numeric-ip",
   "game-catalog": "game-catalog-upload",
   "purchases": "digital-purchases",
-  "intake-review": "intake-review",
+  "intake-review": {
+    "script": "intake-review",
+    "timeout": 600000
+  },
   "game-audio": "game-audio",
   "documents": "documents",
   "backup-reminder": "backup-reminder",
   "remote-media": "remote-media",
-  "queue": "music-queue",
-  "context": "work-context",
-  "labels": "presentation-labels",
-  "review-list": "review-list"
+  "auto-grouping": {
+    "script": "intake-review",
+    "env": {
+      "AUTO_GROUPING_ONLY": "1"
+    }
+  },
+  "grouping-ambiguity": {
+    "script": "intake-review",
+    "env": {
+      "AUTO_GROUPING_ONLY": "1",
+      "GROUPING_AMBIGUITY": "1"
+    }
+  },
+  "ingest-progress": {
+    "script": "intake-review",
+    "env": {
+      "INGEST_PROGRESS_ONLY": "1"
+    },
+    "suite": false
+  }
 }

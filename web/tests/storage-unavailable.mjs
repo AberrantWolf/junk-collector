@@ -6,15 +6,17 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-storage-availability-'));
 const config=path.join(scratch,'collector.toml'),archive=path.join(scratch,'archive'),detached=path.join(scratch,'detached-archive');
-const origin='http://localhost:20152',password=randomBytes(24).toString('hex');
-await writeFile(config,`archive = "${archive}"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:20151"\nprivate_bind = "127.0.0.1:20152"\nlan_bind = "127.0.0.1:20153"\nlocal_playback_enabled = false\nauthentication_origin = "https://localhost:20153"\nallowed_origins = ["${origin}"]\n`);
+const origin=`http://localhost:${ports[1]}`,password=randomBytes(24).toString('hex');
+await writeFile(config,`archive = "${archive}"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_enabled = false\nauthentication_origin = "https://localhost:${ports[2]}"\nallowed_origins = ["${origin}"]\n`);
 const cli=(command,input)=>spawnSync(serverBinary,['--config',config,command],{input,encoding:'utf8',timeout:20000});
 const setup=cli('setup',password);assert.equal(setup.status,0,setup.stderr);
 let server,browser,page,logs='';
-async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);await waitForServer('http://127.0.0.1:20151/healthz',server,{logs:()=>logs});}
+async function start(){server=spawn(serverBinary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);await waitForServer(`http://127.0.0.1:${ports[0]}/healthz`,server,{logs:()=>logs});}
 try{
  await start();browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1200,height:900}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('owner');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();

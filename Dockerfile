@@ -16,6 +16,10 @@ RUN cargo chef cook --release --locked --recipe-path recipe.json -p collector-se
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY web/dist ./web/dist
+# The server build compares web/dist with these sources and refuses to embed
+# screens older than web/src (there is no Node here to rebuild them).
+COPY web/src ./web/src
+COPY web/build.mjs web/package-lock.json ./web/
 RUN cargo build --locked --release -p collector-server -p collector-media
 
 # Optional lean target. The default release image below contains both executables

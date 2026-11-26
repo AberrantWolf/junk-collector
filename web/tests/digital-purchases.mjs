@@ -688,12 +688,9 @@ try{
  const groupedAlbum=await page.evaluate(async id=>(await fetch(`/api/v1/items/${id}`)).json(),groupedMembers[0].import.target_item_id);
  assert.deepEqual(groupedAlbum.captures.map(capture=>capture.representations.length),[1,1],
   'No preparation batch should encode the other disc’s excluded WAV');
- // Two purchases holding disc 1 and disc 2 are one copy, so no copy choice.
- await page.goto(`${origin}/?collection=${collection}&item=${groupedMembers[0].import.target_item_id}`);
- await expect(page.getByRole('region',{name:'Album tracks'}).locator('.music-track').first()).toBeVisible();
- await expect(page.getByRole('combobox',{name:'Plays from'})).toHaveCount(0);
- // Combining two entries that both hold disc 1 gives an album with two copies.
- // Choosing one makes album playback use only it; the other stays listed apart.
+  // Combining two entries that both hold disc 1 gives an album with two copies.
+  // Choosing one makes album playback use only it; the other stays listed apart.
+  // Which copies and formats are offered is checked in tests/unit/album-copies.test.mjs.
  const combined=await page.evaluate(async ids=>{
   const post=async(path,body)=>{const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(body)});if(!response.ok)throw Error(await response.text());return response.json();};
   const entries=await Promise.all(ids.map(async id=>{const item=await(await fetch(`/api/v1/items/${id}`)).json();return {item_id:id,expected_revision:item.revision};}));
@@ -706,25 +703,18 @@ try{
  const combinedTracks=page.getByRole('region',{name:'Album tracks'});
  const playsFrom=combinedTracks.getByRole('combobox',{name:'Plays from'});
  await expect(playsFrom).toHaveValue('');
- await expect(playsFrom.locator('option')).toHaveCount(3);
  const sources=()=>page.evaluate(async id=>{const response=await fetch(`/api/v1/items/${id}/client-playback`);return response.ok?[...new Set((await response.json()).tracks.map(track=>track.source_representation_id))]:[];},combined);
  const chosen=await playsFrom.locator('option').nth(1).getAttribute('value');
  await playsFrom.selectOption(chosen);
  await expect(playsFrom).not.toHaveValue('');
  await expect.poll(async()=>(await sources()).length).toBe(1);
- const kept=(await sources())[0];
  // One copy chosen, the album is no longer reported as needing attention.
  await expect(page.locator('aside.detail').getByText('Album playback needs attention')).toBeHidden({timeout:15000});
- // Only the FLAC purchase has a format choice, and only while the album uses it.
- await expect(combinedTracks.getByRole('combobox',{name:/^Album uses/})).toHaveCount(await playsFrom.inputValue()===steamAlbum.captures[0].representations[0].id?1:0);
  await expect(combinedTracks.locator('details.other-tracks')).toBeVisible();
  await page.screenshot({path:path.join(scratch,'plays-from-desktop.png'),fullPage:true});
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:path.join(scratch,'plays-from-mobile.png'),fullPage:true});console.log(`Plays from screenshots: ${scratch}`);
  await page.setViewportSize({width:1440,height:1000});
- const other=await playsFrom.locator('option').nth(1).getAttribute('value')===chosen?await playsFrom.locator('option').nth(2).getAttribute('value'):await playsFrom.locator('option').nth(1).getAttribute('value');
- await playsFrom.selectOption(other);
- await expect.poll(async()=>{const now=await sources();return now.length===1&&now[0]!==kept;}).toBe(true);
  await combinedTracks.getByRole('button',{name:'Use every copy'}).click();
  await expect(playsFrom).toHaveValue('');
  // A combined album offers every choice, and says the combine can't be undone after deleting.

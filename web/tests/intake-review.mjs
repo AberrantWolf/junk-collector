@@ -49,7 +49,7 @@ if(process.env.INGEST_WORKERS)await writeFile(config,(await readFile(config,'utf
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
 let logs='',server,browser,page;
-async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
+async function startServer(){server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe'],env:{...process.env,JUNK_COLLECTOR_TEST_ACCURATERIP_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_COVER_ART_ORIGIN:providerOrigin,JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS:process.env.JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS??"500"}});server.stdout.on('data',b=>logs+=b);server.stderr.on('data',b=>logs+=b);
  await waitForServer(`http://127.0.0.1:${publicPort}/healthz`,server,{timeout:30000,logs:()=>logs});}
 
 async function stopServer(){await stopProcess(server);}

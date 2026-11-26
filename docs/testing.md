@@ -13,12 +13,33 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 npm --prefix web ci
 npm --prefix web run check                                  # TypeScript
-npm --prefix web run test:models                            # screen logic in plain Node, no browser
+npm --prefix web run test:unit                              # screen rules in plain Node, no browser (about 2 s)
 npm --prefix web run build && git diff --exit-code -- web/dist
 ```
 
-The server embeds `web/dist`, so commit the rebuilt assets with any web change and
-rebuild the server binary afterwards.
+The server embeds `web/dist`, so commit the rebuilt assets with any web change.
+`web/build.mjs` records a fingerprint of `web/src` in `web/dist/source-digest`.
+Building `collector-server` recomputes it: if `web/src` changed and
+`web/node_modules` is installed, the build rebuilds `web/dist` itself (well under a
+second); otherwise it stops with the command to run. So a server built from a
+checkout always serves the screens in that checkout. Set
+`COLLECTOR_SKIP_WEB_BUILD=1` to get the refusal instead of the automatic rebuild.
+
+## Web unit tests
+
+Rules a screen uses to decide what to show or send live in plain `web/src/*.ts`
+modules and are tested in Node, with no browser or server:
+
+```sh
+npm --prefix web run test:unit                               # all of them, about 2 s
+npm --prefix web run test:unit:watch                         # rerun on save
+node --test --test-name-pattern='shared link' 'web/tests/unit/**/*.test.mjs'
+```
+
+Each test loads its module through `web/tests/support/load-source.mjs`, which
+refuses a module that pulls in React, a `.tsx` component or `src/runtime.ts`. When a
+rule lives inside a component, move it into a `.ts` module and test it there. A
+browser journey then needs only one case showing the screen uses the rule.
 
 The music preparation tests call real command-line encoders: `opusenc` (from the
 `opus-tools` package), `flac` and `ffmpeg`. Install them once:
@@ -46,12 +67,24 @@ cargo build --locked -p collector-server -p collector-media
 
 npm --prefix web run test:smoke          # short end-to-end check against a real server
 npm --prefix web test -- browse          # one or more named journeys
-npm --prefix web test                    # every journey, run serially (what CI runs)
+npm --prefix web test                    # every journey, several at a time (what CI runs)
 npm --prefix web run test:scale          # optional 3,000-entry workload
 node web/tests/harness-check.mjs         # harness process/teardown checks, no browser
 ```
 
-Journey names are listed in `web/tests/journeys.json`. When you change a screen, run its
+Journey names are listed in `web/tests/journeys.json`. An entry is either a script name
+or `{"script", "env", "timeout", "suite"}`: `env` picks one scenario inside a longer
+script (for example `auto-grouping` runs only the automatic album grouping part of
+`intake-review.mjs`), and `"suite": false` leaves it out of a plain `npm test`.
+
+Journeys run side by side, half as many at once as the machine has cores; set
+`COLLECTOR_TEST_JOBS=1` to run them one after another. Each journey has its own
+server, ports, data directory and browser. Output from each journey is printed
+in one piece when it ends. The journeys that measure timing or play real audio
+(`opus-preparation`, `local-playback`, `fx04`, `remote-media`, `scale`) run
+afterwards, one at a time.
+
+When you change a screen, run its
 journey and look at the result on desktop and mobile widths; set
 `COLLECTOR_SCREENSHOTS=/absolute/dir` to save smoke-test screenshots. Do not add tests
 that only assert copy text.
@@ -64,6 +97,8 @@ Useful environment variables:
 | `COLLECTOR_TEST_BROWSER=chrome` | Use real Chrome for every journey. |
 | `CHROME_PATH` | Chrome executable location. |
 | `COLLECTOR_OPUS`, `COLLECTOR_FLAC` | Encoders for the preparation journeys. |
+| `COLLECTOR_TEST_JOBS` | How many journeys run at once (default: half the CPU cores). |
+| `JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS` | Debug builds only: how often the server's recovery, automatic grouping and metadata upkeep pass runs (50–5000, default 5000). `intake-review.mjs` sets 500; other journeys keep the real interval. |
 | `COLLECTOR_TEST_ORIGIN`, `COLLECTOR_TEST_PASSWORD` | Run the smoke test against an existing disposable server. Never point it at a real installation; it modifies data. |
 
 Each journey starts its own temporary server and data directory. The runner continues
@@ -86,6 +121,28 @@ COLLECTOR_CD_IDENTITY="$PWD/target/release/collector-cd-identity" python3 -B scr
 ```
 
 These use fake redumper and HTTP inputs; they never open a drive or contact MusicBrainz.
+
+## Faster local runs
+
+On macOS each durable write the store makes is a full flush to the physical disk,
+and most of the store and browser tests' time goes to waiting on those flushes.
+Point their scratch folders at memory instead:
+
+```sh
+TMPDIR="$(scripts/test-tmpdir.sh)" cargo test --workspace
+TMPDIR="$(scripts/test-tmpdir.sh)" npm --prefix web test
+```
+
+The script creates a RAM disk once on macOS (it lasts until a restart, or
+`diskutil eject JunkCollectorTests`) and uses `/dev/shm` on Linux. It changes where
+test data is written, not what the code does. `collector-store`'s `archive.rs`
+tests took about 290 s on an SSD and about 70 s this way. Crash-recovery tests
+stop the process; they don't simulate power loss, so they don't depend on the
+flushes reaching the disk.
+
+Debug builds also optimize third-party crates (`[profile.dev.package."*"]` in
+`Cargo.toml`), including the bundled SQLite. Workspace crates stay unoptimized.
+The first build after cleaning `target/` takes longer; later builds don't.
 
 ## Disk usage
 

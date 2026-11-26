@@ -1,26 +1,8 @@
 import React from '@collector/runtime';
 import type {components} from './generated/api';
-
+import {opusBitrates,preparationPreset,type ImportPreparationChoice,type PreparationPreset} from './preparation-presets';
 type S=components['schemas'];
-export const opusBitrates=[64,96,128,160,192,256] as const;
-export type PreparationPreset='flac'|`${typeof opusBitrates[number]}`;
-export type ImportPreparationChoice=PreparationPreset|'default'|'none';
-export function preparationPreset(value:string|null):PreparationPreset{
- return opusBitrates.some(rate=>String(rate)===value)?value as PreparationPreset:'flac';
-}
-export function conversionProfile(value:PreparationPreset):S['ConversionProfile']{
- return value==='flac'?{codec:'flac'}:{codec:'opus',bitrate_kbps:Number(value)};
-}
-export function profileLabel(profile:S['ConversionProfile']|null|undefined){
- return !profile?'Original':profile.codec==='flac'?'FLAC':`Opus ${profile.bitrate_kbps} kbps`;
-}
-export function preparationQuery(preset:PreparationPreset){
- return preset==='flac'?'':`opus_bitrate_kbps=${preset}`;
-}
-export function importPreparation(choice:ImportPreparationChoice):S['ImportAudioPreparation']|undefined{
- if(choice==='default')return undefined;
- return choice==='none'?{codec:'none'}:conversionProfile(choice);
-}
+export * from './preparation-presets';
 
 export function PreparationFormat({value,onChange,disabled}:{value:PreparationPreset;onChange:(v:PreparationPreset)=>void;disabled?:boolean}){
  return <><label>Preparation format<select aria-label="Preparation format" disabled={disabled} value={value==='flac'?'flac':'opus'} onChange={e=>onChange(e.target.value==='flac'?'flac':'128')}><option value="flac">FLAC</option><option value="opus">Opus</option></select></label>{value!=='flac'&&<label>Opus bitrate<select aria-label="Opus bitrate" disabled={disabled} value={value} onChange={e=>onChange(preparationPreset(e.target.value))}>{opusBitrates.map(rate=><option key={rate} value={rate}>{rate} kbps VBR</option>)}</select></label>}</>;

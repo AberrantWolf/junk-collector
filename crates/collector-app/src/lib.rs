@@ -5623,13 +5623,24 @@ impl CollectionService {
         let Some(claim) = self.jobs.claim_job_in_lane(worker_instance, 30, lane)? else {
             return Ok(false);
         };
-        self.jobs.heartbeat_job(
+        if let Err(error) = self.jobs.heartbeat_job(
             claim.id,
             &claim.claim_token,
             &claim.phase,
             claim.completed_units,
             30,
-        )?;
+        ) {
+            // Cancellation can arrive between the claim and this first
+            // heartbeat. Carry on: the job's own cancellation checks end it
+            // through the usual path. Giving up here would leave it looking
+            // like it is running, with no worker, until its lease expired.
+            if !self
+                .jobs
+                .cancellation_requested(claim.id, &claim.claim_token)?
+            {
+                return Err(error);
+            }
+        }
         let (stop_heartbeat, heartbeat_stop) = std::sync::mpsc::channel();
         let heartbeat_jobs = self.jobs.clone();
         let heartbeat_id = claim.id;
@@ -5895,6 +5906,19 @@ impl CollectionService {
         if result.is_ok() {
             heartbeat_result?;
         }
+        // Once cancellation is requested, progress writes stop being accepted.
+        // A job that tripped over one was cancelled, not failed.
+        let result = match result {
+            Err(Error::CommandInProgress)
+                if self
+                    .jobs
+                    .cancellation_requested(claim.id, &claim.claim_token)
+                    .unwrap_or(false) =>
+            {
+                Err(Error::JobCancelled)
+            }
+            other => other,
+        };
         match result {
             Ok(result) => {
                 if lane == JobLane::Background && claim.kind == "import_publication" {

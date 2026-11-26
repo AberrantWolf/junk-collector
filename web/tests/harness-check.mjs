@@ -52,4 +52,16 @@ try{
  assert.deepEqual(failures.map(({name})=>name),['failed fixture','stalled fixture']);
  assert.equal(await readFile(marker,'utf8'),'completed');
 }finally{await rm(scratch,{recursive:true,force:true});}
-console.log('Held HTTP fixtures shut down and the batch continues after failures and timeouts.');
+// Side by side, journeys still all run, and serial ones never overlap anything.
+{
+ const log=[];let running=0,overlapped=false;
+ const sleeper=ms=>({command:process.execPath,args:['-e',`setTimeout(()=>{},${ms})`],timeout:5000});
+ const failures=await runJourneys([
+  {name:'a',...sleeper(300)},{name:'b',...sleeper(300)},{name:'c',command:process.execPath,args:['-e','process.exit(3)'],timeout:5000},
+  {name:'alone',serial:true,...sleeper(50)},
+ ],{jobs:3,report:line=>{log.push(line);if(line.startsWith('Starting '))running++;else if(/: [0-9.]+s$|failed/.test(line))running--;if(line==='Starting alone'&&running>1)overlapped=true;}});
+ assert.deepEqual(failures.map(({name})=>name),['c']);
+ assert.equal(overlapped,false,'a serial journey ran beside another');
+ assert.ok(log.some(line=>line.startsWith('alone: ')),'the serial journey did not run');
+}
+console.log('Held HTTP fixtures shut down and the batch continues after failures and timeouts, side by side too.');

@@ -63,3 +63,9 @@ opt-level = 3
 
 [profile.dev.package.junk-libs-accuraterip]
 opt-level = 3
+
+# Optimize third-party crates (including the bundled SQLite, which otherwise
+# dominates the store tests' CPU time) while workspace crates stay unoptimized
+# for debugging. This changes speed only, not behaviour.
+[profile.dev.package."*"]
+opt-level = 2

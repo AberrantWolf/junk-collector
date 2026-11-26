@@ -8,18 +8,20 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import assert from 'node:assert/strict';
+import {fixturePorts} from './support/runtime.mjs';
+const ports=await fixturePorts(3);
 
 const root=path.resolve(import.meta.dirname,'../..');
 const scratch=await mkdtemp(path.join(tmpdir(),'collector-fx04-'));
 const config=path.join(scratch,'collector.toml');
 const binary=(process.env.COLLECTOR_SERVER_BINARY||path.join(root,'target/debug/collector-server'));
 const password=randomBytes(24).toString('hex');
-const origin='http://localhost:19982';
+const origin=`http://localhost:${ports[1]}`;
 const count=Number(process.env.COLLECTOR_SCALE_COUNT||102);
 assert.ok(Number.isInteger(count)&&count>=102&&count<=3000,'Choose 102–3000 fixture rows');
 let server,browser,page,logs='';
 try{
- await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:19981"\nprivate_bind = "127.0.0.1:19982"\nlan_bind = "127.0.0.1:19983"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
+ await writeFile(config,`archive = "${scratch}/archive"\nstate = "${scratch}/state"\npublic_bind = "127.0.0.1:${ports[0]}"\nprivate_bind = "127.0.0.1:${ports[1]}"\nlan_bind = "127.0.0.1:${ports[2]}"\nlocal_playback_bind = "127.0.0.1:0"\nallowed_origins = []\n`);
  const setup=spawnSync(binary,['--config',config,'setup','--username','owner'],{input:password,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
  server=spawn(binary,['--config',config,'serve'],{stdio:['ignore','pipe','pipe']});server.stderr.on('data',chunk=>logs+=chunk);server.stdout.on('data',chunk=>logs+=chunk);
  await waitForServer(origin+'/healthz',server,{logs:()=>logs});

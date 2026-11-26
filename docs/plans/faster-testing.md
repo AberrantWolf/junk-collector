@@ -16,6 +16,48 @@ When it is done:
 Each phase below can land on its own. The order at the end puts the cheapest,
 biggest wins first.
 
+## Status
+
+Done:
+
+- Phase 0: `web/tests/support/load-source.mjs`, `web/tests/unit/*.test.mjs` on
+  `node:test`, and `npm --prefix web run test:unit` in CI (it also runs
+  `harness-check.mjs`). First tests for `browse-location.ts` (split out of
+  `browse-navigation.ts`), `import-file-order.ts`, `review-reasons.ts` and
+  `playback-preference.ts`. `intake-drafts.ts` is only IndexedDB plumbing and has
+  no rule worth a unit test.
+- Phase 1 items 1 to 6: `album-copies.ts`, `entry-removal.ts`,
+  `review-list.ts` (now also the list requests, Reason filter, polling, tab
+  labels, import states, "Next entry" and "all matching" ticks),
+  `metadata-candidates.ts`, `intake-plan.ts` and `check-results.ts`, with unit
+  tests. The "is this a digital purchase" test now has one home
+  (`isDigitalPackage`). Not moved: `lookupFeedback` (spread across several
+  commands) and `discFromPath`, which waits on the disc-folder decision below.
+  Searching the match list now keeps the match in use pinned above the
+  results, without counting it as one (it used to disappear when it didn't fit
+  the search). `digital-purchases.mjs` keeps one copy
+  switch and "Use every copy"; its copy-count and format-choice assertions moved to
+  the unit tests. The removal notice wording stays in the two screens.
+- Phase 3 registry without snapshots: `journeys.json` entries can carry
+  environment settings, so `auto-grouping`, `grouping-ambiguity` and
+  `ingest-progress` are named journeys. The first two run in the default suite.
+- Phase 4 ports and concurrency: every journey picks free ports, and
+  `run-suite.mjs` runs `COLLECTOR_TEST_JOBS` at a time (default half the cores),
+  with timing and audio journeys in a one-at-a-time group afterwards.
+- Phase 4 pacing: see the corrected section below.
+- Not in the original plan: building `collector-server` now rebuilds `web/dist`
+  when `web/src` changed (or refuses, with the command to run, when it can't), so
+  a server can't be built with old screens. The container build copies `web/src`
+  for the same check, so an image can't ship old screens either.
+
+- Not in the original plan: Rust tests. `collector-store/tests/archive.rs` (344
+  tests) was about 290 s of `cargo test --workspace`, mostly waiting on disk
+  flushes on macOS. `scripts/test-tmpdir.sh` puts scratch data in memory, and
+  debug builds now optimize third-party crates. Together: about 70 s.
+
+Left: Phase 1 item 7; Phase 2 snapshots; the Phase 3 splits that need
+snapshots; replacing refresh-timer waits.
+
 ## Where the time goes today
 
 Measured on one developer machine: Apple M4 with 10 cores, a debug server build,
@@ -554,23 +596,15 @@ These changes cut the time of the full suite, not only of a rerun.
 
 ### Provider pacing against local stand-ins
 
-The MusicBrainz client waits at least 1 s between requests. Journeys already
-point it at a local stand-in server through the debug-only
-`JUNK_COLLECTOR_TEST_MUSICBRAINZ_ORIGIN`. Extend that existing hook: when a
-debug build has a test origin set, let `JUNK_COLLECTOR_TEST_PROVIDER_INTERVAL_MS`
-lower the interval for that client.
-
-- Release builds never read it, because the code is compiled only with
-  `debug_assertions`, like the origin hooks.
-- The real MusicBrainz server is never contacted with a shorter interval,
-  because the override applies only together with a test origin.
-- It changes pacing only. It doesn't change which requests are made or what is
-  stored.
-
-Before building this, count the stand-in's requests per journey to confirm the
-saving. If each disc makes two or three paced requests, `intake-review` and the
-grouping run each save roughly 10–25 s. Keep one journey on the default interval,
-so the real pacing and its cancellation checks stay covered.
+Correction: this was already done. With a test origin set, debug builds give
+MusicBrainz a 1 ms interval and AccurateRip none (`with_test_origin` in
+`crates/collector-providers`). The waits come from the server's recovery loop
+instead: automatic album grouping and metadata upkeep run on a 5 s cycle
+(`start_job_workers` in `crates/collector-server/src/lib.rs`), and grouping needs
+more than one pass. Debug builds now read
+`JUNK_COLLECTOR_TEST_RECOVERY_INTERVAL_MS` (50–5000) for that cycle.
+`intake-review.mjs` sets 500 ms; every other journey keeps the real 5 s, so the
+real cadence stays covered. It changes only how soon a pass runs.
 
 ### Run journeys side by side
 
@@ -686,6 +720,20 @@ separate change.
   in the loaded list.** It now decides from the entry's own review reasons.
 - **Fixed: the "Group into one album" button allowed more than 32 entries.** It
   now applies the same limit as the grouping panel and says why when it can't.
+- **Fixed: one disc of a grouped album could fail its artwork step.** Discs of
+  one album resolve metadata in parallel jobs that save to the same entry. When
+  one saved between another's revision read and its save, the second failed with
+  "revision conflict" and the import showed as failed. The job's provider save
+  now reads the entry again and retries a few times. A faster server made this
+  happen in most `intake-review` runs.
+- **Fixed: `digital-matching` assumed track 1 is looked up first.** Each track's
+  AcoustID lookup starts when its fingerprint is ready, and lookups run one at a
+  time, so either track can go first. The stand-in held track 2, which blocked
+  the only slot until it timed out whenever track 2 went first. It now holds
+  whichever lookup arrives second. (This timeout first looked like optimized
+  builds computing different fingerprints. They don't: debug, optimized and
+  release builds give bit-identical fingerprints for the fixtures, however the
+  audio is chunked.)
 - **Fragile, but not a bug today:** `specimenDraft` in `inventory-editor.tsx`
   turns a disposed copy's ownership into `unknown`. A save would lose the
   disposal record. This can't happen now, because disposed copies have no "Edit

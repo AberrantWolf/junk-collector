@@ -46,26 +46,40 @@ export async function closeHttpFixture(server,label='HTTP fixture'){
  await deadline(closed,label+' shutdown',5000);
 }
 
-export async function runJourneys(journeys,{report=console.log}={}){
+// Runs journeys in their own processes, `jobs` at a time. Journeys marked
+// `serial` run afterwards, one at a time, because they measure timing or play
+// real audio and contention could make them fail. With more than one job, each
+// journey's output is held and printed in one piece when it ends, so logs from
+// journeys running side by side don't interleave.
+export async function runJourneys(journeys,{report=console.log,jobs=1}={}){
  const failures=[];
- for(const {name,command,args=[],options={},timeout} of journeys){
+ async function run({name,command,args=[],options={},timeout},buffered){
   report(`Starting ${name}`);
   const start=Date.now();
-  let child;
+  let child,output='';
   try{
-   child=spawn(command,args,options);
+   child=spawn(command,args,buffered?{...options,stdio:['ignore','pipe','pipe']}:options);
+   if(buffered){child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);}
    const ended=new Promise((resolve,reject)=>{
     child.once('error',reject);
     child.once('exit',(code,signal)=>code===0?resolve():reject(Error(`${name} failed (${signal||code})`)));
    });
    try{await deadline(ended,name,timeout);}finally{if(child.pid)await stopProcess(child);}
+   if(output)report(output.trimEnd());
    report(`${name}: ${((Date.now()-start)/1000).toFixed(2)}s`);
   }catch(error){
+   if(output)report(output.trimEnd());
    failures.push({name,error});
    report(String(error));
   }
  }
- return failures;
+ const parallel=journeys.filter(journey=>!journey.serial),serial=journeys.filter(journey=>journey.serial);
+ const width=Math.max(1,Math.min(jobs,parallel.length));
+ let next=0;
+ await Promise.all(Array.from({length:width},async()=>{while(next<parallel.length)await run(parallel[next++],width>1);}));
+ for(const journey of serial)await run(journey,false);
+ // Report failures in the order they were listed, however they finished.
+ return failures.sort((a,b)=>journeys.findIndex(j=>j.name===a.name)-journeys.findIndex(j=>j.name===b.name));
 }
 
 export async function waitForServer(url,child,{timeout=20000,logs=()=>''}={}){
@@ -87,3 +101,12 @@ process.once('SIGINT',()=>void finish(130));
 process.once('SIGTERM',()=>void finish(143));
 process.once('uncaughtException',error=>void finish(1,error));
 process.once('unhandledRejection',error=>void finish(1,error));
+// Free loopback ports for one server, all distinct. Every listener stays open
+// until all are chosen, so the system can't hand the same port out twice.
+export async function fixturePorts(count){
+ const listeners=[];
+ try{
+  for(let i=0;i<count;i++){const listener=createServer();listeners.push(listener);await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);});}
+  return listeners.map(listener=>listener.address().port);
+ }finally{await Promise.all(listeners.map(listener=>new Promise(resolve=>listener.close(resolve))));}
+}

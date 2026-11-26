@@ -8,6 +8,7 @@ import InfoHelp from './info-help';
 import {presentationLabel} from './presentation-labels';
 import React,{useEffect,useRef,useState,api,isApiRequestError,requestErrorMessage,addMusicTracks,startMusicTracks,retainUnchanged} from '@collector/runtime';
 import type {components} from './generated/api';
+import {albumCopies,copySelectionChanges,currentCopy as usedCopy,discKey,formatChoices as albumFormatChoices,formatSelectionChanges,groupDiscs as groupByDisc,mergeTrackOverrides,preferredAvailable as preferredFile} from './album-copies';
 
 type Availability=components['schemas']['MusicTrackAvailability'];
 type AlbumPlan=components['schemas']['MusicAlbumPreparationPlan'];
@@ -26,43 +27,11 @@ function stateLabel(row:Availability):string{
 function mediaUrl(itemId:string,row:Availability):string|null{
  return row.state.status==='available'?`/api/v1/items/${itemId}/representations/${row.state.representation_id}/${row.state.file_index}`:null;
 }
+const canPlay=(mediaType:string)=>document.createElement('audio').canPlayType(mediaType)!=='';
 function canDecode(row:Availability):boolean{
- return row.state.status==='available'&&document.createElement('audio').canPlayType(row.state.media_type)!=='';
+ return row.state.status==='available'&&canPlay(row.state.media_type);
 }
-function preferredAvailable(group:Availability[]):Availability|undefined{
- const available=group.filter(row=>row.state.status==='available'&&canDecode(row));
- return available.find(row=>!row.profile)||available.find(row=>row.profile?.codec==='flac')||available[0];
-}
-// Copies the album could play from, when it holds more than one, such as a
-// CD set and a digital purchase of the same album. Originals are alternative
-// copies only when they cover the same album disc: CD rips form one copy, and
-// each digital purchase joins the first copy whose discs it doesn't repeat, so
-// two purchases holding disc 1 and disc 2 stay one copy. Saved formats are not
-// compared, only originals.
-function albumCopies(rows:Availability[],sourceLabel:(id:string)=>string){
- const fileSources=new Set(rows.filter(row=>!row.profile).map(row=>row.source_representation_id));
- type Source={positions:Set<number>;discs:Set<number>;used:boolean};
- const sources=new Map<string,Source>();
- for(const row of rows){
-  const file=fileSources.has(row.source_representation_id);
-  if(file?!!row.profile:row.profile?.codec!=='flac')continue;
-  const source=sources.get(row.source_representation_id)||{positions:new Set<number>(),discs:new Set<number>(),used:false};
-  source.positions.add(row.track_position);source.discs.add(row.disc_position??1);if(row.album_selection!=='excluded')source.used=true;
-  sources.set(row.source_representation_id,source);}
- type Copy={key:string;sources:Map<string,Source>;discs:Set<number>;rips:number;files:string[]};
- const copies:Copy[]=[];
- const rips=[...sources].filter(([id])=>!fileSources.has(id));
- if(rips.length)copies.push({key:'discs',sources:new Map(rips),discs:new Set(rips.flatMap(([,source])=>[...source.discs])),rips:rips.length,files:[]});
- for(const [id,source] of sources){if(!fileSources.has(id))continue;
-  let copy=copies.find(copy=>![...source.discs].some(disc=>copy.discs.has(disc)));
-  if(!copy){copy={key:id,sources:new Map(),discs:new Set(),rips:0,files:[]};copies.push(copy);}
-  copy.sources.set(id,source);source.discs.forEach(disc=>copy!.discs.add(disc));copy.files.push(id);}
- if(copies.length<2)return [];
- return copies.map(copy=>({key:copy.key,sources:copy.sources,used:[...copy.sources.values()].some(source=>source.used),
-  label:[copy.rips?`CD rips (${copy.rips} ${copy.rips===1?'disc':'discs'})`:'',copy.files.length===1?`Digital files · ${sourceLabel(copy.files[0])}`:copy.files.length?`${copy.files.length} digital purchases`:''].filter(Boolean).join(' + ')}));
-}
-
-function discKey(row:Availability):string{return `${row.capture_id}/${row.source_representation_id}`;}
+const preferredAvailable=(group:Availability[])=>preferredFile(group,canPlay);
 function trackKey(row:Availability):string{return `${discKey(row)}/${row.track_position}`;}
 function discPosition(coverage:Coverage|undefined,key:string):number{
  return coverage?.sources.find(source=>`${source.capture_id}/${source.source_representation_id}`===key)?.medium_position??Number.MAX_SAFE_INTEGER;
@@ -263,16 +232,7 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
   try{const [review,current]=await Promise.all([api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal}),api<Availability[]>(`/items/${item.id}/music-tracks`,{signal:controller.signal})]);
    const previous=review.authority.domain_overrides;const payload=object(previous?.payload);
    const existing=Array.isArray(payload.track_overrides)?payload.track_overrides.map(object):[];
-   const changes=new Map<string,{positions:Set<number>;selected:boolean|null}>();
-   for(const choice of albumCopies(current,preparationSourceLabel))for(const [id,source] of choice.sources){
-    if(key&&choice.key!==key)changes.set(id,{positions:source.positions,selected:false});
-    else if(!source.used)changes.set(id,{positions:source.positions,selected:null});
-   }
-   const touched=(value:Record<string,unknown>)=>changes.get(String(value.source_representation_id))?.positions.has(Number(value.track_position));
-   const updated=[...changes.entries()].flatMap(([id,change])=>[...change.positions].map(position=>{const prior=existing.find(value=>value.source_representation_id===id&&value.track_position===position);
-    return {source_representation_id:id,track_position:position,title:prior?.title??null,disc_position:prior?.disc_position??null,display_position:prior?.display_position??null,album_selected:change.selected};
-   })).filter(value=>value.title!=null||value.disc_position!=null||value.display_position!=null||value.album_selected!=null);
-   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:[...existing.filter(value=>!touched(value)),...updated]}}}})});
+   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:mergeTrackOverrides(existing,copySelectionChanges(albumCopies(current,preparationSourceLabel),key))}}}})});
    if(controller.signal.aborted)return;setAvailabilityRefresh(v=>v+1);setRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
   }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
  }
@@ -280,50 +240,26 @@ export default function MusicTracks({preparationPreset,onPreparationPreset,prepa
  // such as WAV instead of MP3. Automatic clears the choices and lets the server
  // pick the best quality again. Other per-track edits are kept.
  async function chooseAlbumFormat(source:string,codec:string){
-  const originals=rows.filter(row=>row.source_representation_id===source&&!row.profile);
   const controller=requests.current;setBusy(true);setError('');setEditingTrack(undefined);
   try{const review=await api<Review>(`/items/${item.id}/metadata`,{signal:controller.signal});
    const previous=review.authority.domain_overrides;const payload=object(previous?.payload);
    const existing=Array.isArray(payload.track_overrides)?payload.track_overrides.map(object):[];
-   const positions=new Set(originals.map(row=>row.track_position));
-   const kept=existing.filter(value=>value.source_representation_id!==source||!positions.has(Number(value.track_position)));
-   const updated=originals.map(row=>{const prior=existing.find(value=>value.source_representation_id===source&&value.track_position===row.track_position);
-    return {source_representation_id:source,track_position:row.track_position,title:prior?.title??null,disc_position:prior?.disc_position??null,display_position:prior?.display_position??null,album_selected:codec?row.audio_format?.codec===codec:null};
-   }).filter(value=>value.title!=null||value.disc_position!=null||value.display_position!=null||value.album_selected!=null);
-   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:[...kept,...updated]}}}})});
+   await api<Review>(`/items/${item.id}/metadata`,{method:'PUT',signal:controller.signal,body:JSON.stringify({expected_revision:review.revision,change:{change:'set_domain_overrides',overrides:{module:item.domain.module,schema_version:previous?.schema_version??item.domain.schema_version,payload:{...payload,track_overrides:mergeTrackOverrides(existing,formatSelectionChanges(rows,source,codec))}}}})});
    if(controller.signal.aborted)return;setAvailabilityRefresh(v=>v+1);setRefresh(v=>v+1);if(callbacks.current.onPrepared)callbacks.current.onPrepared(await api<Item>(`/items/${item.id}`,{signal:controller.signal}));
   }catch(value){if(!controller.signal.aborted)report(value);}finally{if(!controller.signal.aborted)setBusy(false);}
  }
  // Excluded rows are files the album does not use, such as the MP3 copy of a
  // purchase that also has WAV files. List them apart so tracks are not doubled.
- const groupDiscs=(source:Availability[])=>{
-  const grouped=new Map<string,Map<number,Availability[]>>();
-  for(const row of source){const key=discKey(row);const tracks=grouped.get(key)||new Map<number,Availability[]>();const variants=tracks.get(row.track_position)||[];variants.push(row);tracks.set(row.track_position,variants);grouped.set(key,tracks);}
-  return [...grouped.entries()].map(([key,tracks])=>[key,[...tracks.entries()].sort(([,a],[,b])=>(a[0].disc_position??1)-(b[0].disc_position??1)||(a[0].display_position??a[0].track_position)-(b[0].display_position??b[0].track_position)).map(([,variants])=>variants)] as const).sort(([a],[b])=>discPosition(coverage,a)-discPosition(coverage,b)||a.localeCompare(b));
- };
+ const groupDiscs=(source:Availability[])=>groupByDisc(source,key=>discPosition(coverage,key));
  const discs=React.useMemo(()=>groupDiscs(rows.filter(row=>row.album_selection!=='excluded')),[rows,coverage]);
  const otherDiscs=React.useMemo(()=>groupDiscs(rows.filter(row=>row.album_selection==='excluded')),[rows,coverage]);
  const otherCount=otherDiscs.reduce((count,[,tracks])=>count+tracks.length,0);
  // Originals holding the same tracks in more than one format, for example a
  // purchase with MP3 and WAV folders. Each offers one album-wide format choice.
- const formatChoices=React.useMemo(()=>{
-  const sources=new Map<string,{label:string;codecs:Map<string,{included:number;total:number}>}>();
-  for(const row of rows){if(row.profile||!row.audio_format)continue;
-   const source=sources.get(row.source_representation_id)||{label:row.source_label,codecs:new Map()};
-   const count=source.codecs.get(row.audio_format.codec)||{included:0,total:0};
-   count.total++;if(row.album_selection==='included')count.included++;
-   source.codecs.set(row.audio_format.codec,count);sources.set(row.source_representation_id,source);}
-  // A copy the album doesn't use offers no format choice; picking one there
-  // would quietly bring that copy back. Plays from handles copies.
-  return [...sources.entries()].filter(([,source])=>source.codecs.size>1&&[...source.codecs.values()].some(count=>count.included>0)).map(([id,source])=>{
-   const codecs=[...source.codecs.entries()];
-   const used=codecs.filter(([,count])=>count.included>0);
-   return {id,label:source.label,codecs:codecs.map(([codec])=>codec),current:used.length===1&&used[0][1].included===used[0][1].total?used[0][0]:''};
-  });
- },[rows]);
+ const formatChoices=React.useMemo(()=>albumFormatChoices(rows),[rows]);
  const copyChoices=React.useMemo(()=>albumCopies(rows,preparationSourceLabel),
   [rows,item.captures]);
- const currentCopy=copyChoices.filter(choice=>choice.used).length===1?copyChoices.find(choice=>choice.used)!.key:'';
+ const currentCopy=usedCopy(copyChoices);
  const orderedMedia=[...(coverage?.media||[])].sort((a,b)=>a.position-b.position);
  const orderedPlanDiscs=[...(plan?.discs||[])].sort((a,b)=>{
   const selected=(disc:AlbumPlan['discs'][number])=>disc.sources.find(source=>source.source_representation_id===discSources[disc.capture_id])||disc.sources.find(source=>source.default_selected);
