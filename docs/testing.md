@@ -13,12 +13,33 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 npm --prefix web ci
 npm --prefix web run check                                  # TypeScript
-npm --prefix web run test:models                            # screen logic in plain Node, no browser
+npm --prefix web run test:unit                              # screen rules in plain Node, no browser (about 2 s)
 npm --prefix web run build && git diff --exit-code -- web/dist
 ```
 
-The server embeds `web/dist`, so commit the rebuilt assets with any web change and
-rebuild the server binary afterwards.
+The server embeds `web/dist`, so commit the rebuilt assets with any web change.
+`web/build.mjs` records a fingerprint of `web/src` in `web/dist/source-digest`.
+Building `collector-server` recomputes it: if `web/src` changed and
+`web/node_modules` is installed, the build rebuilds `web/dist` itself (well under a
+second); otherwise it stops with the command to run. So a server built from a
+checkout always serves the screens in that checkout. Set
+`COLLECTOR_SKIP_WEB_BUILD=1` to get the refusal instead of the automatic rebuild.
+
+## Web unit tests
+
+Rules a screen uses to decide what to show or send live in plain `web/src/*.ts`
+modules and are tested in Node, with no browser or server:
+
+```sh
+npm --prefix web run test:unit                               # all of them, about 2 s
+npm --prefix web run test:unit:watch                         # rerun on save
+node --test --test-name-pattern='shared link' 'web/tests/unit/**/*.test.mjs'
+```
+
+Each test loads its module through `web/tests/support/load-source.mjs`, which
+refuses a module that pulls in React, a `.tsx` component or `src/runtime.ts`. When a
+rule lives inside a component, move it into a `.ts` module and test it there. A
+browser journey then needs only one case showing the screen uses the rule.
 
 The music preparation tests call real command-line encoders: `opusenc` (from the
 `opus-tools` package), `flac` and `ffmpeg`. Install them once:

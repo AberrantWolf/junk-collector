@@ -30,9 +30,5 @@
   "game-audio": "game-audio",
   "documents": "documents",
   "backup-reminder": "backup-reminder",
-  "remote-media": "remote-media",
-  "queue": "music-queue",
-  "context": "work-context",
-  "labels": "presentation-labels",
-  "review-list": "review-list"
+  "remote-media": "remote-media"
 }

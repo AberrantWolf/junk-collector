@@ -1,17 +1,8 @@
 import type {ScrollTarget} from './browse-scroll-restore';
 import {useEffect,useRef,useState} from './runtime';
-import {preparationPreset,type PreparationPreset} from './audio-profiles';
-import type {operations} from './generated/api';
+import {browseUrl,readLocation,type BrowseLocation} from './browse-location';
+export {browseUrl,readLocation,type BrowseLocation};
 
-type BrowseQuery=NonNullable<operations['browse']['parameters']['query']>;
-export type BrowseLocation={page:'purchases'|'lists'|'library'|'metadata'|'imports'|'preparation'|'activity';list:string;group:string;batch:string;reason:string;attention:boolean;preparationPreset:PreparationPreset;collection:string;search:string;sort:NonNullable<BrowseQuery['sort']>;filter:NonNullable<BrowseQuery['filter']>;item:string;tab:string;intake:string;ingest:string;system:string;attach:string};
-const sorts=['title','recently_added','artist','platform'];
-const filters=['all','wishlist','files_attached','playable','needs_attention','album_playback_needs_attention','removed'];
-export function readLocation():BrowseLocation{
- const q=new URLSearchParams(location.search);
- return {list:q.get('list')||'',page:({'/purchase-inbox':'purchases','/lists':'lists','/review':'metadata','/library-care/metadata':'metadata','/imports':'imports','/library-care/music-preparation':'preparation','/activity':'activity'}[location.pathname]||'library') as BrowseLocation['page'],group:q.get('group')||'',batch:q.get('batch')||'',reason:q.get('reason')||'',attention:q.get('attention')!=='all',preparationPreset:preparationPreset(q.get('opus_bitrate_kbps')),collection:q.get('collection')||'',search:q.get('search')||'',sort:(sorts.includes(q.get('sort')||'')?q.get('sort'):'title') as BrowseLocation['sort'],filter:(filters.includes(q.get('filter')||'')?q.get('filter'):'all') as BrowseLocation['filter'],item:q.get('item')||'',tab:q.get('tab')||(location.pathname!=='/library-care/music-preparation'&&q.get('attention')==='all'?'all':''),intake:q.get('intake')||'',ingest:q.get('ingest')||'',system:q.get('system')||'',attach:q.get('attach')||''};
-}
-export function browseUrl(value:BrowseLocation){const q=new URLSearchParams();if(value.page==='lists'&&value.list)q.set('list',value.list);if(value.collection)q.set('collection',value.collection);if(value.search)q.set('search',value.search);if(value.sort!=='title')q.set('sort',value.sort);if(value.filter!=='all')q.set('filter',value.filter);if(value.item)q.set('item',value.item);if(value.batch)q.set('batch',value.batch);if(value.group)q.set('group',value.group);if(value.page==='preparation'&&value.preparationPreset!=='flac')q.set('opus_bitrate_kbps',value.preparationPreset);if(value.page==='metadata'&&value.reason)q.set('reason',value.reason);if(value.page==='metadata'&&value.system)q.set('system',value.system);if(value.page==='imports'&&value.attach)q.set('attach',value.attach);if(value.page==='metadata'&&value.tab)q.set('tab',value.tab);if(value.page==='metadata'&&value.intake)q.set('intake',value.intake);if(value.page==='metadata'&&value.ingest)q.set('ingest',value.ingest);if((value.page==='metadata'||value.page==='preparation')&&!value.attention)q.set('attention','all');return ({purchases:'/purchase-inbox',lists:'/lists',library:'/',metadata:'/review',imports:'/imports',preparation:'/library-care/music-preparation',activity:'/activity'}[value.page])+(q.size?'?'+q:'');}
 export function useBrowseNavigation(){
  const [route,setRoute]=useState(readLocation);const [revision,setRevision]=useState(0);
  const workspaces=useRef(new Map<BrowseLocation['page'],{route:BrowseLocation;state:Record<string,unknown>}>());
