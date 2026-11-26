@@ -722,14 +722,10 @@ separate change.
   AcoustID lookup starts when its fingerprint is ready, and lookups run one at a
   time, so either track can go first. The stand-in held track 2, which blocked
   the only slot until it timed out whenever track 2 went first. It now holds
-  whichever lookup arrives second.
-- **Open: fingerprints depend on how `chromaprint-next` is compiled.** With
-  optimization on, the same audio gives a different fingerprint, so the
-  stand-ins' exact fingerprint hashes stop matching. Debug builds keep that
-  crate unoptimized for now. Release builds are optimized, so their
-  fingerprints probably differ from what the tests pin. AcoustID matches
-  fingerprints approximately, so this may not matter to users, but the cause
-  (likely floating-point code that compiles differently) is worth a look.
+  whichever lookup arrives second. (This timeout first looked like optimized
+  builds computing different fingerprints. They don't: debug, optimized and
+  release builds give bit-identical fingerprints for the fixtures, however the
+  audio is chunked.)
 - **Fragile, but not a bug today:** `specimenDraft` in `inventory-editor.tsx`
   turns a disposed copy's ownership into `unknown`. A save would lose the
   disposal record. This can't happen now, because disposed copies have no "Edit

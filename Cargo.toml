@@ -69,8 +69,3 @@ opt-level = 3
 # for debugging. This changes speed only, not behaviour.
 [profile.dev.package."*"]
 opt-level = 2
-
-# Audio fingerprints come out slightly different when these are optimized, and
-# test fixtures pin exact fingerprints. Keep them as before.
-[profile.dev.package.chromaprint-next]
-opt-level = 0

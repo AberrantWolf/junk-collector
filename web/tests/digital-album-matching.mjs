@@ -83,7 +83,8 @@ try{
  await matching.getByRole('button',{name:'Find matching albums',exact:true}).click();await accepted;
  let pendingDiscovery;
  await expect.poll(async()=>{const jobs=await matchingJobs(item);pendingDiscovery=jobs?.[0];return pendingDiscovery?.progress?.lookups;},{timeout:60000}).toBe(1);
- assert.equal(lookupOrder.length,2,'remaining recognition must still be gated');
+ // The held lookup is the remaining recognition; wait until it reaches the stand-in.
+ await expect.poll(()=>lookupOrder.length).toBe(2);
  // Only recording 1 is recognized (the fixture returns nothing for 2), so it
  // alone finds a release, without expanding its alternatives yet.
  if(lookupOrder[0]===1){
