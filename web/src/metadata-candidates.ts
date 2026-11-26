@@ -29,14 +29,20 @@ type ListOptions={module:string;showOthers:boolean;search:string;limit:number;pi
 // on: chosen or automatically accepted ones, unmatched ones, and current
 // strong (disc layout or identifier) matches. The search narrows that list by
 // title, subtitle or record ID. The pinned match (the one in use, else the
-// chosen one) goes first, then current matches before older ones, up to limit.
+// chosen one) always stays on top, even when it doesn't fit the search, so a
+// curator can compare results with what the entry has now. Below it come the
+// search results, current matches first, up to limit. `matching` and
+// `shownMatching` count only search results, not the pinned match.
 export function candidateList(candidates:readonly Candidate[],{module,showOthers,search,limit,pinned}:ListOptions){
  const listed=module==='org.junk.music'&&!showOthers?candidates.filter(candidate=>candidate.selected||candidate.accepted_automatically||candidate.unmatched||(candidate.current&&(candidate.strength==='disc_layout'||candidate.strength==='identifier'))):[...candidates];
  const query=search.trim().toLocaleLowerCase();
- const matching=query?listed.filter(candidate=>[candidate.title.value,candidate.subtitle?.value,candidate.identity.provider_record_id].some(value=>value?.toLocaleLowerCase().includes(query))):listed;
- const top=pinned?matching.filter(candidate=>identityKey(candidate.identity)===pinned):[];
- const others=matching.filter(candidate=>identityKey(candidate.identity)!==pinned).sort((left,right)=>Number(right.current)-Number(left.current));
- return {listed,hidden:candidates.length-listed.length,matching,shown:[...top,...others.slice(0,limit)]};
+ const fits=(candidate:Candidate)=>!query||[candidate.title.value,candidate.subtitle?.value,candidate.identity.provider_record_id].some(value=>value?.toLocaleLowerCase().includes(query));
+ const isPinned=(candidate:Candidate)=>!!pinned&&identityKey(candidate.identity)===pinned;
+ const matching=listed.filter(fits);
+ const top=candidates.filter(isPinned).slice(0,1);
+ const others=matching.filter(candidate=>!isPinned(candidate)).sort((left,right)=>Number(right.current)-Number(left.current)).slice(0,limit);
+ const shown=[...top,...others];
+ return {listed,hidden:candidates.length-listed.length,matching,shown,shownMatching:shown.filter(fits).filter(candidate=>listed.includes(candidate)).length};
 }
 
 // After a reload, the panel follows a lookup still running, or else offers a

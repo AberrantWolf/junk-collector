@@ -73,6 +73,12 @@ export async function automaticAlbumGroupingJourney(page,{scratch,collectionId,r
   const review=page.getByRole('region',{name:'Review selected entry'});
   await review.getByRole('article').filter({has:page.getByText('Bulk resolved album',{exact:true})}).first().getByRole('button',{name:'Use this album release',exact:true}).click();
   await expect.poll(async()=>(await readMetadata()).authority?.selected_candidate?.provider_record_id).toBe('11111111-1111-4111-8111-111111111111');
+  // Searching other releases keeps the one in use pinned above the results.
+  const ledger=review.locator('#fix-match');const findMatch=ledger.getByRole('searchbox',{name:/^Find an? .+ match$/});
+  await findMatch.fill('Another possible');
+  await expect(ledger.getByRole('article').first()).toContainText('Bulk resolved album');
+  await expect(ledger.getByRole('article').filter({hasText:'Another possible album'}).first()).toBeVisible();
+  await findMatch.fill('');
   await expect(history.getByRole('button',{name:'Undo album grouping',exact:true})).toBeDisabled();
   const outcomes=(await members()).map(member=>member.import.outcome);
   await restartServer();await page.reload({waitUntil:'domcontentloaded'});

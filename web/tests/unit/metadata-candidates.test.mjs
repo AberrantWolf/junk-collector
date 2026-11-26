@@ -47,3 +47,14 @@ test('a reload follows a running lookup, or offers the newest retryable one unle
  assert.equal(resumableLookup([lookup('new','failed',true)],new Set(['new'])),undefined,'a dismissed failed lookup came back');
  assert.equal(resumableLookup([lookup('new','completed'),lookup('old','failed',true)],new Set()),undefined,'only the newest lookup is offered for retry');
 });
+
+test('the match in use stays pinned above search results, without counting as one',()=>{
+ const inUse=candidate('1987',{selected:true,title:{value:'Abbey Road (1987 CD, UK)'}});
+ const remaster=candidate('2009',{selected:true,title:{value:'Abbey Road (2009 Remaster)'}});
+ const list=candidateList([inUse,remaster],{...options,search:'remaster',pinned:identityKey(inUse.identity)});
+ assert.deepEqual(list.shown.map(c=>c.identity.provider_record_id),['1987','2009']);
+ assert.deepEqual([list.matching.length,list.shownMatching],[1,1],'the pinned match must not count as a search result');
+ const none=candidateList([inUse,remaster],{...options,search:'mono',pinned:identityKey(inUse.identity)});
+ assert.deepEqual(none.shown.map(c=>c.identity.provider_record_id),['1987']);
+ assert.deepEqual([none.matching.length,none.shownMatching],[0,0]);
+});

@@ -33,8 +33,9 @@ Done:
   tests. The "is this a digital purchase" test now has one home
   (`isDigitalPackage`). Not moved: `lookupFeedback` (spread across several
   commands) and `discFromPath`, which waits on the disc-folder decision below.
-  Searching the match list does hide the pinned match when it doesn't match the
-  search; that is today's behaviour and was moved unchanged. `digital-purchases.mjs` keeps one copy
+  Searching the match list now keeps the match in use pinned above the
+  results, without counting it as one (it used to disappear when it didn't fit
+  the search). `digital-purchases.mjs` keeps one copy
   switch and "Use every copy"; its copy-count and format-choice assertions moved to
   the unit tests. The removal notice wording stays in the two screens.
 - Phase 3 registry without snapshots: `journeys.json` entries can carry
